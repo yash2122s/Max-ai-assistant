@@ -77,6 +77,15 @@ class WebSocketServer:
             handshake_done = True
             logger.info(f"Handshake successful with device: {device_id} ({source.get('platform')})")
 
+            # Register active connection
+            from core.connection_manager import connection_manager
+            connection_manager.register(
+                websocket,
+                device_id,
+                source.get("platform", "unknown"),
+                envelope.get("payload", {}).get("device_name", "")
+            )
+
             # 2. Main Transaction Loop
             async for message in websocket:
                 await self.process_packet(websocket, message, device_id)
@@ -85,9 +94,16 @@ class WebSocketServer:
             logger.info(f"Connection closed by {client_address} (code={e.code}, reason='{e.reason}')")
         except Exception as e:
             logger.error(f"Error handling session: {e}", exc_info=True)
+        finally:
+            from core.connection_manager import connection_manager
+            connection_manager.unregister(websocket)
 
     async def process_packet(self, websocket, raw_message: str, client_device_id: str):
         try:
+            # Update connection activity
+            from core.connection_manager import connection_manager
+            connection_manager.update_activity(websocket)
+
             envelope = json.loads(raw_message)
             msg_type = envelope.get("type")
             msg_id = envelope.get("id")
