@@ -79,12 +79,25 @@ class WebSocketServer:
 
             # Register active connection
             from core.connection_manager import connection_manager
+            from core.metrics_manager import metrics_manager
+            from server.event_bus import event_bus
+
             connection_manager.register(
                 websocket,
                 device_id,
                 source.get("platform", "unknown"),
                 envelope.get("payload", {}).get("device_name", "")
             )
+            
+            # Increment connections metrics
+            metrics_manager.increment_connections()
+            
+            # Publish client connected domain event
+            event_bus.publish("client_connected", {
+                "device_id": device_id,
+                "platform": source.get("platform", "unknown"),
+                "device_name": envelope.get("payload", {}).get("device_name", "")
+            })
 
             # 2. Main Transaction Loop
             async for message in websocket:
@@ -96,7 +109,15 @@ class WebSocketServer:
             logger.error(f"Error handling session: {e}", exc_info=True)
         finally:
             from core.connection_manager import connection_manager
+            from core.metrics_manager import metrics_manager
+            from server.event_bus import event_bus
+            
             connection_manager.unregister(websocket)
+            if device_id:
+                metrics_manager.decrement_connections()
+                event_bus.publish("client_disconnected", {
+                    "device_id": device_id
+                })
 
     async def process_packet(self, websocket, raw_message: str, client_device_id: str):
         try:
@@ -116,15 +137,29 @@ class WebSocketServer:
                 code = payload.get("pairing_code")
                 dev_name = payload.get("device_name", "Unknown Android Device")
                 
+                from server.event_bus import event_bus
+                event_bus.publish("pair_started", {
+                    "device_id": client_device_id,
+                    "device_name": dev_name
+                })
+                
                 token = self.pairing_manager.pair_device(client_device_id, dev_name, code)
                 
                 resp_payload = {}
                 if token:
                     logger.info(f"Pairing SUCCESS for device: {client_device_id} ({dev_name})")
                     resp_payload = {"status": "success", "token": token}
+                    event_bus.publish("pair_success", {
+                        "device_id": client_device_id,
+                        "device_name": dev_name
+                    })
                 else:
                     logger.warning(f"Pairing FAILED (incorrect code) for device: {client_device_id}")
                     resp_payload = {"status": "error", "message": "Incorrect pairing code"}
+                    event_bus.publish("pair_failed", {
+                        "device_id": client_device_id,
+                        "reason": "Incorrect pairing code"
+                    })
 
                 await self.send_envelope(websocket, msg_id, "pair_response", client_device_id, resp_payload)
 
@@ -134,12 +169,32 @@ class WebSocketServer:
                 tool_name = payload.get("tool")
                 action = payload.get("action")
                 args = payload.get("arguments", {})
+                
+                from server.event_bus import event_bus
+                from core.metrics_manager import metrics_manager
+
+                # Record request count metrics
+                metrics_manager.increment_requests()
+                
+                event_bus.publish("tool_requested", {
+                    "device_id": client_device_id,
+                    "tool": tool_name,
+                    "action": action,
+                    "arguments": args
+                })
 
                 # Validate pairing token
                 if not self.pairing_manager.verify_token(client_device_id, token):
                     logger.warning(f"Unauthorized command request from device: {client_device_id}")
                     err_payload = {"status": "error", "output": "Unauthorized: pairing token is invalid or expired."}
                     await self.send_envelope(websocket, msg_id, "tool_response", client_device_id, err_payload)
+                    event_bus.publish("tool_failed", {
+                        "device_id": client_device_id,
+                        "tool": tool_name,
+                        "action": action,
+                        "status": "error",
+                        "error": "Unauthorized"
+                    })
                     return
 
                 tool = ToolRegistry.get_tool(tool_name)
@@ -147,23 +202,65 @@ class WebSocketServer:
                     logger.warning(f"Requested tool '{tool_name}' not found in registry")
                     err_payload = {"status": "error", "output": f"Tool '{tool_name}' is not registered on this Windows Agent."}
                     await self.send_envelope(websocket, msg_id, "tool_response", client_device_id, err_payload)
+                    event_bus.publish("tool_failed", {
+                        "device_id": client_device_id,
+                        "tool": tool_name,
+                        "action": action,
+                        "status": "error",
+                        "error": f"Tool '{tool_name}' is not registered on this Windows Agent."
+                    })
                     return
 
                 # Async progress callback helper
                 async def send_progress(progress_msg: str):
                     progress_payload = {"state": "running", "message": progress_msg}
                     await self.send_envelope(websocket, msg_id, "tool_progress", client_device_id, progress_payload)
+                    event_bus.publish("tool_progress", {
+                        "device_id": client_device_id,
+                        "tool": tool_name,
+                        "action": action,
+                        "message": progress_msg
+                    })
 
                 # Execute tool
                 logger.info(f"Executing tool: {tool_name}/{action} for {client_device_id}")
+                start_time_exec = time.time()
                 result = await tool.execute(action, args, send_progress)
+                exec_duration = (time.time() - start_time_exec) * 1000.0
+                
+                # Record metrics average latency
+                metrics_manager.update_latency(exec_duration)
+                
                 logger.info(f"Tool {tool_name}/{action} completed with status: {result.get('status')}")
 
                 await self.send_envelope(websocket, msg_id, "tool_response", client_device_id, result)
+                
+                if result.get("status") == "success":
+                    event_bus.publish("tool_completed", {
+                        "device_id": client_device_id,
+                        "tool": tool_name,
+                        "action": action,
+                        "status": "success",
+                        "output": result.get("output", "")
+                    })
+                else:
+                    event_bus.publish("tool_failed", {
+                        "device_id": client_device_id,
+                        "tool": tool_name,
+                        "action": action,
+                        "status": "error",
+                        "error": result.get("output", "Execution failed")
+                    })
 
             elif msg_type == "heartbeat":
                 # Heartbeat acknowledgement (log and echo)
                 logger.debug(f"Heartbeat received from {client_device_id}")
+                
+                from server.event_bus import event_bus
+                event_bus.publish("heartbeat", {
+                    "device_id": client_device_id
+                })
+                
                 heartbeat_payload = {
                     "uptime": int(time.process_time()),
                     "agent_version": "1.0.0"
@@ -174,6 +271,12 @@ class WebSocketServer:
                 event_name = payload.get("event")
                 if event_name == "heartbeat":
                     logger.debug(f"Event heartbeat received from {client_device_id}")
+                    
+                    from server.event_bus import event_bus
+                    event_bus.publish("heartbeat", {
+                        "device_id": client_device_id
+                    })
+                    
                     heartbeat_payload = {
                         "uptime": int(time.process_time()),
                         "agent_version": "1.0.0"
