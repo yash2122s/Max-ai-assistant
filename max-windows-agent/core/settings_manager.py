@@ -1,5 +1,6 @@
 import os
 import json
+import time
 
 # Setup base paths pointing to max-windows-agent/
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -20,6 +21,7 @@ PROTOCOL_VERSION = 1
 
 class SettingsManager:
     def __init__(self):
+        self.start_time = time.time()
         self.config_data = {}
         self.load()
 
