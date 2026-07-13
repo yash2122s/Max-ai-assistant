@@ -1,0 +1,42 @@
+*.iml
+.gradle
+.kotlin
+/local.properties
+/.idea/caches
+/.idea/libraries
+/.idea/modules.xml
+/.idea/workspace.xml
+/.idea/navEditor.xml
+/.idea/assetWizardSettings.xml
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+.env
+debug.keystore
+
+# Python
+__pycache__/
+*.pyc
+
+# MAX Agent Storage & Logs
+max-windows-agent/storage/
+max-windows-agent/server/__pycache__/
+max-windows-agent/tools/__pycache__/
+*.log
+
+# Agent folders
+.claude-flow/
+.swarm/
+graphify-out/
+
+# Large test/dump text files
+*dump*.txt
+*logcat*.txt
+app_logs.txt
+clean_*.txt
+extracted_user_code.txt
+gemini_logs*.txt
+log_*.txt
