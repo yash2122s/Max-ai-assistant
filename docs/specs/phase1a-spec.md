@@ -1,5 +1,12 @@
 # MAX Windows Agent - Phase 1A Protocol Specification
 
+```text
+Status: Frozen
+Protocol Version: 1
+Implementation Status: Complete
+Last Updated: 2026-07-13
+```
+
 This document serves as the canonical protocol specification for the **MAX Windows Agent (Phase 1A)**. It defines the communication protocol, transport close codes, timing requirements, state machine, error enums, packet lifecycles, and future reserved structures.
 
 ---
