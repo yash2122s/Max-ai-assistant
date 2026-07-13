@@ -7,6 +7,7 @@ import asyncio
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from server.event_bus import EventBus
+from protocol.event_types import EventType
 
 class TestEventBus(unittest.TestCase):
     def test_publish_subscribe(self):
@@ -15,12 +16,12 @@ class TestEventBus(unittest.TestCase):
         
         # Subscribe
         bus.subscribe(queue)
-        evt_id = bus.publish("heartbeat", {"val": 42})
+        evt_id = bus.publish(EventType.HEARTBEAT, {"val": 42})
         
         # Verify buffer stores the event correctly
         self.assertEqual(len(bus.buffer), 1)
         self.assertEqual(bus.buffer[0]["id"], evt_id)
-        self.assertEqual(bus.buffer[0]["type"], "heartbeat")
+        self.assertEqual(bus.buffer[0]["type"], EventType.HEARTBEAT.value)
         self.assertEqual(bus.buffer[0]["payload"]["val"], 42)
         
         # Verify queue receives the event
@@ -33,7 +34,7 @@ class TestEventBus(unittest.TestCase):
         
         # Unsubscribe and verify no more events are pushed
         bus.unsubscribe(queue)
-        bus.publish("settings_changed", {})
+        bus.publish(EventType.TOOL_REQUESTED, {})
         self.assertTrue(queue.empty())
 
     def test_immutability(self):
@@ -41,7 +42,7 @@ class TestEventBus(unittest.TestCase):
         payload = {"nested": {"value": 1}}
         
         # Publish
-        bus.publish("mut_test", payload)
+        bus.publish(EventType.TOOL_COMPLETED, payload)
         
         # Mutate the source dictionary
         payload["nested"]["value"] = 999
@@ -52,16 +53,23 @@ class TestEventBus(unittest.TestCase):
     def test_replay_buffer(self):
         bus = EventBus()
         ids = []
+        types = [
+            EventType.CLIENT_CONNECTED,
+            EventType.PAIR_SUCCESS,
+            EventType.TOOL_REQUESTED,
+            EventType.TOOL_PROGRESS,
+            EventType.TOOL_COMPLETED
+        ]
         for i in range(5):
-            evt_id = bus.publish(f"evt_{i}", {"num": i})
+            evt_id = bus.publish(types[i], {"num": i})
             ids.append(evt_id)
             
         # Retrieve events after the 2nd event (index 1)
         replayed = bus.get_events_after(ids[1])
         self.assertEqual(len(replayed), 3)
-        self.assertEqual(replayed[0]["type"], "evt_2")
-        self.assertEqual(replayed[1]["type"], "evt_3")
-        self.assertEqual(replayed[2]["type"], "evt_4")
+        self.assertEqual(replayed[0]["type"], EventType.TOOL_REQUESTED.value)
+        self.assertEqual(replayed[1]["type"], EventType.TOOL_PROGRESS.value)
+        self.assertEqual(replayed[2]["type"], EventType.TOOL_COMPLETED.value)
         
         # Retrieve events after a non-existent or expired ID (should return all events)
         all_replayed = bus.get_events_after("evt_expired_id")

@@ -5,6 +5,7 @@ from core.settings_manager import settings_manager
 from core.session_manager import session_manager
 from core.connection_manager import connection_manager
 from core.metrics_manager import metrics_manager
+from protocol import SettingKey, ErrorCode
 
 async def handle_request(method: str, path: str, headers: dict, body: bytes, writer):
     def write_success(data):
@@ -49,17 +50,18 @@ async def handle_request(method: str, path: str, headers: dict, body: bytes, wri
         writer.write(h_bytes + body_bytes)
 
     try:
-        if path == "/health":
+        # Route parsing with support for versioned api endpoints
+        if path in ("/health", "/api/v1/health"):
             if method != "GET":
-                write_error(405, "METHOD_NOT_ALLOWED", "Only GET is allowed")
+                write_error(405, ErrorCode.METHOD_NOT_ALLOWED.value, "Only GET is allowed")
                 await writer.drain()
                 return
             write_success({"status": "ok"})
             await writer.drain()
             
-        elif path == "/metrics":
+        elif path in ("/metrics", "/api/v1/metrics"):
             if method != "GET":
-                write_error(405, "METHOD_NOT_ALLOWED", "Only GET is allowed")
+                write_error(405, ErrorCode.METHOD_NOT_ALLOWED.value, "Only GET is allowed")
                 await writer.drain()
                 return
             # Update metrics connections count dynamically
@@ -67,16 +69,16 @@ async def handle_request(method: str, path: str, headers: dict, body: bytes, wri
             write_success(metrics_manager.get_metrics())
             await writer.drain()
             
-        elif path == "/api/status":
+        elif path in ("/api/status", "/api/v1/status"):
             if method != "GET":
-                write_error(405, "METHOD_NOT_ALLOWED", "Only GET is allowed")
+                write_error(405, ErrorCode.METHOD_NOT_ALLOWED.value, "Only GET is allowed")
                 await writer.drain()
                 return
                 
             uptime = time.time() - settings_manager.start_time
             status_data = {
                 "agent_version": "1.0.0",
-                "protocol_version": settings_manager.get("protocol_version", 1),
+                "protocol_version": settings_manager.get(SettingKey.PROTOCOL_VERSION.value, 1),
                 "uptime": round(uptime, 2),
                 "connected_devices": len(connection_manager.get_all_connections()),
                 "paired_devices": len(session_manager.paired_devices),
@@ -91,15 +93,15 @@ async def handle_request(method: str, path: str, headers: dict, body: bytes, wri
                     }
                     for conn in connection_manager.get_all_connections()
                 ],
-                "http_port": settings_manager.get("http_port", 9001),
-                "ws_port": settings_manager.get("port", 9000)
+                "http_port": settings_manager.get(SettingKey.HTTP_PORT.value, 9001),
+                "ws_port": settings_manager.get(SettingKey.PORT.value, 9000)
             }
             write_success(status_data)
             await writer.drain()
 
-        elif path.startswith("/api/events"):
+        elif path.startswith("/api/events") or path.startswith("/api/v1/events"):
             if method != "GET":
-                write_error(405, "METHOD_NOT_ALLOWED", "Only GET is allowed")
+                write_error(405, ErrorCode.METHOD_NOT_ALLOWED.value, "Only GET is allowed")
                 await writer.drain()
                 return
 
@@ -160,9 +162,10 @@ async def handle_request(method: str, path: str, headers: dict, body: bytes, wri
                 event_bus.unsubscribe(queue)
 
         else:
-            write_error(404, "NOT_FOUND", f"Route not found: {method} {path}")
+            write_error(404, ErrorCode.NOT_FOUND.value, f"Route not found: {method} {path}")
             await writer.drain()
             
     except Exception as e:
-        write_error(500, "INTERNAL_ERROR", str(e))
+        write_error(500, ErrorCode.INTERNAL_ERROR.value, str(e))
         await writer.drain()
+

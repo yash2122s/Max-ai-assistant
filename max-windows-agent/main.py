@@ -6,12 +6,14 @@ from server.http_server import HTTPServer
 from server.api_router import handle_request as http_handler
 from server.event_bus import event_bus
 
+from protocol import SettingKey, EventType
+
 # Import tools package to trigger auto-registration of CmdTool
 import tools
 
 async def run_servers(ws_server, http_server):
     # Publish agent startup domain event
-    event_bus.publish("agent_started", {
+    event_bus.publish(EventType.AGENT_STARTED, {
         "ws_port": ws_server.port,
         "http_port": http_server.port
     })
@@ -25,19 +27,19 @@ async def run_servers(ws_server, http_server):
         pass
     finally:
         # Publish agent shutdown domain event
-        event_bus.publish("agent_shutdown", {})
+        event_bus.publish(EventType.AGENT_SHUTDOWN, {})
         await http_server.stop()
 
 def main():
     print("=========================================")
-    print("        MAX Windows Agent (Phase 1B.2)    ")
+    print("        MAX Windows Agent (Phase 1B.3)    ")
     print("=========================================")
 
     # Load server configuration
     config = load_config()
-    host = config.get("host", "0.0.0.0")
-    ws_port = config.get("port", 9000)
-    http_port = config.get("http_port", 9001)
+    host = config.get(SettingKey.HOST.value, "0.0.0.0")
+    ws_port = config.get(SettingKey.PORT.value, 9000)
+    http_port = config.get(SettingKey.HTTP_PORT.value, 9001)
 
     # Initialize the servers
     ws_server = WebSocketServer(host, ws_port)

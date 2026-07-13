@@ -18,12 +18,16 @@ class EventBus:
     def unsubscribe(self, queue: asyncio.Queue):
         self.subscribers.discard(queue)
 
-    def publish(self, event_type: str, payload: Dict[str, Any]) -> str:
+    def publish(self, event_type, payload: Dict[str, Any]) -> str:
+        from protocol.event_types import EventType
+        if not isinstance(event_type, EventType):
+            raise TypeError(f"event_type must be an instance of EventType enum, got {type(event_type)}")
+            
         # Construct the event envelope
         event = {
             "schema_version": 1,
             "id": f"evt_{secrets.token_hex(8)}",
-            "type": event_type,
+            "type": event_type.value,
             "timestamp": time.time(),
             "payload": copy.deepcopy(payload)
         }
