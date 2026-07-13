@@ -154,6 +154,18 @@ class WebSocketServer:
                 }
                 await self.send_envelope(websocket, msg_id, "heartbeat", client_device_id, heartbeat_payload)
 
+            elif msg_type == "event":
+                event_name = payload.get("event")
+                if event_name == "heartbeat":
+                    logger.debug(f"Event heartbeat received from {client_device_id}")
+                    heartbeat_payload = {
+                        "uptime": int(time.process_time()),
+                        "agent_version": "1.0.0"
+                    }
+                    await self.send_envelope(websocket, msg_id, "heartbeat", client_device_id, heartbeat_payload)
+                else:
+                    logger.warning(f"Unknown event name: {event_name}")
+
             else:
                 logger.warning(f"Unknown message type: {msg_type}")
                 
