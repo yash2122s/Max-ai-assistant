@@ -198,7 +198,15 @@
             android:name=".service.JarvisForegroundService"
             android:foregroundServiceType="microphone"
             android:exported="false" />
-        <service android:name=".overlay.DynamicIslandOverlayService" android:exported="false" />
+        <service android:name=".service.FloatingHudService" android:foregroundServiceType="specialUse" android:exported="false" />
+        <service
+            android:name=".service.NotificationListenerBridge"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
         <service android:name=".service.TelegramBotService" android:foregroundServiceType="specialUse" android:exported="false" />
         <service android:name=".network.agent.CompanionConnectionService" android:foregroundServiceType="specialUse" android:exported="false" />
 

@@ -116,6 +116,18 @@ object WindowsToolExecutor {
 
     fun isAgentAvailable(): Boolean = isConnected.get()
 
+    fun sendNotificationEvent(packageName: String, title: String, text: String) {
+        if (isConnected.get()) {
+            val payload = mapOf(
+                "packageName" to packageName,
+                "title" to title,
+                "text" to text,
+                "timestamp" to System.currentTimeMillis()
+            )
+            client?.sendEvent("notification:synced", payload)
+        }
+    }
+
 
     suspend fun executeTool(
         tool: String,
