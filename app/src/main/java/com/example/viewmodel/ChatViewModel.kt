@@ -284,7 +284,25 @@ class ChatViewModel : ViewModel() {
             messages = listOf(ChatMessage("You", text)) + it.messages,
             isThinking = true
         )}
-        
+
+        val ctx = appContext
+        if (ctx != null) {
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                val offlineResult = com.example.automation.engine.OfflineCommandEngine.executeIfMatched(ctx, text)
+                if (offlineResult != null) {
+                    val rawMsg = offlineResult.message ?: if (offlineResult.success) "Action executed." else "Action failed."
+                    val replyText = if (offlineResult.success) rawMsg else "Failed: $rawMsg"
+                    persistChatMessage("Gemini", replyText)
+                    _uiState.update { state ->
+                        state.copy(
+                            messages = listOf(ChatMessage("MAX (Offline)", replyText)) + state.messages,
+                            isThinking = false
+                        )
+                    }
+                }
+            }
+        }
+
         val cleanedText = text.lowercase().trim().replace(Regex("[.,!?]"), "")
         
         // Volume Interceptor
