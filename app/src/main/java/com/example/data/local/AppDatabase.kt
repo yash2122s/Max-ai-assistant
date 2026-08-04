@@ -23,7 +23,7 @@ import com.example.memory.data.PermanentMemoryDao
         ActionReward::class, InstalledApp::class, ScheduledTask::class, 
         TaskExecutionLog::class, PeriodLog::class, PermanentMemory::class
     ], 
-    version = 12, 
+    version = 13, 
     exportSchema = false
 )
 @TypeConverters(SchedulerTypeConverters::class, MemoryTypeConverters::class)
@@ -85,6 +85,12 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN tags TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -95,7 +101,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "jarvis_database"
                 )
-                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance

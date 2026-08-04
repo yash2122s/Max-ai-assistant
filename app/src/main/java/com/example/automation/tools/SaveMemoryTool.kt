@@ -49,12 +49,21 @@ class SaveMemoryTool : Tool {
                 MemoryType.FACT
             }
 
+            var tagsStr = jsonObj.optString("tags", "")
+            if (tagsStr.isBlank()) {
+                val hashtags = Regex("#([\\w:]+)").findAll("$title $content").map { it.groupValues[1] }.toList()
+                if (hashtags.isNotEmpty()) {
+                    tagsStr = hashtags.joinToString(",")
+                }
+            }
+
             val memory = PermanentMemory(
                 title = title,
                 content = content,
                 category = category,
                 type = memoryType,
-                source = MemorySource.AUTO
+                source = MemorySource.AUTO,
+                tags = tagsStr
             )
 
             val repository = MemoryRepository(context.applicationContext)

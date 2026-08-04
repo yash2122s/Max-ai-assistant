@@ -81,7 +81,8 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
         content: String,
         category: String,
         type: MemoryType,
-        pinned: Boolean = false
+        pinned: Boolean = false,
+        tags: String = ""
     ) {
         viewModelScope.launch {
             _isLoading.value = true
@@ -92,7 +93,8 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
                 content = content.trim(),
                 category = category,
                 type = type,
-                pinned = pinned
+                pinned = pinned,
+                tags = tags.trim()
             )
 
             when (val result = repository.addMemory(memory)) {

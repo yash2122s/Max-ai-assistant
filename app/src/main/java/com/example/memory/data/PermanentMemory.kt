@@ -22,6 +22,7 @@ data class PermanentMemory(
     val category: String,
     val type: MemoryType,
     val source: MemorySource = MemorySource.MANUAL,
+    val tags: String = "",
     val pinned: Boolean = false,
     val enabled: Boolean = true,
     val usageCount: Int = 0,

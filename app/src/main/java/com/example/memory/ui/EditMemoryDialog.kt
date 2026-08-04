@@ -31,6 +31,7 @@ fun EditMemoryDialog(
 ) {
     var title by remember { mutableStateOf(memory.title) }
     var content by remember { mutableStateOf(memory.content) }
+    var tags by remember { mutableStateOf(memory.tags) }
     var selectedCategory by remember { mutableStateOf(memory.category) }
     var selectedType by remember { mutableStateOf(memory.type) }
     var pinned by remember { mutableStateOf(memory.pinned) }
@@ -81,6 +82,24 @@ fun EditMemoryDialog(
                     shape = RoundedCornerShape(12.dp),
                     minLines = 2,
                     maxLines = 4
+                )
+
+                OutlinedTextField(
+                    value = tags,
+                    onValueChange = { tags = it },
+                    label = { Text("Tags (e.g. hardware, person:jay)", color = TextLight.copy(alpha = 0.6f)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonBlue,
+                        unfocusedBorderColor = BorderDark,
+                        focusedTextColor = TextLight,
+                        unfocusedTextColor = TextLight,
+                        focusedLabelColor = NeonBlue,
+                        unfocusedLabelColor = TextLight.copy(alpha = 0.6f),
+                        cursorColor = NeonBlue
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
                 )
 
                 Text(
@@ -184,7 +203,8 @@ fun EditMemoryDialog(
                             content = content.trim(),
                             category = selectedCategory,
                             type = selectedType,
-                            pinned = pinned
+                            pinned = pinned,
+                            tags = tags.trim()
                         )
                     )
                 },

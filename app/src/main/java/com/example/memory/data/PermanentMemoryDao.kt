@@ -28,6 +28,7 @@ interface PermanentMemoryDao {
             title LIKE '%' || :query || '%' 
             OR content LIKE '%' || :query || '%' 
             OR category LIKE '%' || :query || '%'
+            OR tags LIKE '%' || :query || '%'
         )
         ORDER BY pinned DESC, updatedAt DESC
     """)
@@ -39,10 +40,14 @@ interface PermanentMemoryDao {
             title LIKE '%' || :query || '%' 
             OR content LIKE '%' || :query || '%' 
             OR category LIKE '%' || :query || '%'
+            OR tags LIKE '%' || :query || '%'
         )
         ORDER BY pinned DESC, updatedAt DESC
     """)
     fun searchFlow(query: String): Flow<List<PermanentMemory>>
+
+    @Query("SELECT * FROM permanent_memory WHERE enabled = 1 AND tags LIKE '%' || :tag || '%' ORDER BY pinned DESC, updatedAt DESC")
+    fun getByTagFlow(tag: String): Flow<List<PermanentMemory>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(memory: PermanentMemory): Long

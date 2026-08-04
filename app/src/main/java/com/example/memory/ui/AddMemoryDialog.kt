@@ -25,12 +25,13 @@ import com.example.ui.theme.*
 @Composable
 fun AddMemoryDialog(
     onDismiss: () -> Unit,
-    onAdd: (String, String, String, MemoryType, Boolean) -> Unit,
+    onAdd: (String, String, String, MemoryType, Boolean, String) -> Unit,
     isLoading: Boolean,
     error: String?
 ) {
     var title by remember { mutableStateOf("") }
     var content by remember { mutableStateOf("") }
+    var tags by remember { mutableStateOf("") }
     var selectedCategory by remember { mutableStateOf(MemoryCategory.PERSONAL.name) }
     var selectedType by remember { mutableStateOf(MemoryType.FACT) }
     var pinned by remember { mutableStateOf(false) }
@@ -82,6 +83,24 @@ fun AddMemoryDialog(
                     shape = RoundedCornerShape(12.dp),
                     minLines = 2,
                     maxLines = 4
+                )
+
+                OutlinedTextField(
+                    value = tags,
+                    onValueChange = { tags = it },
+                    label = { Text("Tags (e.g. hardware, person:jay)", color = TextLight.copy(alpha = 0.6f)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = NeonBlue,
+                        unfocusedBorderColor = BorderDark,
+                        focusedTextColor = TextLight,
+                        unfocusedTextColor = TextLight,
+                        focusedLabelColor = NeonBlue,
+                        unfocusedLabelColor = TextLight.copy(alpha = 0.6f),
+                        cursorColor = NeonBlue
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    singleLine = true
                 )
 
                 Text(
@@ -198,7 +217,7 @@ fun AddMemoryDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onAdd(title, content, if (selectedCategory == MemoryCategory.CUSTOM.name && customCategory.isNotEmpty()) customCategory else selectedCategory, selectedType, pinned) },
+                onClick = { onAdd(title, content, if (selectedCategory == MemoryCategory.CUSTOM.name && customCategory.isNotEmpty()) customCategory else selectedCategory, selectedType, pinned, tags) },
                 enabled = !isLoading && title.isNotBlank() && content.isNotBlank(),
                 colors = ButtonDefaults.buttonColors(containerColor = NeonBlue),
                 shape = RoundedCornerShape(12.dp)
