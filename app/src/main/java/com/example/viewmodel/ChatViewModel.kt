@@ -677,7 +677,10 @@ class ChatViewModel : ViewModel() {
         }
 
         val ctx = appContext
-        if (ctx != null) {
+        val isOnline = _uiState.value.connectionState == ConnectionState.CONNECTED && webSocketClient != null
+
+        if (!isOnline && ctx != null) {
+            // OFFLINE MODE: Free mic for SpeechRecognizerManager (Do not start AudioRecorder)
             if (ttsManager == null) {
                 ttsManager = com.example.voice.speech.TtsManager(ctx)
             }
@@ -686,26 +689,32 @@ class ChatViewModel : ViewModel() {
                     android.util.Log.d("ChatViewModel", "Offline Voice STT Result: '$spokenText'")
                     viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         val offlineResult = com.example.automation.engine.OfflineCommandEngine.executeIfMatched(ctx, spokenText)
-                        if (offlineResult != null) {
-                            val replyText = offlineResult.message ?: if (offlineResult.success) "Action executed." else "Action failed."
-                            ttsManager?.speak(replyText)
-                            persistChatMessage("Gemini", replyText)
-                            _uiState.update { state ->
-                                state.copy(
-                                    messages = listOf(ChatMessage("MAX (Offline)", replyText)) + state.messages,
-                                    isThinking = false
-                                )
-                            }
+                        val replyText = if (offlineResult != null) {
+                            offlineResult.message ?: if (offlineResult.success) "Action executed." else "Action failed."
+                        } else {
+                            "Command not recognized offline: '$spokenText'"
+                        }
+                        ttsManager?.speak(replyText)
+                        persistChatMessage("Gemini", replyText)
+                        _uiState.update { state ->
+                            state.copy(
+                                messages = listOf(ChatMessage("MAX (Offline)", replyText)) + state.messages,
+                                isThinking = false,
+                                isRecording = false
+                            )
                         }
                     }
                 }
                 onError = { err ->
                     android.util.Log.w("ChatViewModel", "Offline Voice STT Error: $err")
+                    _uiState.update { state -> state.copy(isRecording = false) }
                 }
             }
             speechRecognizerManager?.startListening()
+            return
         }
 
+        // ONLINE MODE: Stream audio to Gemini Live WebSocket
         if (audioRecorder == null) {
             audioRecorder = AudioRecorder()
         }
