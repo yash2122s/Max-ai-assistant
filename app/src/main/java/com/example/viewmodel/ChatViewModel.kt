@@ -656,6 +656,9 @@ class ChatViewModel : ViewModel() {
     
     private var videoStreamJob: kotlinx.coroutines.Job? = null
 
+    private var speechRecognizerManager: com.example.voice.speech.SpeechRecognizerManager? = null
+    private var ttsManager: com.example.voice.speech.TtsManager? = null
+
     private fun startAudioRecording() {
         // Barge-in: flush playing audio so microphone does not capture speaker output
         com.example.utils.stopAudioResponse()
@@ -673,6 +676,36 @@ class ChatViewModel : ViewModel() {
             }
         }
 
+        val ctx = appContext
+        if (ctx != null) {
+            if (ttsManager == null) {
+                ttsManager = com.example.voice.speech.TtsManager(ctx)
+            }
+            speechRecognizerManager = com.example.voice.speech.SpeechRecognizerManager(ctx).apply {
+                onResult = { spokenText ->
+                    android.util.Log.d("ChatViewModel", "Offline Voice STT Result: '$spokenText'")
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val offlineResult = com.example.automation.engine.OfflineCommandEngine.executeIfMatched(ctx, spokenText)
+                        if (offlineResult != null) {
+                            val replyText = offlineResult.message ?: if (offlineResult.success) "Action executed." else "Action failed."
+                            ttsManager?.speak(replyText)
+                            persistChatMessage("Gemini", replyText)
+                            _uiState.update { state ->
+                                state.copy(
+                                    messages = listOf(ChatMessage("MAX (Offline)", replyText)) + state.messages,
+                                    isThinking = false
+                                )
+                            }
+                        }
+                    }
+                }
+                onError = { err ->
+                    android.util.Log.w("ChatViewModel", "Offline Voice STT Error: $err")
+                }
+            }
+            speechRecognizerManager?.startListening()
+        }
+
         if (audioRecorder == null) {
             audioRecorder = AudioRecorder()
         }
@@ -684,6 +717,8 @@ class ChatViewModel : ViewModel() {
     private fun stopAudioRecording() {
         videoStreamJob?.cancel()
         videoStreamJob = null
+        speechRecognizerManager?.stopListening()
+        speechRecognizerManager = null
         audioRecorder?.stopRecording()
         audioRecorder = null
     }
