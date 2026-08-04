@@ -1,21 +1,61 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# Max AI Assistant
 
-# Run and deploy your AI Studio app
+Max AI Assistant is a powerful, cross-device AI orchestration assistant that seamlessly bridges your **Android mobile device** with a **Windows desktop agent**. Powered by Google Gemini, Max allows you to control, monitor, and automate tasks on both your phone and your computer through voice, text, and automated routines.
 
-This contains everything you need to run your app locally.
+---
 
-View your app in AI Studio: https://ai.studio/apps/d91b3ae8-dc26-45e0-8d85-cb32e20e4f1e
+## 📱 Project Components
 
-## Run Locally
+### 1. Android Application (`/app`)
+A native Android app built with **Kotlin** and **Jetpack Compose** that serves as the primary interface for the user.
+* **Gemini Live Integration**: Implements a real-time WebSocket client connection for low-latency voice, audio, and vision processing.
+* **Device Automation**: Executes local system actions like adjusting brightness, volume, DND settings, and managing Wi-Fi or Bluetooth.
+* **Advanced Integrations**: Incorporates Shizuku shell service integration for elevated permission actions and system automation.
+* **Built-in Utilities**: Includes structured tools for alarms, reminders, calendar syncing, period tracking, and saving memories.
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+### 2. Windows Agent (`/windows-agent` & `/max-windows-agent`)
+A lightweight **Python** background agent running on your PC that executes tasks requested by the Android client or assistant engine.
+* **Control Tools**: Terminal execution, process management, file operations, system info retrieval, and power commands (sleep, lock, shutdown).
+* **Media & Productivity**: Screen capture capabilities, clipboard syncing, application launching, and system volume controls.
+* **Web Dashboard**: Features a premium HTML/CSS/JS dashboard serving real-time logs, active device pairing, terminal sessions, and service settings.
+* **Secure Transport**: Features a secure cert-based communication system using WebSockets for encrypted local networking.
 
+---
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
+## ⚡ Key Features
+
+* **Cross-Device Coordination**: Request actions on your phone that seamlessly control or query your PC (e.g., *"Open VS Code on my PC"* or *"Check my PC's CPU usage"*).
+* **Gemini-Powered Engine**: Direct tool call routing where Gemini decides whether to execute actions locally on the phone or forward them to the Windows Agent.
+* **Voice & Vision Feedback**: Supports real-time audio streams, voice wave visualization, and screen reasoners to "see" your current workspace.
+
+---
+
+## 🚀 Setup & Installation
+
+### Android App
+1. Open the `/app` folder in **Android Studio**.
+2. Create a `.env` file in the root directory and add your Gemini API Key:
+   ```env
+   GEMINI_API_KEY=your_api_key_here
+   ```
+3. Sync Gradle and build the application onto an emulator or physical device.
+
+### Windows Agent
+1. Navigate to the agent directory:
+   ```bash
+   cd windows-agent
+   ```
+2. Install the Python dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+3. Run the agent startup script:
+   ```bash
+   startup.bat
+   ```
+4. Access the web dashboard locally at `https://localhost:8000` (or the configured port) to pair with your Android device.
+
+---
+
+## 🤝 How It Works (Protocol)
+The Android client and Windows agent communicate over a custom local WebSocket protocol. When Gemini classifies an intent that targets the computer (like looking up a file or taking a screenshot), the Android orchestrator routes the packet to the Windows agent connection, which processes it and responds with the execution results.
