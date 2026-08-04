@@ -156,7 +156,7 @@ class SettingsManager(context: Context) {
 
     /** The Gemini model to use for Live audio sessions. */
     var liveVoiceModelName: String
-        get() = prefs.getString("live_voice_model_name", "gemini-2.5-flash-native-audio-preview-12-2025") ?: "gemini-2.5-flash-native-audio-preview-12-2025"
+        get() = prefs.getString("live_voice_model_name", "gemini-3.1-flash-live-preview") ?: "gemini-3.1-flash-live-preview"
         set(value) = prefs.edit().putString("live_voice_model_name", value).apply()
 
     /** Voice persona for Gemini Live audio output. Options: Fenrir, Puck, Charon, etc. */

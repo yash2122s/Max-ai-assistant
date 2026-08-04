@@ -109,7 +109,9 @@ dependencies {
   // implementation(libs.googleid)
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.gson)
+  implementation(libs.play.services.code.scanner)
   implementation(libs.kotlinx.coroutines.android)
+
   implementation(libs.kotlinx.coroutines.core)
   implementation(libs.logging.interceptor)
   implementation(libs.moshi.kotlin)

@@ -1,0 +1,517 @@
+﻿--------- beginning of crash
+07-20 08:51:27.386   704   704 F libc    : Unwind request: crash_dump helper failed to exec, or was killed
+07-20 08:51:27.411   733   733 F libc    : Unwind request: crash_dump helper failed to exec, or was killed
+07-20 15:27:58.101 29229 29383 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-1
+07-20 15:27:58.101 29229 29383 E AndroidRuntime: Process: com.aistudio.geminilive.abcde, PID: 29229
+07-20 15:27:58.101 29229 29383 E AndroidRuntime: java.lang.IllegalStateException: Migration didn't properly handle: permanent_memory(com.example.memory.data.PermanentMemory).
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:  Expected:
+07-20 15:27:58.101 29229 29383 E AndroidRuntime: TableInfo {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:     name = 'permanent_memory',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:     columns = {    
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'category',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'content',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'createdAt',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'enabled',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'lastUsedAt',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'false',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'memoryId',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '1',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'pinned',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'source',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'title',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'type',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'updatedAt',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'usageCount',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         }
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:     },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:     foreignKeys = { }
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:     indices = { }
+07-20 15:27:58.101 29229 29383 E AndroidRuntime: }
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:  Found:
+07-20 15:27:58.101 29229 29383 E AndroidRuntime: TableInfo {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:     name = 'permanent_memory',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:     columns = {    
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'category',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'content',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'createdAt',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'enabled',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            name = 'lastUsedAt',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.101 29229 29383 E AndroidRuntime:            notNull = 'false',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'memoryId',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            primaryKeyPosition = '1',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'pinned',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'source',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'title',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'type',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            type = 'TEXT',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            affinity = '2',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'updatedAt',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Column {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'usageCount',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            affinity = '3',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            notNull = 'true',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         }
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:     },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:     foreignKeys = { }
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:     indices = {    
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Index {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'index_permanent_memory_category',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            unique = 'false',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            columns = {kotlin.Unit
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            orders = {kotlin.Unit
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Index {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'index_permanent_memory_enabled',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            unique = 'false',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            columns = {kotlin.Unit
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            orders = {kotlin.Unit
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Index {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'index_permanent_memory_pinned',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            unique = 'false',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            columns = {kotlin.Unit
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            orders = {kotlin.Unit
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         Index {
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            name = 'index_permanent_memory_type',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            unique = 'false',
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            columns = {kotlin.Unit
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:            orders = {kotlin.Unit
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:         }
+07-20 15:27:58.102 29229 29383 E AndroidRuntime:     },
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: }
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.room.BaseRoomConnectionManager.onMigrate(RoomConnectionManager.kt:212)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.room.RoomConnectionManager$SupportOpenHelperCallback.onUpgrade(RoomConnectionManager.android.kt:152)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper$OpenHelper.onUpgrade(FrameworkSQLiteOpenHelper.android.kt:245)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at android.database.sqlite.SQLiteOpenHelper.getDatabaseLocked(SQLiteOpenHelper.java:433)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at android.database.sqlite.SQLiteOpenHelper.getWritableDatabase(SQLiteOpenHelper.java:332)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper$OpenHelper.getWritableOrReadableDatabase(FrameworkSQLiteOpenHelper.android.kt:224)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper$OpenHelper.innerGetDatabase(FrameworkSQLiteOpenHelper.android.kt:180)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper$OpenHelper.getSupportDatabase(FrameworkSQLiteOpenHelper.android.kt:141)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper.getWritableDatabase(FrameworkSQLiteOpenHelper.android.kt:96)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.room.driver.SupportSQLiteDriver.open(SupportSQLiteDriver.android.kt:26)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.room.driver.SupportSQLiteConnectionPool.getSupportConnection(SupportSQLiteConnectionPool.android.kt:35)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.room.driver.SupportSQLiteConnectionPool.useConnection(SupportSQLiteConnectionPool.android.kt:42)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.room.RoomConnectionManager.useConnection(RoomConnectionManager.android.kt:126)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.room.RoomDatabase.useConnection$room_runtime_release(RoomDatabase.android.kt:588)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at androidx.room.util.DBUtil__DBUtil_androidKt$performSuspending$$inlined$compatCoroutineExecute$DBUtil__DBUtil_androidKt$1.invokeSuspend(DBUtil.android.kt:109)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1154)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:652)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	at java.lang.Thread.run(Thread.java:1563)
+07-20 15:27:58.102 29229 29383 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [StandaloneCoroutine{Cancelling}@19d2b3, Dispatchers.IO]
+07-20 15:28:05.877 29538 29577 E AndroidRuntime: FATAL EXCEPTION: DefaultDispatcher-worker-1
+07-20 15:28:05.877 29538 29577 E AndroidRuntime: Process: com.aistudio.geminilive.abcde, PID: 29538
+07-20 15:28:05.877 29538 29577 E AndroidRuntime: java.lang.IllegalStateException: Migration didn't properly handle: permanent_memory(com.example.memory.data.PermanentMemory).
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:  Expected:
+07-20 15:28:05.877 29538 29577 E AndroidRuntime: TableInfo {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:     name = 'permanent_memory',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:     columns = {    
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'category',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'content',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'createdAt',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'enabled',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'lastUsedAt',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'false',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'memoryId',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '1',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'pinned',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'source',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'title',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'type',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'updatedAt',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'usageCount',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         }
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:     },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:     foreignKeys = { }
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:     indices = { }
+07-20 15:28:05.877 29538 29577 E AndroidRuntime: }
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:  Found:
+07-20 15:28:05.877 29538 29577 E AndroidRuntime: TableInfo {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:     name = 'permanent_memory',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:     columns = {    
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'category',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'content',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'createdAt',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'enabled',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            name = 'lastUsedAt',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.877 29538 29577 E AndroidRuntime:            notNull = 'false',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'memoryId',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            primaryKeyPosition = '1',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'pinned',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'source',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'title',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'type',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            type = 'TEXT',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            affinity = '2',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'updatedAt',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Column {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'usageCount',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            type = 'INTEGER',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            affinity = '3',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            notNull = 'true',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            primaryKeyPosition = '0',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            defaultValue = 'undefined'
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         }
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:     },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:     foreignKeys = { }
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:     indices = {    
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Index {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'index_permanent_memory_category',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            unique = 'false',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            columns = {kotlin.Unit
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            orders = {kotlin.Unit
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Index {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'index_permanent_memory_enabled',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            unique = 'false',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            columns = {kotlin.Unit
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            orders = {kotlin.Unit
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Index {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'index_permanent_memory_pinned',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            unique = 'false',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            columns = {kotlin.Unit
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            orders = {kotlin.Unit
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         Index {
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            name = 'index_permanent_memory_type',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            unique = 'false',
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            columns = {kotlin.Unit
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:            orders = {kotlin.Unit
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:         }
+07-20 15:28:05.878 29538 29577 E AndroidRuntime:     },
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: }
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.room.BaseRoomConnectionManager.onMigrate(RoomConnectionManager.kt:212)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.room.RoomConnectionManager$SupportOpenHelperCallback.onUpgrade(RoomConnectionManager.android.kt:152)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper$OpenHelper.onUpgrade(FrameworkSQLiteOpenHelper.android.kt:245)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at android.database.sqlite.SQLiteOpenHelper.getDatabaseLocked(SQLiteOpenHelper.java:433)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at android.database.sqlite.SQLiteOpenHelper.getWritableDatabase(SQLiteOpenHelper.java:332)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper$OpenHelper.getWritableOrReadableDatabase(FrameworkSQLiteOpenHelper.android.kt:224)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper$OpenHelper.innerGetDatabase(FrameworkSQLiteOpenHelper.android.kt:180)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper$OpenHelper.getSupportDatabase(FrameworkSQLiteOpenHelper.android.kt:141)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.sqlite.db.framework.FrameworkSQLiteOpenHelper.getWritableDatabase(FrameworkSQLiteOpenHelper.android.kt:96)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.room.driver.SupportSQLiteDriver.open(SupportSQLiteDriver.android.kt:26)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.room.driver.SupportSQLiteConnectionPool.getSupportConnection(SupportSQLiteConnectionPool.android.kt:35)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.room.driver.SupportSQLiteConnectionPool.useConnection(SupportSQLiteConnectionPool.android.kt:42)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.room.RoomConnectionManager.useConnection(RoomConnectionManager.android.kt:126)
+07-20 15:28:05.878 29538 29577 E AndroidRuntime: 	at androidx.room.RoomDatabase.useConnection$room_runtime_release(RoomDatabase.android.kt:588)
+07-20 15:28:05.879 29538 29577 E AndroidRuntime: 	at androidx.room.util.DBUtil__DBUtil_androidKt$performSuspending$$inlined$compatCoroutineExecute$DBUtil__DBUtil_androidKt$1.invokeSuspend(DBUtil.android.kt:109)
+07-20 15:28:05.879 29538 29577 E AndroidRuntime: 	at kotlin.coroutines.jvm.internal.BaseContinuationImpl.resumeWith(ContinuationImpl.kt:33)
+07-20 15:28:05.879 29538 29577 E AndroidRuntime: 	at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:100)
+07-20 15:28:05.879 29538 29577 E AndroidRuntime: 	at java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1154)
+07-20 15:28:05.879 29538 29577 E AndroidRuntime: 	at java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:652)
+07-20 15:28:05.879 29538 29577 E AndroidRuntime: 	at java.lang.Thread.run(Thread.java:1563)
+07-20 15:28:05.879 29538 29577 E AndroidRuntime: 	Suppressed: kotlinx.coroutines.internal.DiagnosticCoroutineContextException: [StandaloneCoroutine{Cancelling}@2a37070, Dispatchers.IO]

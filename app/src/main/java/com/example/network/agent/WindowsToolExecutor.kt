@@ -8,102 +8,102 @@ import kotlin.coroutines.resume
 
 object WindowsToolExecutor {
     private var client: WindowsAgentClient? = null
-    private var isConnected = AtomicBoolean(false)
+    private val isConnected = java.util.concurrent.atomic.AtomicBoolean(false)
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var heartbeatJob: Job? = null
-    private var reconnectJob: Job? = null
     
     private var storedIp: String = "192.168.1.100"
     private var storedPort: Int = 9000
+
+    fun isDesktopConnectionEnabled(context: Context): Boolean {
+        val prefs = context.getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("desktop_connection_enabled", true)
+    }
+
+    fun setDesktopConnectionEnabled(context: Context, enabled: Boolean) {
+        val prefs = context.getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("desktop_connection_enabled", enabled).apply()
+        if (enabled) {
+            startService(context)
+        } else {
+            stopService(context)
+        }
+    }
+
+    fun isClipboardSyncEnabled(context: Context): Boolean {
+        val prefs = context.getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
+        return prefs.getBoolean("clipboard_sync_enabled", true)
+    }
+
+    fun setClipboardSyncEnabled(context: Context, enabled: Boolean) {
+        val prefs = context.getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("clipboard_sync_enabled", enabled).apply()
+    }
 
     fun initialize(context: Context) {
         if (client == null) {
             client = WindowsAgentClient(context.applicationContext)
             loadConfig(context)
-            startAutoConnectLoop(context)
+            if (isDesktopConnectionEnabled(context)) {
+                startService(context)
+            }
+        }
+    }
+
+    fun startService(context: Context) {
+        try {
+            val intent = android.content.Intent(context, CompanionConnectionService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Exception) {
+            Log.e("WindowsToolExecutor", "Failed to start CompanionConnectionService: ${e.message}", e)
+        }
+    }
+
+    fun stopService(context: Context) {
+        try {
+            val intent = android.content.Intent(context, CompanionConnectionService::class.java)
+            context.stopService(intent)
+            markConnected(false)
+        } catch (e: Exception) {
+            Log.e("WindowsToolExecutor", "Failed to stop CompanionConnectionService: ${e.message}", e)
         }
     }
 
     private fun loadConfig(context: Context) {
         val prefs = context.getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
-        storedIp = prefs.getString("agent_ip", "192.168.1.100") ?: "192.168.1.100"
-        storedPort = prefs.getInt("agent_port", 9000)
+        storedIp = prefs.getString("agent_ip", "192.168.0.152") ?: "192.168.0.152"
+        storedPort = prefs.getInt("agent_port", 9500)
     }
 
     fun saveConfig(context: Context, ip: String, port: Int) {
         val prefs = context.getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
-        val oldIp = prefs.getString("agent_ip", "")
-        val oldPort = prefs.getInt("agent_port", -1)
-        val changed = oldIp != ip || oldPort != port
-        
         prefs.edit().putString("agent_ip", ip).putInt("agent_port", port).apply()
         storedIp = ip
         storedPort = port
-        
-        if (changed || !isConnected.get()) {
-            client?.disconnect()
-            isConnected.set(false)
-            stopHeartbeatLoop()
-            scope.launch {
-                delay(1000)
-                tryConnect(context)
-            }
-        }
     }
 
     fun getClient(): WindowsAgentClient? = client
 
-    private fun startAutoConnectLoop(context: Context) {
-        reconnectJob?.cancel()
-        reconnectJob = scope.launch {
-            while (isActive) {
-                if (!isConnected.get()) {
-                    Log.d("WindowsToolExecutor", "Attempting connection to $storedIp:$storedPort...")
-                    tryConnect(context)
-                }
-                delay(10000)
-            }
+    fun markConnected(connected: Boolean) {
+        isConnected.set(connected)
+        if (connected) {
+            startHeartbeatLoop()
+        } else {
+            stopHeartbeatLoop()
         }
-    }
-
-    private fun tryConnect(context: Context) {
-        val currentClient = client ?: return
-        currentClient.connect(storedIp, storedPort, object : WindowsAgentClient.ConnectionListener {
-            override fun onConnected(capabilities: Map<String, Int>) {
-                Log.d("WindowsToolExecutor", "Connected to Windows Agent! Capabilities: $capabilities")
-                isConnected.set(true)
-                startHeartbeatLoop()
-            }
-
-            override fun onDisconnected() {
-                Log.d("WindowsToolExecutor", "Disconnected from Windows Agent")
-                isConnected.set(false)
-                stopHeartbeatLoop()
-            }
-
-            override fun onError(t: Throwable) {
-                Log.e("WindowsToolExecutor", "Connection error: ${t.message}")
-                isConnected.set(false)
-                stopHeartbeatLoop()
-            }
-        })
-    }
-
-    private suspend fun reconnect(context: Context) {
-        client?.disconnect()
-        isConnected.set(false)
-        stopHeartbeatLoop()
-        delay(1000)
-        tryConnect(context)
     }
 
     private fun startHeartbeatLoop() {
         heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (isActive) {
-                delay(25000)
+                delay(30000) // Heartbeat every 30 seconds
                 if (isConnected.get()) {
-                    client?.sendEvent("heartbeat", emptyMap())
+                    client?.sendEvent("core:ping", emptyMap())
                 }
             }
         }
@@ -115,6 +115,7 @@ object WindowsToolExecutor {
     }
 
     fun isAgentAvailable(): Boolean = isConnected.get()
+
 
     suspend fun executeTool(
         tool: String,

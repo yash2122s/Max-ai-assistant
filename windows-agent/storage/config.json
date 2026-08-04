@@ -1,0 +1,9 @@
+{
+    "port": 9500,
+    "host": "0.0.0.0",
+    "agent_name": "MAX Windows Agent",
+    "protocol_version": 1,
+    "pairing_enabled": true,
+    "http_port": 9501,
+    "device_id": "3aa7a60f-5a6b-4bac-9f57-0709b522a0c7"
+}

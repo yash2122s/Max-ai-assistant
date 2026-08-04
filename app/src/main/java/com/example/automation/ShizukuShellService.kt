@@ -31,7 +31,21 @@ class ShizukuShellService : IShizukuShell.Stub() {
         }
     }
 
-    override fun destroy() {
-        exitProcess(0)
+    override fun runCommandBytes(command: String): ByteArray {
+        android.util.Log.d("ShizukuShellService", "Executing byte command: $command")
+        return try {
+            val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
+            val bytes = process.inputStream.readBytes()
+            process.waitFor()
+            bytes
+        } catch (e: Exception) {
+            android.util.Log.e("ShizukuShellService", "Error reading bytes from command: $command", e)
+            ByteArray(0)
+        }
     }
+
+    override fun destroy() {
+        android.util.Log.d("ShizukuShellService", "ShizukuShellService stub destroyed.")
+    }
+
 }

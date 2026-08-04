@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
 
 enum class InputSource {
     CHAT, VOICE, HUD, TELEGRAM
@@ -22,12 +23,13 @@ data class JarvisResponse(
 
 object JarvisCore {
     private const val TAG = "JarvisCore"
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _responses = MutableSharedFlow<JarvisResponse>()
     val responses = _responses.asSharedFlow()
 
     fun processCommand(context: Context, text: String, source: InputSource) {
-        CoroutineScope(Dispatchers.IO).launch {
+        scope.launch {
             try {
                 Log.d(TAG, "Processing command from $source: $text")
                 
@@ -60,7 +62,7 @@ object JarvisCore {
     }
     
     fun processServerResponse(context: Context, text: String) {
-        CoroutineScope(Dispatchers.IO).launch {
+        scope.launch {
             // Save Jarvis response to UI database locally
             val db = AppDatabase.getDatabase(context)
             db.chatMessageDao().insertMessage(ChatMessage(sender = "jarvis", text = text))

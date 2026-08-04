@@ -50,7 +50,9 @@ class ReminderReceiver : BroadcastReceiver() {
                                 directJson.put("message", reminder.automationMessage)
                                 directJson.put("is_scheduled", true)
                                 json.put("direct_automation", directJson)
-                                com.example.automation.engine.AutomationEngine.dispatch(context, json)
+                                kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                                    com.example.automation.engine.AutomationEngine.dispatch(context, json)
+                                }
                             }
                             
                             if (keyguardManager.isKeyguardLocked && securitySettings.autoUnlockEnabled) {

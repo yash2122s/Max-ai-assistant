@@ -8,8 +8,13 @@ object ToolRegistry {
     private var frozen = false
 
     fun register(tool: Tool) {
-        check(!frozen) { "Registry is frozen. Cannot register new tools." }
         val nameKey = tool.name.uppercase()
+        if (frozen) {
+            if (toolMap.containsKey(nameKey)) {
+                return
+            }
+            frozen = false
+        }
         if (toolMap.containsKey(nameKey)) {
             throw IllegalStateException("Duplicate tool registered for name: ${tool.name}")
         }
@@ -17,6 +22,8 @@ object ToolRegistry {
         tool.supportedActions.forEach { action ->
             val actionKey = action.uppercase()
             if (actionMap.containsKey(actionKey)) {
+                // If it is the exact same tool object re-registering, allow it
+                if (actionMap[actionKey] === tool) return@forEach
                 throw IllegalStateException("Duplicate action registered: $action (mapped to ${actionMap[actionKey]?.name} and ${tool.name})")
             }
             actionMap[actionKey] = tool

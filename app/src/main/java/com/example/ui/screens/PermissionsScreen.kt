@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.app.AppOpsManager
+import android.app.admin.DevicePolicyManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -8,11 +10,14 @@ import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.PowerManager
 import android.provider.Settings
 import android.text.TextUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationManagerCompat
+import com.example.receiver.MyDeviceAdminReceiver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -62,6 +67,14 @@ fun PermissionsScreen(onNavigateBack: () -> Unit) {
     var accessibilityStatus by remember { mutableStateOf("Grant") }
     var batteryStatus by remember { mutableStateOf("Grant") }
     var overlayStatus by remember { mutableStateOf("Grant") }
+    var locationStatus by remember { mutableStateOf("Grant") }
+    var restrictedSettingsStatus by remember { mutableStateOf("Grant") }
+    var allFilesStatus by remember { mutableStateOf("Grant") }
+    var deviceAdminStatus by remember { mutableStateOf("Grant") }
+    var usageDataStatus by remember { mutableStateOf("Grant") }
+    var appNotificationsStatus by remember { mutableStateOf("Grant") }
+    var calendarStatus by remember { mutableStateOf("Grant") }
+    var shizukuStatus by remember { mutableStateOf("Grant") }
 
     // Helper to refresh all statuses
     fun refreshPermissions() {
@@ -95,6 +108,36 @@ fun PermissionsScreen(onNavigateBack: () -> Unit) {
 
         // 7. Display over other apps (Overlay)
         overlayStatus = if (isOverlayPermissionGranted(context)) "Granted" else "Grant"
+
+        // 8. Location
+        locationStatus = if (isLocationPermissionGranted(context)) "Granted" else "Grant"
+
+        // 9. Allow restricted settings helper status
+        restrictedSettingsStatus = if (isAccessibilityServiceEnabled(context) || isNotificationListenerEnabled(context)) "Granted" else "Grant"
+
+        // 10. All files access
+        allFilesStatus = if (isAllFilesAccessGranted(context)) "Granted" else "Grant"
+
+        // 11. Device administrator
+        deviceAdminStatus = if (isDeviceAdminActive(context)) "Granted" else "Grant"
+
+        // 12. Usage data
+        usageDataStatus = if (isUsageAccessGranted(context)) "Granted" else "Grant"
+
+        // 13. Disable app notifications
+        appNotificationsStatus = if (isNotificationsEnabled(context)) "Granted" else "Grant"
+
+        // 14. Calendar
+        val readCalendar = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
+        val writeCalendar = ContextCompat.checkSelfPermission(context, Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED
+        calendarStatus = if (readCalendar && writeCalendar) "Granted" else "Grant"
+
+        // 15. Shizuku
+        shizukuStatus = if (com.example.automation.ShizukuManager.isShizukuAvailable()) {
+            if (com.example.automation.ShizukuManager.isPermissionGranted()) "Granted" else "Grant"
+        } else {
+            "Not Running"
+        }
     }
 
     // Refresh when screen is first entered and on resume (returning from Settings screens)
@@ -131,71 +174,32 @@ fun PermissionsScreen(onNavigateBack: () -> Unit) {
         notificationsStatus = if (isGranted) "Granted" else "Grant"
     }
 
+    val locationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val fineGranted = results[Manifest.permission.ACCESS_FINE_LOCATION] ?: false
+        val coarseGranted = results[Manifest.permission.ACCESS_COARSE_LOCATION] ?: false
+        locationStatus = if (fineGranted && coarseGranted) "Granted" else "Grant"
+    }
+
     val screenCaptureLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { _ ->
         // No action needed for test
     }
 
+    val calendarLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val readGranted = results[Manifest.permission.READ_CALENDAR] ?: false
+        val writeGranted = results[Manifest.permission.WRITE_CALENDAR] ?: false
+        calendarStatus = if (readGranted && writeGranted) "Granted" else "Grant"
+    }
+
     val permissions = listOf(
         PermissionItem(
-            title = "Answer & manage calls",
-            description = "Har incoming call ko MAX announce kare aur answer/reject/end kar sake - caller ka naam batane ke liye Call Log bhi chahiye.",
-            status = callsStatus,
-            onClick = {
-                if (callsStatus != "Granted") {
-                    callsLauncher.launch(
-                        arrayOf(
-                            Manifest.permission.READ_CONTACTS,
-                            Manifest.permission.CALL_PHONE
-                        )
-                    )
-                }
-            }
-        ),
-        PermissionItem(
-            title = "Bluetooth",
-            description = "MAX ki awaaz Bluetooth headset/speaker pe bhej sake.",
-            status = bluetoothStatus,
-            onClick = {
-                if (bluetoothStatus != "Granted") {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        bluetoothLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
-                    }
-                }
-            }
-        ),
-        PermissionItem(
-            title = "App notifications",
-            description = "Session chalti rahe iske liye MAX ki notification.",
-            status = notificationsStatus,
-            onClick = {
-                if (notificationsStatus != "Granted") {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                }
-            }
-        ),
-        PermissionItem(
-            title = "Notification access",
-            description = "Sabhi apps ke notifications (aur WhatsApp messages) padhne ke liye.",
-            status = notificationAccessStatus,
-            onClick = {
-                if (notificationAccessStatus != "Granted") {
-                    try {
-                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
-                        context.startActivity(intent)
-                    } catch (e: Exception) {
-                        val intent = Intent(Settings.ACTION_SETTINGS)
-                        context.startActivity(intent)
-                    }
-                }
-            }
-        ),
-        PermissionItem(
-            title = "Accessibility service",
-            description = "WhatsApp/YouTube control aur screen reading ke liye (list me 'MAX' enable karo).",
+            title = "Enable accessibility",
+            description = "Accessibility is useful for several features of the application (Instant messaging, call recording, live viewing, application blocking and website history).",
             status = accessibilityStatus,
             onClick = {
                 if (accessibilityStatus != "Granted") {
@@ -210,15 +214,98 @@ fun PermissionsScreen(onNavigateBack: () -> Unit) {
             }
         ),
         PermissionItem(
-            title = "Battery - no optimization",
-            description = "MAX screen off / background me bhi chalti rahe - battery optimization se exempt karo.",
-            status = batteryStatus,
+            title = "Activate all permissions",
+            description = "Activate the permissions necessary for the proper functioning of the application (Calls, Bluetooth, and Notifications).",
+            status = if (callsStatus == "Granted" && bluetoothStatus == "Granted" && notificationsStatus == "Granted") "Granted" else "Grant",
             onClick = {
-                if (batteryStatus != "Exempt") {
-                    try {
-                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                            data = Uri.parse("package:${context.packageName}")
+                if (callsStatus != "Granted") {
+                    callsLauncher.launch(arrayOf(Manifest.permission.READ_CONTACTS, Manifest.permission.CALL_PHONE))
+                }
+                if (bluetoothStatus != "Granted" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    bluetoothLauncher.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                }
+                if (notificationsStatus != "Granted" && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    notificationsLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+        ),
+        PermissionItem(
+            title = "Allow restricted settings",
+            description = "You must allow restricted settings to enable accessibility, access to notifications and SMS permission.",
+            status = restrictedSettingsStatus,
+            onClick = {
+                try {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    val intent = Intent(Settings.ACTION_SETTINGS)
+                    context.startActivity(intent)
+                }
+            }
+        ),
+        PermissionItem(
+            title = "All files access",
+            description = "Allow access to manage all files on the device.",
+            status = allFilesStatus,
+            onClick = {
+                if (allFilesStatus != "Granted") {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        try {
+                            val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                            context.startActivity(intent)
                         }
+                    }
+                }
+            }
+        ),
+        PermissionItem(
+            title = "Allow location",
+            description = "Always allow location access for this application.",
+            status = locationStatus,
+            onClick = {
+                if (locationStatus != "Granted") {
+                    locationLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    )
+                }
+            }
+        ),
+        PermissionItem(
+            title = "Device administrator",
+            description = "Administrator rights prevent the application from shutting down, locking the phone, erasing all data, and blocking the camera.",
+            status = deviceAdminStatus,
+            onClick = {
+                if (deviceAdminStatus != "Granted") {
+                    try {
+                        val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                            putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, ComponentName(context, MyDeviceAdminReceiver::class.java))
+                            putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Activate device administrator rights.")
+                        }
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+        ),
+        PermissionItem(
+            title = "Enable access to notifications",
+            description = "Hide system notifications for the application and retrieve messages received from instant messengers.",
+            status = notificationAccessStatus,
+            onClick = {
+                if (notificationAccessStatus != "Granted") {
+                    try {
+                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
                         context.startActivity(intent)
                     } catch (e: Exception) {
                         val intent = Intent(Settings.ACTION_SETTINGS)
@@ -228,8 +315,26 @@ fun PermissionsScreen(onNavigateBack: () -> Unit) {
             }
         ),
         PermissionItem(
-            title = "Display over other apps",
-            description = "MAX doosre apps ke upar kaam kar sake.",
+            title = "Usage data",
+            description = "Provides statistics on the use of installed applications.",
+            status = usageDataStatus,
+            onClick = {
+                if (usageDataStatus != "Granted") {
+                    try {
+                        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        val intent = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+                        context.startActivity(intent)
+                    }
+                }
+            }
+        ),
+        PermissionItem(
+            title = "Overlay on other apps.",
+            description = "Useful for the good functioning of the application.",
             status = overlayStatus,
             onClick = {
                 if (overlayStatus != "Granted") {
@@ -246,17 +351,82 @@ fun PermissionsScreen(onNavigateBack: () -> Unit) {
             }
         ),
         PermissionItem(
-            title = "Screen capture",
-            description = "MAX tumhari screen live dekh sake (screen share). Iski permission MAX zaroorat padne par khud maang legi - har baar. Yahan se ek baar test bhi kar sakte ho.",
+            title = "Disable app notifications",
+            description = "Hide notifications for the application.",
+            status = appNotificationsStatus,
+            onClick = {
+                try {
+                    val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                        putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                    }
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    val intent = Intent(Settings.ACTION_SETTINGS)
+                    context.startActivity(intent)
+                }
+            }
+        ),
+        PermissionItem(
+            title = "Do not optimize battery usage",
+            description = "This makes it possible to keep the application running in the background.",
+            status = batteryStatus,
+            onClick = {
+                if (batteryStatus != "Exempt") {
+                    try {
+                        val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                        context.startActivity(intent)
+                    } catch (e: Exception) {
+                        val intent = Intent(Settings.ACTION_SETTINGS)
+                        context.startActivity(intent)
+                    }
+                }
+            }
+        ),
+        PermissionItem(
+            title = "Protecting application",
+            description = "Important step for the application not to be stopped.",
             status = "Grant",
             onClick = {
-                val mediaProjectionManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as? MediaProjectionManager
-                mediaProjectionManager?.let {
-                    try {
-                        screenCaptureLauncher.launch(it.createScreenCaptureIntent())
-                    } catch (e: Exception) {
-                        e.printStackTrace()
+                try {
+                    val intent = Intent(Settings.ACTION_SETTINGS)
+                    context.startActivity(intent)
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        ),
+        PermissionItem(
+            title = "Calendar access",
+            description = "Allows MAX to query, display, and add calendar events on your device.",
+            status = calendarStatus,
+            onClick = {
+                if (calendarStatus != "Granted") {
+                    calendarLauncher.launch(arrayOf(Manifest.permission.READ_CALENDAR, Manifest.permission.WRITE_CALENDAR))
+                }
+            }
+        ),
+        PermissionItem(
+            title = "Shizuku ADB execution",
+            description = "Enables executing ADB shell commands safely. The Shizuku app must be running in the background.",
+            status = shizukuStatus,
+            onClick = {
+                if (shizukuStatus == "Grant") {
+                    var currentContext = context
+                    var activity: android.app.Activity? = null
+                    while (currentContext is android.content.ContextWrapper) {
+                        if (currentContext is android.app.Activity) {
+                            activity = currentContext
+                            break
+                        }
+                        currentContext = currentContext.baseContext
                     }
+                    if (activity != null) {
+                        com.example.automation.ShizukuManager.requestPermission(activity)
+                    }
+                } else if (shizukuStatus == "Not Running") {
+                    android.widget.Toast.makeText(context, "Please start the Shizuku app/service first!", android.widget.Toast.LENGTH_LONG).show()
                 }
             }
         )
@@ -391,4 +561,47 @@ private fun isBatteryOptimizationIgnored(context: Context): Boolean {
 
 private fun isOverlayPermissionGranted(context: Context): Boolean {
     return Settings.canDrawOverlays(context)
+}
+
+private fun isAllFilesAccessGranted(context: Context): Boolean {
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Environment.isExternalStorageManager()
+    } else {
+        true
+    }
+}
+
+private fun isLocationPermissionGranted(context: Context): Boolean {
+    val fineGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    val coarseGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+    return fineGranted && coarseGranted
+}
+
+private fun isDeviceAdminActive(context: Context): Boolean {
+    val dpm = context.getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+    val cn = ComponentName(context, MyDeviceAdminReceiver::class.java)
+    return dpm.isAdminActive(cn)
+}
+
+private fun isUsageAccessGranted(context: Context): Boolean {
+    val appOps = context.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
+    val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        appOps.unsafeCheckOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            context.packageName
+        )
+    } else {
+        @Suppress("DEPRECATION")
+        appOps.checkOpNoThrow(
+            AppOpsManager.OPSTR_GET_USAGE_STATS,
+            android.os.Process.myUid(),
+            context.packageName
+        )
+    }
+    return mode == AppOpsManager.MODE_ALLOWED
+}
+
+private fun isNotificationsEnabled(context: Context): Boolean {
+    return NotificationManagerCompat.from(context).areNotificationsEnabled()
 }

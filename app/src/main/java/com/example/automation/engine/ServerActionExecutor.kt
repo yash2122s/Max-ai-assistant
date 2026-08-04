@@ -14,7 +14,7 @@ object ServerActionExecutor {
         "OPEN_APP", "CALL_PHONE", "SEND_MESSAGE",
         "SET_REMINDER", "GET_TIME", "SYSTEM_ACTION",
         "PERFORM_BACK", "PERFORM_HOME", "PERFORM_RECENT_APPS",
-        "TAKE_SCREENSHOT"
+        "TAKE_SCREENSHOT", "GET_LOCATION", "SEND_LOCATION"
     )
 
     fun execute(context: Context, requestJson: JSONObject) {
@@ -59,15 +59,18 @@ object ServerActionExecutor {
                 }
 
                 // Dispatch it locally via the existing ActionDispatcher
-                val accepted = ActionDispatcher.dispatch(context, dispatchJson)
-
+                val resultString = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                    ActionDispatcher.dispatchWithResult(context, dispatchJson)
+                }
+                val resultJson = JSONObject(resultString)
+                
                 val res = JSONObject()
                 res.put("action_id", actionId)
-                if (accepted) {
-                    res.put("status", "success")
-                } else {
-                    res.put("status", "failed")
-                    res.put("error", "Action was not accepted by dispatcher")
+                
+                val keysIterator = resultJson.keys()
+                while (keysIterator.hasNext()) {
+                    val key = keysIterator.next()
+                    res.put(key, resultJson.get(key))
                 }
                 resultsArray.put(res)
             } catch (e: Exception) {

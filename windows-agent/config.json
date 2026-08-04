@@ -1,0 +1,18 @@
+{
+  "apps": {
+    "notepad": "notepad.exe",
+    "chrome": "chrome.exe",
+    "calculator": "calc.exe",
+    "vscode": "code.exe"
+  },
+  "urls": {
+    "google": "https://www.google.com",
+    "youtube": "https://www.youtube.com",
+    "github": "https://github.com",
+    "whatsapp": "https://web.whatsapp.com"
+  },
+  "contacts": {
+    "daddy": "9640461271",
+    "mom": "0987654321"
+  }
+}

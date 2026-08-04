@@ -8,7 +8,7 @@ class AudioProcessor(
 ) {
     private var silenceStartTime: Long = 0L
     private val SILENCE_THRESHOLD = 0.02f // RMS threshold for voice detection
-    private val SILENCE_TIMEOUT_MS = 5000L // 5 seconds of silence triggers automatic mute/timeout
+    private val SILENCE_TIMEOUT_MS = 30000L // 30 seconds of silence triggers automatic mute/timeout
 
     fun processAudio(shorts: ShortArray, size: Int): Float {
         if (size <= 0) return 0f

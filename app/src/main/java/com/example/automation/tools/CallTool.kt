@@ -19,10 +19,7 @@ class CallTool(private val callPhoneAction: CallPhoneAction) : Tool {
 
     override fun validate(request: ExecutionRequest): Boolean {
         val arguments = request.arguments
-        val contact = arguments.get("contact")?.asString
-            ?: arguments.get("phone_number")?.asString
-            ?: ""
-        return contact.isNotEmpty()
+        return arguments.has("contactId") && arguments.has("phoneId")
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {

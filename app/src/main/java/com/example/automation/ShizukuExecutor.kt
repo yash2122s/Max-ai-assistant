@@ -7,18 +7,16 @@ object ShizukuExecutor {
 
     private const val TAG = "ShizukuExecutor"
 
-    private val blockedCommands = listOf(
-        "rm -rf",
-        "reboot",
-        "format",
-        "wipe",
-        "mkfs",
-        "dd"
+    private val allowedPrefixes = listOf(
+        "pm list packages",
+        "wm size",
+        "getprop",
+        "dumpsys"
     )
 
     fun isSafeCommand(cmd: String): Boolean {
-        val lowerCmd = cmd.lowercase()
-        return blockedCommands.none { lowerCmd.contains(it) }
+        val lowerCmd = cmd.trim().lowercase()
+        return allowedPrefixes.any { lowerCmd.startsWith(it) }
     }
 
     fun runCommand(command: String): String {

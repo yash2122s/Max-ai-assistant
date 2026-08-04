@@ -7,6 +7,7 @@ import com.example.automation.tools.OpenAppTool
 import com.example.automation.tools.ToolRegistry
 import com.example.automation.verification.OpenAppVerifier
 import com.example.automation.verification.VerificationRegistry
+import kotlinx.coroutines.launch
 
 class MyApplication : Application() {
     override fun onCreate() {
@@ -60,6 +61,48 @@ class MyApplication : Application() {
         val createContactVerifier = com.example.automation.verification.CreateContactVerifier()
 
         val windowsAgentTool = com.example.automation.tools.WindowsAgentTool()
+        val locationTool = com.example.automation.tools.LocationTool()
+
+        // New skills
+        val shizukuTool = com.example.automation.tools.ShizukuTool()
+        val shizukuVerifier = com.example.automation.verification.ShizukuVerifier()
+
+        val bluetoothAction = com.example.automation.actions.BluetoothAction()
+        val bluetoothTool = com.example.automation.tools.BluetoothTool(bluetoothAction)
+        val bluetoothVerifier = com.example.automation.verification.BluetoothVerifier()
+
+        val batteryAction = com.example.automation.actions.BatteryAction()
+        val batteryTool = com.example.automation.tools.BatteryTool(batteryAction)
+        val batteryVerifier = com.example.automation.verification.BatteryVerifier()
+
+        val dndAction = com.example.automation.actions.DndAction()
+        val dndTool = com.example.automation.tools.DndTool(dndAction)
+        val dndVerifier = com.example.automation.verification.DndVerifier()
+
+        val cameraAction = com.example.automation.actions.CameraAction()
+        val cameraTool = com.example.automation.tools.CameraTool(cameraAction)
+        val cameraVerifier = com.example.automation.verification.CameraVerifier()
+
+        val calendarAction = com.example.automation.actions.CalendarAction()
+        val calendarTool = com.example.automation.tools.CalendarTool(calendarAction)
+        val calendarVerifier = com.example.automation.verification.CalendarVerifier()
+
+        val notificationTool = com.example.automation.tools.NotificationTool()
+        val mediaTool = com.example.automation.tools.MediaTool()
+        val alarmTool = com.example.automation.tools.AlarmTool()
+        val fileSearchTool = com.example.automation.tools.FileSearchTool()
+
+        val settingsSearchTool = com.example.automation.tools.SettingsSearchTool()
+        val deviceStatusTool = com.example.automation.tools.DeviceStatusTool(batteryAction)
+        val usageStatsTool = com.example.automation.tools.UsageStatsTool()
+        val clipboardTool = com.example.automation.tools.ClipboardTool()
+        val routineTool = com.example.automation.tools.RoutineTool()
+        val periodTrackerTool = com.example.automation.tools.PeriodTrackerTool()
+        val periodTrackerVerifier = com.example.automation.verification.PeriodTrackerVerifier()
+
+        val searchContactAction = com.example.automation.actions.SearchContactAction()
+        val searchContactTool = com.example.automation.tools.SearchContactTool(searchContactAction)
+        val searchContactVerifier = com.example.automation.verification.SearchContactVerifier()
 
         VerificationRegistry.register(openAppVerifier)
         VerificationRegistry.register(whatsAppVerifier)
@@ -72,6 +115,14 @@ class MyApplication : Application() {
         VerificationRegistry.register(wifiVerifier)
         VerificationRegistry.register(diagnosticsVerifier)
         VerificationRegistry.register(createContactVerifier)
+        VerificationRegistry.register(shizukuVerifier)
+        VerificationRegistry.register(bluetoothVerifier)
+        VerificationRegistry.register(batteryVerifier)
+        VerificationRegistry.register(dndVerifier)
+        VerificationRegistry.register(cameraVerifier)
+        VerificationRegistry.register(calendarVerifier)
+        VerificationRegistry.register(periodTrackerVerifier)
+        VerificationRegistry.register(searchContactVerifier)
 
         ToolRegistry.register(openAppTool)
         ToolRegistry.register(flashlightTool)
@@ -89,10 +140,58 @@ class MyApplication : Application() {
         ToolRegistry.register(diagnosticsTool)
         ToolRegistry.register(createContactTool)
         ToolRegistry.register(windowsAgentTool)
+        ToolRegistry.register(locationTool)
+        ToolRegistry.register(shizukuTool)
+        ToolRegistry.register(bluetoothTool)
+        ToolRegistry.register(batteryTool)
+        ToolRegistry.register(dndTool)
+        ToolRegistry.register(cameraTool)
+        ToolRegistry.register(calendarTool)
+        ToolRegistry.register(notificationTool)
+        ToolRegistry.register(mediaTool)
+        ToolRegistry.register(alarmTool)
+        ToolRegistry.register(fileSearchTool)
+        ToolRegistry.register(settingsSearchTool)
+        ToolRegistry.register(deviceStatusTool)
+        ToolRegistry.register(usageStatsTool)
+        ToolRegistry.register(clipboardTool)
+        ToolRegistry.register(routineTool)
+        ToolRegistry.register(periodTrackerTool)
+        ToolRegistry.register(searchContactTool)
+        ToolRegistry.register(com.example.automation.tools.SaveMemoryTool())
+        ToolRegistry.register(com.example.automation.tools.ReminderTool())
 
         VerificationRegistry.freeze()
         ToolRegistry.freeze()
         
+        // Start Telegram Bot Service only when fully configured (token + authorized chat)
+        val settings = com.example.data.preferences.SettingsManager(this)
+        if (settings.isTelegramBotEnabled &&
+            settings.telegramBotToken.isNotBlank() &&
+            settings.telegramChatId.isNotBlank()
+        ) {
+            try {
+                val serviceIntent = android.content.Intent(this, com.example.service.TelegramBotService::class.java)
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            } catch (e: java.lang.Exception) {
+                Log.e("MyApplication", "Failed to start TelegramBotService on startup", e)
+            }
+        } else if (settings.isTelegramBotEnabled) {
+            Log.w("MyApplication", "Telegram bot enabled but token/chat ID missing — not starting service")
+        }
+        
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            try {
+                com.example.data.local.PeriodDataSeeder.seedPeriodData(this@MyApplication)
+            } catch (e: Exception) {
+                Log.e("MyApplication", "Error seeding period data", e)
+            }
+        }
+
         Log.d("MyApplication", "MAX execution framework successfully initialized.")
     }
 }

@@ -8,7 +8,7 @@ import org.json.JSONObject
 object AutomationEngine {
     private const val TAG = "AutomationEngine"
 
-    fun dispatch(context: Context, json: JSONObject): Boolean {
+    suspend fun dispatch(context: Context, json: JSONObject): Boolean {
         Log.d(TAG, "Dispatching automation: $json")
         return ActionDispatcher.dispatch(context, json)
     }

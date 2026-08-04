@@ -9,6 +9,7 @@ import android.util.Log
 class AudioRecorder {
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
+    private var recordingThread: Thread? = null
 
     @SuppressLint("MissingPermission")
     @Synchronized
@@ -46,7 +47,7 @@ class AudioRecorder {
             audioProcessor.reset()
 
             val buffer = ShortArray(bufferSize)
-            Thread {
+            recordingThread = Thread({
                 while (isRecording) {
                     val shortsRead = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (shortsRead > 0) {
@@ -64,7 +65,8 @@ class AudioRecorder {
                         onAudioChunk(byteBuffer)
                     }
                 }
-            }.start()
+            }, "AudioRecorder-Thread")
+            recordingThread?.start()
         } catch (e: Exception) {
             Log.e("AudioRecorder", "Error starting recording", e)
         }
@@ -73,6 +75,12 @@ class AudioRecorder {
     @Synchronized
     fun stopRecording() {
         isRecording = false
+        try {
+            recordingThread?.join(1000)
+        } catch (e: InterruptedException) {
+            Log.w("AudioRecorder", "Interrupted while joining recording thread", e)
+        }
+        recordingThread = null
         try {
             audioRecord?.apply {
                 if (state == AudioRecord.STATE_INITIALIZED) {

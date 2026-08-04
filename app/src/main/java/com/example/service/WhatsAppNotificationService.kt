@@ -13,9 +13,30 @@ class WhatsAppNotificationService : NotificationListenerService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main)
 
+    companion object {
+        private var instance: WhatsAppNotificationService? = null
+        fun getInstance(): WhatsAppNotificationService? = instance
+    }
+
     override fun onListenerConnected() {
         super.onListenerConnected()
+        instance = this
         Log.d("WhatsAppNotifService", "Notification Listener Connected!")
+    }
+
+    override fun onListenerDisconnected() {
+        super.onListenerDisconnected()
+        if (instance == this) {
+            instance = null
+        }
+        Log.d("WhatsAppNotifService", "Notification Listener Disconnected!")
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (instance == this) {
+            instance = null
+        }
     }
 
     @Suppress("DEPRECATION")

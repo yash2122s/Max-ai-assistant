@@ -56,4 +56,14 @@ object ShizukuShellPlugin {
             "Remote error: ${e.localizedMessage}"
         }
     }
+
+    fun runCommandBytes(command: String): ByteArray? {
+        if (!bindSync()) return null
+        return try {
+            service?.runCommandBytes(command)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error running byte command", e)
+            null
+        }
+    }
 }

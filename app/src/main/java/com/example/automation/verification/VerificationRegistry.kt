@@ -5,10 +5,17 @@ object VerificationRegistry {
     private var frozen = false
 
     fun register(verifier: Verifier) {
-        check(!frozen) { "VerificationRegistry is frozen." }
+        val firstTool = verifier.supportedTools.firstOrNull()?.uppercase()
+        if (frozen) {
+            if (firstTool != null && verifierMap.containsKey(firstTool)) {
+                return
+            }
+            frozen = false
+        }
         verifier.supportedTools.forEach { toolName ->
             val key = toolName.uppercase()
             if (verifierMap.containsKey(key)) {
+                if (verifierMap[key] === verifier) return@forEach
                 throw IllegalStateException("Duplicate verifier registered for tool: $toolName")
             }
             verifierMap[key] = verifier

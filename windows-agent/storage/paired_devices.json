@@ -1,0 +1,12 @@
+[
+    {
+        "device_id": "5ccff7d9-4d44-49b2-bab9-642157e24f9e",
+        "device_name": "Redmi K20 Pro",
+        "token": "79807dd0cf82d5ea8da320147e62df0f"
+    },
+    {
+        "device_id": "test-client",
+        "device_name": "Test Device",
+        "token": "601ee6b8805d40ac2bdbddb139c77b57"
+    }
+]

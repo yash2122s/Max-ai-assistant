@@ -3,6 +3,7 @@ package com.example.receiver
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.util.Log
 import com.example.data.local.AppDatabase
 import com.example.data.repository.JarvisRepository
@@ -18,9 +19,18 @@ class BootReceiver : BroadcastReceiver() {
             
             // Auto-start Jarvis persistent listening service removed
             try {
-                // Foreground service removed
+                val settings = com.example.data.preferences.SettingsManager(context)
+                if (settings.isTelegramBotEnabled) {
+                    val serviceIntent = Intent(context, com.example.service.TelegramBotService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
+                    Log.d("BootReceiver", "Started TelegramBotService on boot completed.")
+                }
             } catch (e: Exception) {
-                Log.e("BootReceiver", "Failed to auto-start on boot", e)
+                Log.e("BootReceiver", "Failed to auto-start TelegramBotService on boot", e)
             }
             
             CoroutineScope(Dispatchers.IO).launch {
