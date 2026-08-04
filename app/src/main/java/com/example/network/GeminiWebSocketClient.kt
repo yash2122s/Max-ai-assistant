@@ -338,15 +338,25 @@ class GeminiWebSocketClient(
 
     fun sendToolResponse(id: String, name: String, responseJsonStr: String) {
         val safeId = if (id.isEmpty()) "call_0" else id
-        val outputMsg = try {
+        val responseObj = try {
             val rawObj = org.json.JSONObject(responseJsonStr)
-            rawObj.optString("message", rawObj.optString("output", "Action executed successfully"))
+            val dataObj = rawObj.optJSONObject("data")
+            if (dataObj != null && dataObj.length() > 0) {
+                rawObj
+            } else if (rawObj.has("output")) {
+                rawObj.get("output")
+            } else if (rawObj.has("message")) {
+                rawObj.get("message")
+            } else {
+                rawObj
+            }
         } catch (e: Exception) {
             responseJsonStr
         }
-        val safeOutputJson = Gson().toJson(outputMsg)
-        val responseJson = """{"toolResponse":{"functionResponses":[{"id":"$safeId","response":{"output":$safeOutputJson}}]}}"""
-        Log.d("GeminiWebSocket", "Sending clean tool response: $responseJson")
+
+        val safeOutputJson = if (responseObj is String) Gson().toJson(responseObj) else responseObj.toString()
+        val responseJson = """{"toolResponse":{"functionResponses":[{"id":"$safeId","name":"$name","response":{"output":$safeOutputJson}}]}}"""
+        Log.d("GeminiWebSocket", "Sending clean tool response for $name: $responseJson")
         webSocket?.send(responseJson)
     }
 }
