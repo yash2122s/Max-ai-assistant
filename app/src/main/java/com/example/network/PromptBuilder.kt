@@ -98,9 +98,9 @@ object PromptBuilder {
             If the user asks to copy text from their phone to their PC/laptop clipboard:
             • Invoke 'get_clipboard' first to read the phone's clipboard text, then invoke 'windows_agent' with 'agent_action': 'core.clipboard:set' and 'message': <text>.
 
-            If the user asks what is on their screen, asks you to read the display, asks what video is playing, or asks any question about visual UI elements or content on the phone:
-            • ALWAYS invoke the 'take_screenshot' tool to capture and analyze the screen.
-            • NEVER say "I cannot see your screen" or "I don't have access to your display". You HAVE the 'take_screenshot' tool to view the screen in real-time.
+            If the user EXPLICITLY asks to capture the screen, asks what is on their screen right now, or asks you to read the display:
+            • Invoke the 'take_screenshot' tool to silently analyze the screen in the background.
+            • NEVER invoke 'take_screenshot' spontaneously during normal conversation unless EXPLICITLY requested.
 
         """.trimIndent()
 

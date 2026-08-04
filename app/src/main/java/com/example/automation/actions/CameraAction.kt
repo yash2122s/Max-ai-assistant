@@ -25,15 +25,9 @@ class CameraAction : BaseAction<JSONObject>() {
                 "TAKE_SCREENSHOT" -> {
                     val jpeg = com.example.voice.vision.ScreenCaptureProvider.captureCompressedJpeg()
                     if (jpeg != null) {
-                        log("Captured silent in-memory screenshot (${jpeg.size} bytes JPEG)")
+                        log("Captured silent background screenshot (${jpeg.size} bytes JPEG)")
                     } else {
-                        val service = ServiceRegistry.get<JarvisAccessibilityService>(ServiceType.ACCESSIBILITY)
-                        if (service != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                            val success = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT)
-                            log("Triggered accessibility screenshot: success=$success")
-                        } else {
-                            log("Accessibility service not connected or API level low.")
-                        }
+                        log("Silent background screenshot unavailable (Shizuku/Accessibility disabled).")
                     }
                 }
                 else -> {
