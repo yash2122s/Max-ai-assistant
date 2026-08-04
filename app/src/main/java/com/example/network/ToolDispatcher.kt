@@ -63,10 +63,12 @@ object ToolDispatcher {
         "system_action",
         "save_memory",
         "set_reminder",
-        "create_reminder"
+        "create_reminder",
+        "unlock_device"
     )
 
     private val functionToActionMap = mapOf(
+        "unlock_device" to "UNLOCK_DEVICE",
         "get_battery_status" to "GET_BATTERY_STATUS",
         "get_dnd_status" to "GET_DND",
         "set_dnd" to "SET_DND",

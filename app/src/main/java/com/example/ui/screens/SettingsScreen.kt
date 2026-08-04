@@ -93,6 +93,10 @@ fun SettingsScreen(
     var pairStatus by remember { mutableStateOf("") }
     val coroutineScope = rememberCoroutineScope()
     val settingsManager = remember { com.example.data.preferences.SettingsManager(context) }
+    val securitySettings = remember { com.example.security.SecuritySettings(context) }
+    var autoUnlockEnabled by remember { mutableStateOf(securitySettings.autoUnlockEnabled) }
+    var devicePin by remember { mutableStateOf(securitySettings.getDecryptedPin()) }
+    var voiceCodeWord by remember { mutableStateOf(securitySettings.voiceUnlockCodeWord) }
     var isTelegramEnabled by remember { mutableStateOf(settingsManager.isTelegramBotEnabled) }
     var telegramBotToken by remember { mutableStateOf(settingsManager.telegramBotToken) }
     var telegramChatId by remember { mutableStateOf(settingsManager.telegramChatId) }
@@ -467,7 +471,58 @@ fun SettingsScreen(
             )
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+            // Security & Phone Unlock Card
+            SettingsSectionCard(title = "Security & Phone Unlock", icon = "🔓") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Enable Auto-Unlock", color = TextLight, fontWeight = FontWeight.SemiBold)
+                            Text("Allows MAX to wake and unlock phone for tasks & voice commands", color = TextLight.copy(alpha = 0.7f), fontSize = 12.sp)
+                        }
+                        Switch(
+                            checked = autoUnlockEnabled,
+                            onCheckedChange = { autoUnlockEnabled = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = NeonBlue, checkedTrackColor = SurfaceDark)
+                        )
+                    }
+
+                    if (autoUnlockEnabled) {
+                        OutlinedTextField(
+                            value = devicePin,
+                            onValueChange = { devicePin = it },
+                            label = { Text("Stored Device PIN Code", color = TextLight) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = NeonBlue,
+                                unfocusedBorderColor = BorderDark,
+                                focusedTextColor = TextLight,
+                                unfocusedTextColor = TextLight
+                            )
+                        )
+
+                        OutlinedTextField(
+                            value = voiceCodeWord,
+                            onValueChange = { voiceCodeWord = it },
+                            label = { Text("Voice Unlock Codeword", color = TextLight) },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = NeonBlue,
+                                unfocusedBorderColor = BorderDark,
+                                focusedTextColor = TextLight,
+                                unfocusedTextColor = TextLight
+                            )
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
             
             Button(
                 onClick = {
@@ -475,6 +530,10 @@ fun SettingsScreen(
                     onSaveVoice(selectedVoice)
                     onSaveLanguage(selectedLanguage)
                     onSaveModel(selectedModel)
+
+                    securitySettings.autoUnlockEnabled = autoUnlockEnabled
+                    securitySettings.encryptedPin = devicePin.trim()
+                    securitySettings.voiceUnlockCodeWord = voiceCodeWord.trim()
 
                     if (isTelegramEnabled && (telegramBotToken.isBlank() || telegramChatId.isBlank())) {
                         android.widget.Toast.makeText(
