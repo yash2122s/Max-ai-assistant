@@ -7,9 +7,9 @@ export default {
                 <div class="card-header">
                     <span class="card-title">System Log Viewer</span>
                 </div>
-                <p>Monitor live log traces from `max-agent.log`.</p>
+                <p>Monitor live log traces from <code>max-agent.log</code>.</p>
                 <div style="background-color: var(--sidebar-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 16px; margin-top: 16px; font-family: monospace; font-size: 12px; color: var(--text-secondary); max-height: 300px; overflow-y: auto;">
-                    <div>[INFO] Initialized server. Current pairing code: 834250</div>
+                    <div>[INFO] Initialized server. Current pairing code active.</div>
                     <div>[INFO] WebSocket server listening on ws://localhost:9000</div>
                     <div>[INFO] HTTP server listening on http://localhost:9001</div>
                 </div>
@@ -25,4 +25,4 @@ export default {
         // Teardown behavior
     }
 };
-export const view = { init: (c)=>container.innerHTML="" };
+

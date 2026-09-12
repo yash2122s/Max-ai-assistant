@@ -13,21 +13,30 @@ class SystemAction : BaseAction<JSONObject>() {
         // 1. Runtime Enum Validation
         val supportedActions = setOf(
             "home", "back", "recent", "recents", "notifications",
-            "quick_settings", "quick settings", "screenshot", "take_screenshot", "take screenshot"
+            "quick_settings", "quick settings", "screenshot", "take_screenshot", "take screenshot",
+            "close_app", "close app", "lock_screen", "lock"
         )
         if (actionName !in supportedActions) {
             Log.e("SystemAction", "[SystemAction] Requested: $rawAction | Source: ActionExecutor | Result: Failure (Unsupported system action)")
             throw IllegalArgumentException("Unsupported system action: '$rawAction'")
         }
 
-        val service = ServiceRegistry.get<com.example.service.JarvisAccessibilityService>(com.example.core.registry.ServiceType.ACCESSIBILITY)
+        val service = com.example.service.JarvisAccessibilityService.instance
+            ?: ServiceRegistry.get<com.example.service.JarvisAccessibilityService>(com.example.core.registry.ServiceType.ACCESSIBILITY)
         if (service != null) {
             val gestureId = when (actionName) {
                 "back" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK
-                "home" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME
+                "home", "close_app", "close app" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME
                 "recent", "recents" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_RECENTS
                 "notifications" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS
                 "quick_settings", "quick settings" -> android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_QUICK_SETTINGS
+                "lock_screen", "lock" -> {
+                    if (android.os.Build.VERSION.SDK_INT >= 28) {
+                        android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_LOCK_SCREEN
+                    } else {
+                        android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME
+                    }
+                }
                 "screenshot", "take_screenshot", "take screenshot" -> {
                     if (android.os.Build.VERSION.SDK_INT >= 28) {
                         android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT

@@ -1,17 +1,21 @@
 package com.example.voice.session
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.example.voice.assistant.AssistantEngine
+import com.example.voice.assistant.AssistantLifecycleManager
 import com.example.voice.assistant.SessionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,16 +37,16 @@ class AssistantEngineService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d("AssistantEngineService", "Creating AssistantEngineService...")
-        engine = AssistantEngine(applicationContext)
+        engine = AssistantLifecycleManager.getOrCreateEngine(applicationContext)
 
         // Observe state transitions to promote/demote foreground status
         scope.launch {
             engine.stateMachine.currentState.collect { state ->
                 when (state) {
-                    SessionState.LISTENING, SessionState.STREAMING_AUDIO, SessionState.TOOL_EXECUTION -> {
+                    SessionState.CONNECTED, SessionState.LISTENING, SessionState.STREAMING_AUDIO, SessionState.TOOL_EXECUTION -> {
                         promoteToForeground("MAX Assistant is active")
                     }
-                    SessionState.IDLE, SessionState.CONNECTED, SessionState.ERROR -> {
+                    SessionState.IDLE, SessionState.ERROR -> {
                         demoteFromForeground()
                     }
                     else -> {}
@@ -63,8 +67,9 @@ class AssistantEngineService : Service() {
 
     private fun promoteToForeground(statusMessage: String) {
         if (isForeground) return
-        isForeground = true
-        Log.d("AssistantEngineService", "Promoting service to foreground: $statusMessage")
+        val hasMicPermission = ContextCompat.checkSelfPermission(
+            this, Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
 
         createNotificationChannel()
 
@@ -75,10 +80,16 @@ class AssistantEngineService : Service() {
             .setOngoing(true)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && hasMicPermission) {
+                startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            isForeground = true
+            Log.d("AssistantEngineService", "Promoted service to foreground: $statusMessage (hasMicPerm=$hasMicPermission)")
+        } catch (e: Exception) {
+            Log.w("AssistantEngineService", "Could not promote to foreground (FGS permission check): ${e.message}")
         }
     }
 

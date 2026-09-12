@@ -69,10 +69,7 @@ fun AssistantHud(
                 }
             }
 
-            TranscriptBubble(
-                userTranscript = uiState.userTranscription,
-                geminiResponse = uiState.geminiResponse
-            )
+
 
             if (uiState.sessionState == SessionState.TOOL_EXECUTION) {
                 Card(
@@ -89,6 +86,9 @@ fun AssistantHud(
                     )
                 }
             }
+
+            // Real-Time Agent Activity / Execution Trace Card
+            com.example.ui.components.AgentActivityCard(onDismiss = onDismiss)
 
             BottomPill(
                 isRecording = uiState.isRecording,

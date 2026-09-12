@@ -34,10 +34,21 @@ class WindowsAgentTool(BaseTool):
             "core.app:launch": self._handle_app_launch,
             "core.app:is_running": self._handle_app_is_running,
             "core.app:close": self._handle_window_close,
+            "core.uia:click": self._handle_uia_click,
+            "core.uia:inspect": self._handle_uia_inspect,
+            "core.uia:find": self._handle_uia_find,
+            "task.create": self._handle_task_create,
+            "task.run": self._handle_task_run,
+            "task.status": self._handle_task_status,
+            "task.cancel": self._handle_task_cancel,
+            "task.list": self._handle_task_list,
+            "task.orchestrate": self._handle_task_orchestrate,
+            "task.execute_goal": self._handle_task_orchestrate,
         }
 
     @property
     def name(self) -> str:
+
         return "windows_agent"
 
     def _dispatch_fallback(self, action: str, arguments: dict):
@@ -284,15 +295,16 @@ class WindowsAgentTool(BaseTool):
 
     async def _handle_terminal_run(self, arguments: dict, request_id: str, send_progress) -> tuple:
         command = arguments.get("command", "")
-        confirmed = arguments.get("confirmed", False)
         if not command:
             return "failed", None, {"code": "INVALID_ARGUMENT", "message": "Missing 'command' parameter."}
 
-        res = await terminal_helper.run_command(command, request_id, send_progress, confirmed=confirmed)
+        # Enforce server-side security checks: do not allow client to bypass confirmation
+        res = await terminal_helper.run_command(command, request_id, send_progress, confirmed=False)
         status = res.get("status", "success")
         output = res.get("output", res.get("message", ""))
         error = res.get("error", None)
         return status, output, error
+
 
     async def _handle_terminal_kill(self, arguments: dict, request_id: str, send_progress) -> tuple:
         pid_raw = arguments.get("pid", None)
@@ -328,3 +340,133 @@ class WindowsAgentTool(BaseTool):
 
         res = app_helper.is_running(target)
         return "success", res, None
+
+    async def _handle_uia_click(self, arguments: dict, request_id: str, send_progress) -> tuple:
+        target = arguments.get("target") or arguments.get("name") or arguments.get("text") or ""
+        window = arguments.get("window") or arguments.get("window_title")
+        if not target:
+            return "failed", None, {"code": "INVALID_ARGUMENT", "message": "Missing 'target' or 'name' parameter for UI click."}
+
+        from core.ui_automation import uia_engine
+        res = uia_engine.click_element_by_selector(target, window_title=window)
+        if res.get("status") in ("success", "fallback"):
+            return "success", res, None
+        return "failed", None, res.get("error", {"code": "UIA_ERROR", "message": "UI Automation click failed."})
+
+    async def _handle_uia_inspect(self, arguments: dict, request_id: str, send_progress) -> tuple:
+        max_elem = int(arguments.get("max_elements", 40))
+        from core.ui_automation import uia_engine
+        tree = uia_engine.inspect_active_ui_tree(max_elements=max_elem)
+        return "success", {"controls": tree, "total_inspected": len(tree)}, None
+
+    async def _handle_uia_find(self, arguments: dict, request_id: str, send_progress) -> tuple:
+        query = arguments.get("query") or arguments.get("name") or ""
+        if not query:
+            return "failed", None, {"code": "INVALID_ARGUMENT", "message": "Missing 'query' or 'name' parameter."}
+
+        from core.ui_automation import uia_engine
+        matches = uia_engine.find_elements_by_name(None, query, partial=True)
+        clean_matches = [
+            {
+                "name": m.get("name"),
+                "control_type": m.get("control_type"),
+                "automation_id": m.get("automation_id"),
+                "is_enabled": m.get("is_enabled"),
+                "bounding_box": m.get("bounding_box")
+            }
+            for m in matches
+        ]
+        return "success", {"matches": clean_matches, "count": len(clean_matches)}, None
+
+    async def _handle_task_create(self, arguments: dict, request_id: str, send_progress) -> tuple:
+        goal = arguments.get("goal", "")
+        steps_raw = arguments.get("steps", [])
+        if not goal:
+            return "failed", None, {"code": "INVALID_ARGUMENT", "message": "Missing 'goal' parameter."}
+        if not steps_raw or not isinstance(steps_raw, list):
+            return "failed", None, {"code": "INVALID_ARGUMENT", "message": "Missing or invalid 'steps' array."}
+
+        from engine.models import Step, VerificationPolicy
+        from engine.task_engine import task_engine
+
+        steps = []
+        for s in steps_raw:
+            v_dict = s.get("verification")
+            v_policy = VerificationPolicy.from_dict(v_dict) if v_dict else VerificationPolicy()
+            step = Step(
+                step_id=s.get("step_id", f"step_{len(steps)+1}"),
+                task_id="",
+                sequence=len(steps) + 1,
+                action=s.get("action", ""),
+                arguments=s.get("arguments", s.get("args", {})),
+                max_attempts=int(s.get("max_attempts", 3)),
+                timeout_s=float(s.get("timeout_s", 60.0)),
+                retryable=bool(s.get("retryable", True)),
+                verification=v_policy
+            )
+            steps.append(step)
+
+        try:
+            task = task_engine.create_task(goal=goal, steps=steps, context=arguments.get("context", {}))
+            return "success", task.to_dict(), None
+        except Exception as e:
+            return "failed", None, {"code": "TASK_ERROR", "message": str(e)}
+
+    async def _handle_task_run(self, arguments: dict, request_id: str, send_progress) -> tuple:
+        task_id = arguments.get("task_id", "")
+        if not task_id:
+            return "failed", None, {"code": "INVALID_ARGUMENT", "message": "Missing 'task_id' parameter."}
+
+        from engine.task_engine import task_engine
+        try:
+            executed_task = await task_engine.execute_task(task_id)
+            return "success", executed_task.to_dict(), None
+        except Exception as e:
+            return "failed", None, {"code": "TASK_EXECUTION_ERROR", "message": str(e)}
+
+    async def _handle_task_status(self, arguments: dict, request_id: str, send_progress) -> tuple:
+        task_id = arguments.get("task_id", "")
+        from engine.store import task_store
+        if task_id:
+            task = task_store.get_task(task_id)
+            if not task:
+                return "failed", None, {"code": "NOT_FOUND", "message": f"Task '{task_id}' not found."}
+            return "success", task.to_dict(), None
+        else:
+            from engine.task_engine import task_engine
+            active = task_engine.get_active_task()
+            return "success", active.to_dict() if active else None, None
+
+    async def _handle_task_cancel(self, arguments: dict, request_id: str, send_progress) -> tuple:
+        task_id = arguments.get("task_id", "")
+        reason = arguments.get("reason", "Cancelled via agent request")
+        if not task_id:
+            return "failed", None, {"code": "INVALID_ARGUMENT", "message": "Missing 'task_id' parameter."}
+
+        from engine.task_engine import task_engine
+        try:
+            task = task_engine.cancel_task(task_id, reason=reason)
+            return "success", task.to_dict(), None
+        except Exception as e:
+            return "failed", None, {"code": "TASK_CANCEL_ERROR", "message": str(e)}
+
+    async def _handle_task_list(self, arguments: dict, request_id: str, send_progress) -> tuple:
+        limit = int(arguments.get("limit", 20))
+        from engine.store import task_store
+        tasks = task_store.list_tasks(limit=limit)
+        return "success", {"tasks": [t.to_dict() for t in tasks], "count": len(tasks)}, None
+
+    async def _handle_task_orchestrate(self, arguments: dict, request_id: str, send_progress) -> tuple:
+        goal = arguments.get("goal", "")
+        if not goal:
+            return "failed", None, {"code": "INVALID_ARGUMENT", "message": "Missing 'goal' parameter."}
+
+        from orchestrator.router import orchestration_router
+        context = arguments.get("context", {})
+        res = await orchestration_router.execute_goal(goal, context=context, source_device="android", async_execution=True)
+        if res.get("status") in ("accepted", "completed"):
+            return "success", res, None
+        return "failed", None, {"code": res.get("error_code", "ORCHESTRATION_FAILED"), "message": res.get("message", "Task orchestration failed.")}
+
+
+

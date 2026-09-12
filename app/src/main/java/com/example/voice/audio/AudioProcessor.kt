@@ -1,14 +1,30 @@
 package com.example.voice.audio
 
-import com.example.voice.assistant.AssistantLogger
 import kotlin.math.sqrt
 
+/**
+ * AudioProcessor performs RMS signal energy calculation for UI wave / neural orb animation.
+ *
+ * VAD POLICY (aligned with OLD golden reference):
+ * - Client-side VAD EOS detection is DISABLED.
+ * - Gemini Live server-side VAD handles all speech start/end detection automatically.
+ * - Using realtimeInput (continuous audio stream) — no commitAudioTurn() needed from client.
+ * - This removes the 400ms+ silence-timer latency that was causing chatbot-like behaviour.
+ *
+ * The onEndOfSpeech / onSilenceTimeout parameters are retained in the constructor
+ * for backward compatibility but are never invoked.
+ */
 class AudioProcessor(
-    private val onSilenceTimeout: () -> Unit
+    var speechThreshold: Float = 0.035f,
+    var silenceThreshold: Float = 0.018f,
+    var silenceDurationMs: Long = 400L,
+    var minSpeechDurationMs: Long = 180L,
+    private val onEndOfSpeech: (() -> Unit)? = null,
+    private val onSilenceTimeout: (() -> Unit)? = null
 ) {
-    private var silenceStartTime: Long = 0L
-    private val SILENCE_THRESHOLD = 0.02f // RMS threshold for voice detection
-    private val SILENCE_TIMEOUT_MS = 30000L // 30 seconds of silence triggers automatic mute/timeout
+    companion object {
+        private const val TAG = "VAD"
+    }
 
     fun processAudio(shorts: ShortArray, size: Int): Float {
         if (size <= 0) return 0f
@@ -17,29 +33,14 @@ class AudioProcessor(
         for (i in 0 until size) {
             sum += shorts[i] * shorts[i]
         }
-        val rms = sqrt(sum / size).toFloat()
-        val normalizedRms = (rms / 32767f).coerceIn(0f, 1f)
-
-        // Voice Activity Detection (VAD) / Silence Timeout checks
-        if (normalizedRms > SILENCE_THRESHOLD) {
-            silenceStartTime = 0L // Reset silence timer when speech is active
-        } else {
-            if (silenceStartTime == 0L) {
-                silenceStartTime = System.currentTimeMillis()
-            } else {
-                val duration = System.currentTimeMillis() - silenceStartTime
-                if (duration >= SILENCE_TIMEOUT_MS) {
-                    silenceStartTime = 0L
-                    AssistantLogger.logInfo("Silence timeout reached (no speech detected for ${SILENCE_TIMEOUT_MS}ms)")
-                    onSilenceTimeout()
-                }
-            }
-        }
-
-        return normalizedRms
+        val rawRms = sqrt(sum / size).toFloat()
+        return (rawRms / 32767f).coerceIn(0f, 1f)
     }
 
     fun reset() {
-        silenceStartTime = 0L
+        // No-op — continuous server-VAD mode; no client state to reset
     }
+
+    fun isSpeechDetected(): Boolean = false
 }
+

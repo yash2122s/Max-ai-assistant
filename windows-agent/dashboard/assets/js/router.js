@@ -1,6 +1,7 @@
 import AppState from "./state.js";
 
 const ROUTES = {
+    chat: () => import("./views/chat.js"),
     dashboard: () => import("./views/dashboard.js"),
     activity: () => import("./views/activity.js"),
     terminal: () => import("./views/terminal.js"),
@@ -13,8 +14,8 @@ const ROUTES = {
 let activeViewModule = null;
 
 export async function navigateTo(routeHash) {
-    const cleanHash = (routeHash || "dashboard").replace(/^#/, "");
-    const loader = ROUTES[cleanHash] || ROUTES["dashboard"];
+    const cleanHash = (routeHash || "chat").replace(/^#/, "");
+    const loader = ROUTES[cleanHash] || ROUTES["chat"];
     
     const contentFrame = document.getElementById("content-frame");
     if (!contentFrame) return;

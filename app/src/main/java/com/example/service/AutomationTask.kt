@@ -19,5 +19,7 @@ data class AutomationTask(
     val steps: List<AutomationStep> = emptyList(),
     var currentStepIndex: Int = 0,
     var startTime: Long = System.currentTimeMillis(),
-    val isScheduled: Boolean = false
+    val isScheduled: Boolean = false,
+    val phone: String? = null,
+    val contactDisplayName: String? = null
 ) : Serializable

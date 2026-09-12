@@ -6,28 +6,23 @@ object ToolRegistry {
     private val actionMap = mutableMapOf<String, Tool>()
     private val toolMap = mutableMapOf<String, Tool>()
     private var frozen = false
+    private val registrationVersion = java.util.concurrent.atomic.AtomicInteger(0)
+
+    /** Monotonic registration counter used to invalidate planner capability caches. */
+    fun getRegistrationVersion(): Int = registrationVersion.get()
 
     fun register(tool: Tool) {
-        val nameKey = tool.name.uppercase()
         if (frozen) {
-            if (toolMap.containsKey(nameKey)) {
-                return
-            }
-            frozen = false
+            return
         }
-        if (toolMap.containsKey(nameKey)) {
-            throw IllegalStateException("Duplicate tool registered for name: ${tool.name}")
-        }
+        val nameKey = tool.name.uppercase()
         toolMap[nameKey] = tool
         tool.supportedActions.forEach { action ->
             val actionKey = action.uppercase()
-            if (actionMap.containsKey(actionKey)) {
-                // If it is the exact same tool object re-registering, allow it
-                if (actionMap[actionKey] === tool) return@forEach
-                throw IllegalStateException("Duplicate action registered: $action (mapped to ${actionMap[actionKey]?.name} and ${tool.name})")
-            }
             actionMap[actionKey] = tool
         }
+        registrationVersion.incrementAndGet()
+        com.example.automation.registry.PlannerToolDiscovery.invalidateCache()
     }
 
     fun freeze() {
@@ -42,7 +37,16 @@ object ToolRegistry {
         Log.d("ToolRegistry", "Startup validations completed.")
     }
 
+    fun resetForTests() {
+        frozen = false
+        toolMap.clear()
+        actionMap.clear()
+        registrationVersion.incrementAndGet()
+        com.example.automation.registry.PlannerToolDiscovery.invalidateCache()
+    }
+
     fun getToolForAction(actionName: String): Tool? = actionMap[actionName.uppercase()]
     fun getToolByName(toolName: String): Tool? = toolMap[toolName.uppercase()]
     fun getAllTools(): Collection<Tool> = toolMap.values
+    fun getAllCapabilities(): List<String> = toolMap.values.flatMap { it.supportedActions }.distinct().sorted()
 }

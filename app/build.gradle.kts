@@ -1,11 +1,13 @@
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
+import java.util.Properties
+import java.io.FileInputStream
+import java.io.File
 
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.kotlin.compose)
   alias(libs.plugins.google.devtools.ksp)
   alias(libs.plugins.roborazzi)
-  alias(libs.plugins.secrets)
   alias(libs.plugins.google.services)
 }
 
@@ -23,13 +25,41 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  val keystorePropsFile = rootProject.file("keystore.properties")
+  val keystoreProps = Properties()
+  if (keystorePropsFile.exists()) {
+    FileInputStream(keystorePropsFile).use { fis ->
+      keystoreProps.load(fis)
+    }
+  }
+
+  val releaseStoreFilePath = System.getenv("RELEASE_STORE_FILE")
+    ?: System.getenv("KEYSTORE_PATH")
+    ?: keystoreProps.getProperty("RELEASE_STORE_FILE")
+    ?: "${rootDir}/max-release-key.jks"
+
+  val releaseStorePassword = System.getenv("RELEASE_STORE_PASSWORD")
+    ?: System.getenv("STORE_PASSWORD")
+    ?: keystoreProps.getProperty("RELEASE_STORE_PASSWORD")
+
+  val releaseKeyAlias = System.getenv("RELEASE_KEY_ALIAS")
+    ?: System.getenv("KEY_ALIAS")
+    ?: keystoreProps.getProperty("RELEASE_KEY_ALIAS")
+    ?: "max-release-key"
+
+  val releaseKeyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+    ?: System.getenv("KEY_PASSWORD")
+    ?: keystoreProps.getProperty("RELEASE_KEY_PASSWORD")
+
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      val releaseKeystore = file(releaseStoreFilePath)
+      if (releaseKeystore.exists()) {
+        storeFile = releaseKeystore
+        storePassword = releaseStorePassword
+        keyAlias = releaseKeyAlias
+        keyPassword = releaseKeyPassword
+      }
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -40,13 +70,16 @@ android {
   }
 
   buildTypes {
+    debug {
+      isDebuggable = true
+    }
     release {
-      isCrunchPngs = false
+      isDebuggable = false
+      isCrunchPngs = true
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.getByName("release")
     }
-
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -60,12 +93,6 @@ android {
   testOptions { unitTests { isIncludeAndroidResources = true } }
 }
 
-// Configure the Secrets Gradle Plugin to use .env and .env.example files
-// to match the convention used in Web projects.
-secrets {
-  propertiesFileName = ".env"
-  defaultPropertiesFileName = ".env.example"
-}
 
 googleServices { missingGoogleServicesStrategy = MissingGoogleServicesStrategy.WARN }
 
@@ -94,6 +121,7 @@ dependencies {
   implementation(libs.androidx.navigation.compose)
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
+  implementation(libs.androidx.security.crypto)
   // implementation(libs.coil.compose)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)

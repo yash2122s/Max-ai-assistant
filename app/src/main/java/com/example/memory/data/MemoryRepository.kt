@@ -1,92 +1,217 @@
 package com.example.memory.data
 
 import android.content.Context
+import android.util.Log
 import com.example.data.local.AppDatabase
 import com.example.memory.config.MemoryConfig
 import com.example.memory.retrieval.MemoryProvider
 import com.example.memory.retrieval.MemoryRetrieval
+import com.example.memory.security.MemoryCryptography
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-
-import java.io.File
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+
+import kotlinx.coroutines.flow.flowOn
+import java.util.concurrent.atomic.AtomicBoolean
 
 sealed class MemoryValidationResult {
     object Success : MemoryValidationResult()
     data class Error(val message: String) : MemoryValidationResult()
 }
 
-class MemoryRepository(private val context: Context) : MemoryProvider {
+class MemoryRepository constructor(private val context: Context) : MemoryProvider {
 
-    private val dao: PermanentMemoryDao = AppDatabase.getDatabase(context).permanentMemoryDao()
-    private val memoriesFile = File(context.applicationContext.filesDir, "memories.md")
-    
-    private val _memoriesMarkdownFlow = MutableStateFlow("")
-    val memoriesMarkdownFlow: StateFlow<String> = _memoriesMarkdownFlow.asStateFlow()
+    companion object {
+        private const val TAG = "MemoryRepository"
+        private val isMigrationCompleted = AtomicBoolean(false)
 
-    init {
-        // Collect DB changes and update memoriesMarkdownFlow dynamically from Room
-        kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
-            dao.getEnabledFlow().collect { enabledList ->
-                val mdStr = com.example.memory.retrieval.MemoryFormatter.formatForPrompt(enabledList)
-                _memoriesMarkdownFlow.value = mdStr
-                saveMemoriesMarkdown(mdStr)
+        @Volatile
+        private var INSTANCE: MemoryRepository? = null
+
+        /**
+         * Returns the singleton MemoryRepository instance.
+         * Always uses applicationContext to prevent activity/service leaks.
+         */
+        fun getInstance(context: Context): MemoryRepository {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: MemoryRepository(context.applicationContext).also {
+                    INSTANCE = it
+                }
             }
         }
     }
 
-    fun getMemoriesMarkdown(): String {
-        val currentFlowValue = _memoriesMarkdownFlow.value
-        if (currentFlowValue.isNotBlank()) return currentFlowValue
+    // Structured lifecycle scope — all background work uses this scope.
+    // SupervisorJob ensures one child failure doesn't cancel siblings.
+    private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-        return try {
-            if (memoriesFile.exists()) memoriesFile.readText() else "# Permanent Memories"
-        } catch (e: Exception) {
-            ""
+    private val dao: PermanentMemoryDao = AppDatabase.getDatabase(context).permanentMemoryDao()
+    private val memoriesFile = File(context.applicationContext.filesDir, "memories.md")
+
+    private val _memoriesMarkdownFlow = MutableStateFlow("")
+    val memoriesMarkdownFlow: StateFlow<String> = _memoriesMarkdownFlow.asStateFlow()
+
+    // Debounced markdown sync job — tracked to prevent orphan coroutines
+    @Volatile
+    private var syncJob: Job? = null
+
+    init {
+        // One-time automatic migration of versioned plaintext memories and normalization
+        repositoryScope.launch {
+            if (isMigrationCompleted.compareAndSet(false, true)) {
+                try {
+                    // Delete legacy plaintext memories.md file cache on startup
+                    if (memoriesFile.exists()) {
+                        memoriesFile.delete()
+                    }
+
+                    val allRaw = dao.getAll()
+                    val batchUpdates = mutableListOf<PermanentMemory>()
+
+                    for (mem in allRaw) {
+                        val isTitleEncrypted = mem.title.startsWith("enc_v1:")
+                        val isContentEncrypted = mem.content.startsWith("enc_v1:")
+                        val isTagsEncrypted = mem.tags.startsWith("enc_v1:")
+                        val needsPrivateReset = mem.isPrivate
+
+                        if (!isTitleEncrypted || !isContentEncrypted || (mem.tags.isNotBlank() && !isTagsEncrypted) || needsPrivateReset) {
+                            val rawTitle = if (isTitleEncrypted) mem.title else mem.title
+                            val rawContent = if (isContentEncrypted) mem.content else mem.content
+                            val rawTags = if (isTagsEncrypted) mem.tags else mem.tags
+
+                            val encryptedTitle = if (!isTitleEncrypted) MemoryCryptography.encrypt(rawTitle) else rawTitle
+                            val encryptedContent = if (!isContentEncrypted) MemoryCryptography.encrypt(rawContent) else rawContent
+                            val encryptedTags = if (rawTags.isNotBlank() && !isTagsEncrypted) MemoryCryptography.encrypt(rawTags) else rawTags
+
+                            val migrated = mem.copy(
+                                title = encryptedTitle,
+                                content = encryptedContent,
+                                tags = encryptedTags,
+                                isPrivate = false
+                            )
+                            batchUpdates.add(migrated)
+                        }
+                    }
+
+                    if (batchUpdates.isNotEmpty()) {
+                        dao.insertAll(batchUpdates)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Memory encryption migration aborted/failed", e)
+                }
+            }
+
+            // Collect DB changes and update memoriesMarkdownFlow dynamically from Room.
+            // This collector runs for the lifetime of the singleton — exactly ONE collector.
+            dao.getTopMemoriesForPromptFlow(30).flowOn(Dispatchers.IO).collect { agentList ->
+                val decryptedList = agentList.map { decryptMemory(it) }
+                val mdStr = com.example.memory.retrieval.MemoryFormatter.formatForPrompt(decryptedList)
+                _memoriesMarkdownFlow.value = mdStr
+            }
+        }
+
+        // Asynchronously index any unindexed memories in RAG
+        repositoryScope.launch {
+            try {
+                val allDecrypted = getAll()
+                com.example.rag.engine.RagEngine.getInstance(context).indexMemories(allDecrypted)
+            } catch (e: Exception) {
+                Log.w(TAG, "RAG initial indexing check: ${e.message}")
+            }
         }
     }
 
-    fun saveMemoriesMarkdown(content: String) {
-        try {
-            memoriesFile.writeText(content)
-            _memoriesMarkdownFlow.value = content
-        } catch (e: Exception) {
-            android.util.Log.e("MemoryRepository", "Error saving memories.md", e)
-        }
+    private fun encryptMemory(memory: PermanentMemory): PermanentMemory {
+        return memory.copy(
+            title = MemoryCryptography.encrypt(memory.title),
+            content = MemoryCryptography.encrypt(memory.content),
+            tags = if (memory.tags.isNotBlank()) MemoryCryptography.encrypt(memory.tags) else memory.tags
+        )
+    }
+
+    private fun decryptMemory(memory: PermanentMemory): PermanentMemory {
+        return memory.copy(
+            title = MemoryCryptography.decrypt(memory.title),
+            content = MemoryCryptography.decrypt(memory.content),
+            tags = if (memory.tags.isNotBlank()) MemoryCryptography.decrypt(memory.tags) else memory.tags
+        )
+    }
+
+    fun getMemoriesMarkdown(): String {
+        return _memoriesMarkdownFlow.value
     }
 
     val allMemories: Flow<List<PermanentMemory>> = dao.getAllFlow()
-    val enabledMemories: Flow<List<PermanentMemory>> = dao.getEnabledFlow()
+        .map { list -> list.map { decryptMemory(it) } }
+        .flowOn(Dispatchers.IO)
 
-    fun searchFlow(query: String): Flow<List<PermanentMemory>> = dao.searchFlow(query)
+    val agentMemories: Flow<List<PermanentMemory>> = dao.getAgentMemoriesFlow()
+        .map { list -> list.map { decryptMemory(it) } }
+        .flowOn(Dispatchers.IO)
+
+    val privateMemories: Flow<List<PermanentMemory>> = dao.getPrivateMemoriesFlow()
+        .map { list -> list.map { decryptMemory(it) } }
+        .flowOn(Dispatchers.IO)
+
+    val enabledMemories: Flow<List<PermanentMemory>> = dao.getEnabledFlow()
+        .map { list -> list.map { decryptMemory(it) } }
+        .flowOn(Dispatchers.IO)
+
+    fun searchFlow(query: String): Flow<List<PermanentMemory>> {
+        val lowerQuery = query.lowercase().trim()
+        return dao.getAllFlow()
+            .map { list ->
+                list.map { decryptMemory(it) }.filter { mem ->
+                    lowerQuery.isBlank() ||
+                    mem.title.lowercase().contains(lowerQuery) ||
+                    mem.content.lowercase().contains(lowerQuery) ||
+                    mem.category.lowercase().contains(lowerQuery) ||
+                    mem.tags.lowercase().contains(lowerQuery)
+                }
+            }
+            .flowOn(Dispatchers.IO)
+    }
 
     override suspend fun getAll(): List<PermanentMemory> = withContext(Dispatchers.IO) {
-        dao.getAll()
+        dao.getAll().map { decryptMemory(it) }
     }
 
     override suspend fun getAllEnabled(): List<PermanentMemory> = withContext(Dispatchers.IO) {
-        dao.getEnabled()
+        dao.getEnabled().map { decryptMemory(it) }
     }
 
     override suspend fun getRelevantMemories(query: String): List<PermanentMemory> = withContext(Dispatchers.IO) {
-        val allEnabled = dao.getEnabled()
+        val allEnabledDecrypted = dao.getEnabled().map { decryptMemory(it) }
         val apiKey = GeminiEmbeddingClient.getApiKey(context)
         val queryEmbedding = if (apiKey.isNotBlank() && query.isNotBlank()) {
-            GeminiEmbeddingClient.generateEmbedding(query, apiKey)
+            GeminiEmbeddingClient.generateEmbeddingSuspend(query, apiKey)
         } else null
 
-        MemoryRetrieval.selectForPrompt(allEnabled, query, queryEmbedding)
+        MemoryRetrieval.selectForPrompt(allEnabledDecrypted, query, queryEmbedding)
     }
 
     suspend fun searchUi(query: String): List<PermanentMemory> = withContext(Dispatchers.IO) {
+        val allEnabledDecrypted = dao.getEnabled().map { decryptMemory(it) }
         if (query.length < MemoryConfig.SEARCH_MIN_QUERY_LENGTH) {
-            dao.getEnabled()
+            allEnabledDecrypted
         } else {
-            dao.searchUi(query)
+            val lower = query.lowercase().trim()
+            allEnabledDecrypted.filter { mem ->
+                mem.title.lowercase().contains(lower) ||
+                mem.content.lowercase().contains(lower) ||
+                mem.category.lowercase().contains(lower) ||
+                mem.tags.lowercase().contains(lower)
+            }
         }
     }
 
@@ -109,30 +234,167 @@ class MemoryRepository(private val context: Context) : MemoryProvider {
         return MemoryValidationResult.Success
     }
 
+    /**
+     * Combined single-pass duplicate + topic check.
+     * Replaces the old isDuplicate() + findExistingTopicMemory() dual full-table scans.
+     * Returns (isDuplicate, existingTopicMemory) in one decryption pass.
+     */
+    private data class DedupResult(
+        val isExactDuplicate: Boolean,
+        val existingTopicMemory: PermanentMemory?
+    )
+
+    private suspend fun checkDuplicateAndTopic(
+        title: String,
+        content: String,
+        category: String,
+        excludeId: String? = null
+    ): DedupResult = withContext(Dispatchers.IO) {
+        val allDecrypted = getAll()
+        val cleanTitle = title.trim().lowercase()
+        val cleanContent = content.trim()
+
+        var isExactDuplicate = false
+        var existingTopicMemory: PermanentMemory? = null
+
+        for (mem in allDecrypted) {
+            if (mem.memoryId == excludeId) continue
+
+            // Check exact duplicate
+            if (!isExactDuplicate &&
+                mem.title.equals(title.trim(), ignoreCase = true) &&
+                mem.content.equals(cleanContent, ignoreCase = true)
+            ) {
+                isExactDuplicate = true
+            }
+
+            // Check existing topic (same logic as original findExistingTopicMemory)
+            if (existingTopicMemory == null) {
+                val memTitle = mem.title.trim().lowercase()
+                if (memTitle == cleanTitle ||
+                    (cleanTitle.length > 5 && memTitle.contains(cleanTitle))
+                ) {
+                    existingTopicMemory = mem
+                }
+            }
+
+            // Early exit if both found
+            if (isExactDuplicate && existingTopicMemory != null) break
+        }
+
+        DedupResult(isExactDuplicate, existingTopicMemory)
+    }
+
     suspend fun isDuplicate(title: String, content: String, excludeId: String? = null): Boolean = withContext(Dispatchers.IO) {
-        val all = dao.getAll()
-        all.any { 
+        val allDecrypted = getAll()
+        allDecrypted.any { 
             it.memoryId != excludeId && 
             it.title.equals(title.trim(), ignoreCase = true) && 
             it.content.equals(content.trim(), ignoreCase = true) 
         }
     }
 
+    suspend fun findExistingTopicMemory(title: String, excludeId: String? = null): PermanentMemory? = withContext(Dispatchers.IO) {
+        val allDecrypted = getAll()
+        val cleanTitle = title.trim().lowercase()
+        allDecrypted.firstOrNull { 
+            it.memoryId != excludeId && 
+            (it.title.trim().lowercase() == cleanTitle ||
+             (cleanTitle.length > 5 && it.title.trim().lowercase().contains(cleanTitle)))
+        }
+    }
+
+    /**
+     * Saves a memory to Room DB and returns immediately.
+     * Embedding generation, RAG indexing, and markdown sync happen asynchronously in the background.
+     * The memory is committed to Room BEFORE any network calls.
+     *
+     * Order:
+     * VALIDATE → DEDUP (single pass) → WRITE ROOM → RETURN SUCCESS → ASYNC EMBEDDING → UPDATE → MARKDOWN SYNC
+     */
     suspend fun addMemory(memory: PermanentMemory): MemoryValidationResult = withContext(Dispatchers.IO) {
         val validation = validate(memory.title, memory.content, memory.category)
         if (validation is MemoryValidationResult.Error) return@withContext validation
 
-        if (isDuplicate(memory.title, memory.content)) {
-            return@withContext MemoryValidationResult.Error("A memory with this title and content already exists")
+        // Sensitive data filter
+        val securityCheck = com.example.memory.security.SensitiveDataFilter.isSafeToStore(memory.title, memory.content)
+        if (!securityCheck.isSafe) {
+            return@withContext MemoryValidationResult.Error(securityCheck.reason ?: "Sensitive data cannot be stored in permanent memory")
         }
 
-        val apiKey = GeminiEmbeddingClient.getApiKey(context)
-        val embedding = if (memory.embedding == null && apiKey.isNotBlank()) {
-            GeminiEmbeddingClient.generateEmbedding("${memory.title}: ${memory.content}", apiKey)
-        } else memory.embedding
+        // Single-pass dedup + topic check (one getAll/decrypt instead of two)
+        val dedupResult = checkDuplicateAndTopic(memory.title, memory.content, memory.category)
 
-        val memoryWithEmbedding = memory.copy(embedding = embedding)
-        dao.insert(memoryWithEmbedding)
+        // Exact duplicate — silently succeed
+        if (dedupResult.isExactDuplicate) {
+            return@withContext MemoryValidationResult.Success
+        }
+
+        // Contradiction / Superseding check: if memory with same specific topic exists, update it
+        val existingTopicMem = dedupResult.existingTopicMemory
+        if (existingTopicMem != null && existingTopicMem.category.equals(memory.category, ignoreCase = true)) {
+            val updated = existingTopicMem.copy(
+                content = memory.content,
+                updatedAt = System.currentTimeMillis(),
+                source = memory.source,
+                tags = if (memory.tags.isNotBlank()) memory.tags else existingTopicMem.tags
+            )
+            return@withContext updateMemory(updated)
+        }
+
+        // Commit to Room DB immediately WITHOUT waiting for embedding
+        val contentHash = memory.contentHash ?: PermanentMemory.computeContentHash(memory.title, memory.content, memory.category, memory.tags)
+        val memoryToSave = memory.copy(embedding = null, contentHash = contentHash)
+        val encryptedMem = encryptMemory(memoryToSave)
+        dao.insert(encryptedMem)
+        Log.d(TAG, "Memory committed to Room DB: '${memory.title}' (embedding deferred)")
+
+        // ASYNC: Generate embedding + update + RAG index + markdown sync
+        // Uses repositoryScope (SupervisorJob) — NOT a throwaway CoroutineScope
+        repositoryScope.launch {
+            try {
+                val apiKey = GeminiEmbeddingClient.getApiKey(context)
+                if (apiKey.isNotBlank()) {
+                    val embedding = GeminiEmbeddingClient.generateEmbeddingSuspend(
+                        "${memory.title}: ${memory.content}", apiKey
+                    )
+                    if (embedding != null) {
+                        val updatedWithEmbedding = memoryToSave.copy(embedding = embedding)
+                        dao.update(encryptMemory(updatedWithEmbedding))
+                        Log.d(TAG, "Embedding updated for memory: '${memory.title}'")
+
+                        // Index in RAG
+                        try {
+                            com.example.rag.engine.RagEngine.getInstance(context).indexMemory(updatedWithEmbedding)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "RAG indexing non-fatal warning: ${e.message}")
+                        }
+                    } else {
+                        Log.w(TAG, "Embedding generation returned null for: '${memory.title}'")
+                        // Index without embedding
+                        try {
+                            com.example.rag.engine.RagEngine.getInstance(context).indexMemory(memoryToSave)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "RAG indexing non-fatal warning: ${e.message}")
+                        }
+                    }
+                } else {
+                    // No API key — index without embedding
+                    try {
+                        com.example.rag.engine.RagEngine.getInstance(context).indexMemory(memoryToSave)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "RAG indexing non-fatal warning: ${e.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Background embedding/indexing failed for '${memory.title}': ${e.message}")
+                // Memory is already saved in Room — this failure is non-fatal
+            }
+        }
+
+        // Trigger debounced markdown sync (async, non-blocking)
+        triggerDebouncedMarkdownSync()
+
         MemoryValidationResult.Success
     }
 
@@ -140,73 +402,155 @@ class MemoryRepository(private val context: Context) : MemoryProvider {
         val validation = validate(memory.title, memory.content, memory.category)
         if (validation is MemoryValidationResult.Error) return@withContext validation
 
-        if (isDuplicate(memory.title, memory.content, memory.memoryId)) {
-            return@withContext MemoryValidationResult.Error("A memory with this title and content already exists")
+        val securityCheck = com.example.memory.security.SensitiveDataFilter.isSafeToStore(memory.title, memory.content)
+        if (!securityCheck.isSafe) {
+            return@withContext MemoryValidationResult.Error(securityCheck.reason ?: "Sensitive data cannot be stored in permanent memory")
         }
 
-        val apiKey = GeminiEmbeddingClient.getApiKey(context)
-        val embedding = if (apiKey.isNotBlank()) {
-            GeminiEmbeddingClient.generateEmbedding("${memory.title}: ${memory.content}", apiKey)
-        } else memory.embedding
+        // Commit to Room DB immediately without waiting for embedding
+        val contentHash = PermanentMemory.computeContentHash(memory.title, memory.content, memory.category, memory.tags)
+        val updatedMemoryDecrypted = memory.copy(updatedAt = System.currentTimeMillis(), contentHash = contentHash)
+        val encryptedMem = encryptMemory(updatedMemoryDecrypted)
+        dao.update(encryptedMem)
 
-        dao.update(memory.copy(updatedAt = System.currentTimeMillis(), embedding = embedding))
+        // ASYNC: Generate embedding + update + RAG index
+        repositoryScope.launch {
+            try {
+                val apiKey = GeminiEmbeddingClient.getApiKey(context)
+                if (apiKey.isNotBlank()) {
+                    val embedding = GeminiEmbeddingClient.generateEmbeddingSuspend(
+                        "${memory.title}: ${memory.content}", apiKey
+                    )
+                    if (embedding != null) {
+                        val withEmbedding = updatedMemoryDecrypted.copy(embedding = embedding)
+                        dao.update(encryptMemory(withEmbedding))
+                    }
+                    // RAG update
+                    try {
+                        com.example.rag.engine.RagEngine.getInstance(context)
+                            .indexMemory(updatedMemoryDecrypted.copy(embedding = embedding))
+                    } catch (e: Exception) {
+                        Log.w(TAG, "RAG update non-fatal warning: ${e.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Background embedding update failed: ${e.message}")
+            }
+        }
+
+        triggerDebouncedMarkdownSync()
         MemoryValidationResult.Success
+    }
+
+    /**
+     * Debounced markdown sync using the repository-level scope.
+     * Cancels any previous pending sync job to prevent overlapping file writes.
+     */
+    private fun triggerDebouncedMarkdownSync() {
+        syncJob?.cancel()
+        syncJob = repositoryScope.launch {
+            delay(600)
+            try {
+                val syncService = com.example.memory.sync.MemorySyncService.getInstance(context)
+                val state = syncService.getSyncState()
+                if (state?.syncStatus != "EXTERNAL_CHANGE") {
+                    syncService.exportToMarkdown()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Debounced markdown sync failed: ${e.message}")
+            }
+        }
+    }
+
+    suspend fun forgetMemory(query: String): Int = withContext(Dispatchers.IO) {
+        val cleanQuery = query.trim().lowercase()
+        if (cleanQuery.isBlank()) return@withContext 0
+
+        val allDecrypted = getAll()
+        val matching = allDecrypted.filter { mem ->
+            mem.title.lowercase().contains(cleanQuery) ||
+            mem.content.lowercase().contains(cleanQuery) ||
+            mem.tags.lowercase().contains(cleanQuery) ||
+            cleanQuery.contains(mem.title.lowercase()) ||
+            cleanQuery.contains(mem.content.lowercase())
+        }
+
+        matching.forEach { mem ->
+            dao.deleteById(mem.memoryId)
+            repositoryScope.launch {
+                try {
+                    com.example.rag.engine.RagEngine.getInstance(context).deleteMemory(mem.memoryId)
+                } catch (e: Exception) {}
+            }
+        }
+        if (matching.isNotEmpty()) {
+            triggerDebouncedMarkdownSync()
+        }
+        matching.size
     }
 
     suspend fun backfillMissingEmbeddings() = withContext(Dispatchers.IO) {
         val apiKey = GeminiEmbeddingClient.getApiKey(context)
         if (apiKey.isBlank()) return@withContext
 
-        val all = dao.getAll()
-        val missing = all.filter { it.embedding == null }
+        val allDecrypted = getAll()
+        val missing = allDecrypted.filter { it.embedding == null }
         if (missing.isEmpty()) return@withContext
 
-        android.util.Log.d("MemoryRepository", "Backfilling ${missing.size} missing embeddings in rate-limited batches...")
+        Log.d(TAG, "Backfilling ${missing.size} missing embeddings in rate-limited batches...")
         val batchSize = 10
         missing.chunked(batchSize).forEach { batch ->
             for (mem in batch) {
-                val vector = GeminiEmbeddingClient.generateEmbedding("${mem.title}: ${mem.content}", apiKey)
+                val vector = GeminiEmbeddingClient.generateEmbeddingSuspend("${mem.title}: ${mem.content}", apiKey)
                 if (vector != null) {
-                    dao.update(mem.copy(embedding = vector))
+                    val updated = mem.copy(embedding = vector)
+                    dao.update(encryptMemory(updated))
                 }
             }
-            kotlinx.coroutines.delay(500) // 500ms delay between batches to avoid rate limits
+            kotlinx.coroutines.delay(1000) // Delay to prevent API rate limiting
         }
-    }
-
-    suspend fun deleteMemory(memoryId: String) = withContext(Dispatchers.IO) {
-        dao.deleteById(memoryId)
     }
 
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
         dao.deleteAll()
+        _memoriesMarkdownFlow.value = ""
+        triggerDebouncedMarkdownSync()
+        repositoryScope.launch {
+            try {
+                com.example.rag.engine.RagEngine.getInstance(context).clearIndex()
+            } catch (e: Exception) {}
+        }
+    }
+
+    suspend fun deleteById(memoryId: String) = withContext(Dispatchers.IO) {
+        dao.deleteById(memoryId)
+        triggerDebouncedMarkdownSync()
+        repositoryScope.launch {
+            try {
+                com.example.rag.engine.RagEngine.getInstance(context).deleteMemory(memoryId)
+            } catch (e: Exception) {}
+        }
     }
 
     suspend fun toggleEnabled(memoryId: String, enabled: Boolean) = withContext(Dispatchers.IO) {
         dao.toggleEnabled(memoryId, enabled)
+        triggerDebouncedMarkdownSync()
     }
 
     suspend fun togglePinned(memoryId: String, pinned: Boolean) = withContext(Dispatchers.IO) {
-        val memory = dao.getById(memoryId) ?: return@withContext
-        if (pinned) {
-            val pinnedCount = dao.getPinnedCount()
-            if (pinnedCount >= MemoryConfig.MAX_PINNED_SLOTS) {
-                return@withContext
-            }
-        }
         dao.togglePinned(memoryId, pinned)
+        triggerDebouncedMarkdownSync()
     }
 
-    suspend fun recordUsage(memoryId: String) = withContext(Dispatchers.IO) {
-        dao.incrementUsage(memoryId)
-        dao.updateLastUsed(memoryId, System.currentTimeMillis())
+    suspend fun deleteBySpace(isPrivate: Boolean) = withContext(Dispatchers.IO) {
+        dao.deleteBySpace(if (isPrivate) 1 else 0)
+        triggerDebouncedMarkdownSync()
     }
 
-    suspend fun getById(memoryId: String): PermanentMemory? = withContext(Dispatchers.IO) {
-        dao.getById(memoryId)
-    }
-
-    suspend fun getCount(): Int = withContext(Dispatchers.IO) {
-        dao.getCount()
+    suspend fun replaceAllForSpace(newMemories: List<PermanentMemory>, isPrivate: Boolean) = withContext(Dispatchers.IO) {
+        dao.deleteBySpace(if (isPrivate) 1 else 0)
+        for (mem in newMemories) {
+            addMemory(mem)
+        }
     }
 }

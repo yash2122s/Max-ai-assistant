@@ -47,12 +47,18 @@ data class ToolCall(
 )
 
 data class ServerContent(
-    val modelTurn: ModelTurn?,
+    val modelTurn: ModelTurn? = null,
     val turnComplete: Boolean? = null,
-    val inputTranscription: InputTranscription? = null
+    val inputTranscription: InputTranscription? = null,
+    val outputTranscription: OutputTranscription? = null,
+    val interrupted: Boolean? = null
 )
 
 data class InputTranscription(
+    val text: String? = null
+)
+
+data class OutputTranscription(
     val text: String? = null
 )
 
@@ -62,7 +68,8 @@ data class ModelTurn(
 
 data class ResponsePart(
     val text: String? = null,
-    val inlineData: InlineData? = null
+    val inlineData: InlineData? = null,
+    val thought: Boolean? = null
 )
 
 data class InlineData(
@@ -72,6 +79,6 @@ data class InlineData(
 
 data class FunctionCall(
     val name: String,
-    val args: com.google.gson.JsonObject,
+    val args: com.google.gson.JsonObject? = null,
     val id: String? = null
 )

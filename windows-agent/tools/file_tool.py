@@ -1,5 +1,6 @@
 import os
 import logging
+from core.security import security_guard
 
 logger = logging.getLogger("MAXWindowsAgent.File")
 
@@ -9,27 +10,11 @@ class FileHelper:
 
     def is_path_safe(self, path: str) -> bool:
         """
-        Validates that path resides inside the User Profile directory to prevent traversal.
+        Validates that path resides inside the authorized sandbox to prevent traversal.
         Also permits launching system executables inside standard Program Files / System32 paths.
         """
-        abs_path = os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
-        if abs_path.lower().startswith(self.user_profile.lower()):
-            return True
-            
-        # Allow launching system applications (executables only) in default system paths
-        if abs_path.lower().endswith(".exe"):
-            if os.path.basename(abs_path).lower() in ("cmd.exe", "powershell.exe"):
-                return False
-            allowed_system_roots = [
-                os.environ.get("ProgramFiles", "C:\\Program Files").lower(),
-                os.environ.get("ProgramFiles(x86)", "C:\\Program Files (x86)").lower(),
-                os.path.join(os.environ.get("SystemRoot", "C:\\Windows"), "System32").lower(),
-                os.environ.get("SystemRoot", "C:\\Windows").lower()
-            ]
-            for root in allowed_system_roots:
-                if abs_path.lower().startswith(root):
-                    return True
-        return False
+        return security_guard.is_safe_path(path, allow_system_executables=True)
+
 
 
 

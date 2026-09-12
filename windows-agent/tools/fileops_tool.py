@@ -4,6 +4,7 @@ import logging
 import subprocess
 import time
 from .base_tool import BaseTool
+from core.security import security_guard
 
 logger = logging.getLogger("MAXWindowsAgent.FileOps")
 
@@ -13,12 +14,11 @@ class FileOpsHelper:
         self.user_profile = os.path.abspath(os.path.expanduser("~"))
 
     def is_path_safe(self, path: str) -> bool:
-        abs_path = os.path.abspath(os.path.expandvars(os.path.expanduser(path)))
-        return abs_path.lower().startswith(self.user_profile.lower())
+        return security_guard.is_safe_path(path)
 
     def _ensure_safe(self, path: str):
-        if not self.is_path_safe(path):
-            raise PermissionError(f"Access denied: {path} is outside user profile sandbox")
+        security_guard.ensure_safe_path(path)
+
 
     def read_file(self, path: str, encoding: str = "utf-8", max_size_mb: int = 5) -> dict:
         try:

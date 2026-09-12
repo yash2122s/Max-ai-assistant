@@ -9,8 +9,9 @@ Usage:
 
 import asyncio
 import logging
-import sys
 import signal
+import sys
+import threading
 
 # ─── Logging Setup ───────────────────────────────────────────────────────────
 
@@ -54,6 +55,88 @@ BANNER = r"""
 """
 
 
+# ─── Centralized Shutdown Coordinator ─────────────────────────────────────────
+
+_shutdown_lock = threading.Lock()
+_shutdown_called = False
+_voice_session = None
+_ws_server = None
+_http_server = None
+_tasks: list = []
+
+
+def is_shutdown_requested() -> bool:
+    global _shutdown_called
+    with _shutdown_lock:
+        return _shutdown_called
+
+
+async def async_shutdown():
+    """Asynchronous shutdown coordinator: stops services in deterministic order."""
+    global _shutdown_called
+    with _shutdown_lock:
+        if _shutdown_called:
+            return
+        _shutdown_called = True
+
+    logger = logging.getLogger("jarvis.main")
+    print("\n\n🛑 Shutting down MAX...")
+
+    # 1. Stop voice session (joins audio capture/playback threads before loop closure)
+    if _voice_session is not None:
+        try:
+            await asyncio.to_thread(_voice_session.stop)
+        except Exception:
+            logger.exception("Failed to stop voice session cleanly")
+
+    # 2. Stop WebSocket companion server & mDNS advertiser
+    if _ws_server is not None:
+        try:
+            await _ws_server.stop()
+        except Exception:
+            logger.exception("Failed to stop WebSocket server cleanly")
+
+    # 3. Stop HTTP companion server
+    if _http_server is not None:
+        try:
+            await _http_server.stop()
+        except Exception:
+            logger.exception("Failed to stop HTTP server cleanly")
+
+    # 4. Cancel & await remaining tasks
+    pending = [t for t in _tasks if not t.done() and t is not asyncio.current_task()]
+    for t in pending:
+        t.cancel()
+    if pending:
+        try:
+            await asyncio.gather(*pending, return_exceptions=True)
+        except Exception:
+            logger.exception("Error awaiting cancelled tasks")
+
+
+def run_shutdown():
+    """Synchronous fallback shutdown (for signal handlers / interpreter exit)."""
+    global _shutdown_called
+    with _shutdown_lock:
+        if _shutdown_called:
+            return
+        _shutdown_called = True
+
+    logger = logging.getLogger("jarvis.main")
+    print("\n\n🛑 Shutting down MAX...")
+    if _voice_session is not None:
+        try:
+            _voice_session.stop()
+        except Exception:
+            logger.exception("Voice session sync shutdown failed")
+    for t in _tasks:
+        try:
+            if not t.done():
+                t.cancel()
+        except Exception:
+            logger.exception("Task cancellation failed")
+
+
 async def run_companion_servers(ws_server, http_server):
     """Run WebSocket and HTTP Companion Servers."""
     from server.event_bus import event_bus
@@ -73,11 +156,19 @@ async def run_companion_servers(ws_server, http_server):
         pass
     finally:
         event_bus.publish(EventType.AGENT_SHUTDOWN, {})
-        await http_server.stop()
+        try:
+            await ws_server.stop()
+        except Exception:
+            pass
+        try:
+            await http_server.stop()
+        except Exception:
+            pass
 
 
 async def main():
     """Initialize and start JARVIS Companion Server & Voice Agent."""
+    global _voice_session, _ws_server, _http_server, _tasks
     setup_logging()
     logger = logging.getLogger("jarvis.main")
     
@@ -97,64 +188,77 @@ async def main():
     http_port = 9001
     local_ip = get_local_ip()
 
-    ws_server = WebSocketServer(host, ws_port)
-    http_server = HTTPServer(host, http_port, http_handler)
+    _ws_server = WebSocketServer(host, ws_port)
+    _http_server = HTTPServer(host, http_port, http_handler)
+    
+    from orchestrator.device_router import device_router
+    device_router._ws_server = _ws_server
 
     print("  =======================================================")
-    print("        JARVIS Windows Agent & Companion Ecosystem        ")
+    print("          MAX Windows Agent & Companion Ecosystem        ")
     print("  =======================================================")
     print(f"  Server Host  : {host} (LAN IP: {local_ip})")
     print(f"  WS Port      : {ws_port} (Android App Endpoint: wss://{local_ip}:{ws_port})")
     print(f"  HTTP Port    : {http_port}")
     print(f"  Dashboard URL: \033[94mhttp://localhost:{http_port}/\033[0m")
-    print(f"  Pairing Code : \033[92m{ws_server.pairing_manager.get_pairing_code()}\033[0m")
+    print(f"  Pairing Code : \033[92m{_ws_server.pairing_manager.get_pairing_code()}\033[0m")
     print("  -------------------------------------------------------")
     print("  Scan/enter pairing code in Android App to connect.")
     print("  =======================================================\n")
 
-    tasks = []
+    _tasks = []
 
     # 1. Start companion WebSocket & HTTP servers
-    server_task = asyncio.create_task(run_companion_servers(ws_server, http_server))
-    tasks.append(server_task)
+    server_task = asyncio.create_task(run_companion_servers(_ws_server, _http_server))
+    _tasks.append(server_task)
 
     # 2. Start Gemini Live Voice session if API key is provided
-    voice_session = None
+    _voice_session = None
     if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
         try:
             from core.tool_executor import ToolRegistry as VoiceToolRegistry
             from core.gemini_live import GeminiLiveSession
             voice_tool_registry = VoiceToolRegistry()
-            voice_session = GeminiLiveSession(voice_tool_registry)
+            _voice_session = GeminiLiveSession(voice_tool_registry)
+            voice_session = _voice_session
             print(f"  🎤 Gemini Live Voice Session Enabled ({GEMINI_MODEL})")
-            voice_task = asyncio.create_task(voice_session.start())
-            tasks.append(voice_task)
+            
+            async def run_voice():
+                try:
+                    await voice_session.start()
+                except Exception as ve:
+                    logger.warning(f"Voice session ended: {ve}")
+                print("  ℹ️  Voice session stopped. Companion Server remaining active.")
+            
+            voice_task = asyncio.create_task(run_voice())
+            _tasks.append(voice_task)
         except Exception as e:
             logger.warning(f"Voice session initialization notice: {e}")
     else:
         print("  ℹ️  Gemini API key not configured — running Companion Server in standalone mode.")
 
-    # Handle graceful shutdown
-    def shutdown():
-        print("\n\n🛑 Shutting down JARVIS...")
-        if voice_session:
-            voice_session.stop()
-        for t in tasks:
-            t.cancel()
-
     loop = asyncio.get_running_loop()
+    
+    # Schedule async_shutdown on signal
+    def handle_signal():
+        asyncio.create_task(async_shutdown())
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, shutdown)
+            loop.add_signal_handler(sig, handle_signal)
         except NotImplementedError:
             pass
 
     try:
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await server_task
+    except asyncio.CancelledError:
+        pass
     except KeyboardInterrupt:
-        shutdown()
+        pass
+    finally:
+        await async_shutdown()
 
-    print("\n👋 JARVIS offline. Goodbye, sir.\n")
+    print("\n👋 MAX offline. Bye Yaswanth!\n")
 
 
 if __name__ == "__main__":
@@ -169,4 +273,7 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
+        run_shutdown()
         sys.exit(0)
+    finally:
+        run_shutdown()

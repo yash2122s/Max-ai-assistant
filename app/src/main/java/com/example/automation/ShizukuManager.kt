@@ -32,7 +32,7 @@ object ShizukuManager {
         }
     }
 
-    fun requestPermission(activity: Activity) {
+    fun requestPermission(activity: Activity? = null) {
         try {
             if (isShizukuAvailable()) {
                 Shizuku.requestPermission(SHIZUKU_PERMISSION_REQUEST_CODE)

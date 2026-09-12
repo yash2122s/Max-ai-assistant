@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 class BrightnessTool(private val brightnessAction: BrightnessAction) : Tool {
     override val name: String = "brightness"
-    override val supportedActions: Set<String> = setOf("SET_BRIGHTNESS", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN")
+    override val supportedActions: Set<String> = setOf("SET_BRIGHTNESS", "BRIGHTNESS_UP", "BRIGHTNESS_DOWN", "GET_BRIGHTNESS")
     override val retryPolicy: RetryPolicy = RetryPolicy.NoRetry
     override val capabilities: ToolCapabilities = ToolCapabilities(
         supportsPlanner = true,
@@ -22,11 +22,15 @@ class BrightnessTool(private val brightnessAction: BrightnessAction) : Tool {
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
         return try {
             val jsonPayload = JSONObject(request.arguments.toString())
+            if (!jsonPayload.has("action")) {
+                jsonPayload.put("action", request.action)
+            }
             brightnessAction.execute(context, jsonPayload)
             ToolResult(
                 success = true,
                 toolName = name,
-                verificationRequired = true
+                verificationRequired = true,
+                metadata = JSONObject().put("action", request.action)
             )
         } catch (e: Exception) {
             ToolResult(

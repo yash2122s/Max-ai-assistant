@@ -1,18 +1,23 @@
 from typing import Dict, Optional
 from .base_tool import BaseTool
+from core.unified_tool_registry import UnifiedToolRegistry
+
 
 class ToolRegistry:
-    _registry: Dict[str, BaseTool] = {}
+    """
+    Class-based ToolRegistry delegating to the canonical UnifiedToolRegistry.
+    """
 
     @classmethod
     def register(cls, tool: BaseTool):
-        cls._registry[tool.name] = tool
+        UnifiedToolRegistry.get_instance().register_base_tool(tool)
 
     @classmethod
     def get_tool(cls, name: str) -> Optional[BaseTool]:
-        return cls._registry.get(name)
+        return UnifiedToolRegistry.get_instance().get_base_tool(name)
 
     @classmethod
     def get_capabilities(cls) -> Dict[str, int]:
-        # Return registered capabilities with version (defaulting to 1)
-        return {name: 1 for name in cls._registry.keys()}
+        return {name: 1 for name in UnifiedToolRegistry.get_instance()._base_tools.keys()}
+
+

@@ -12,11 +12,19 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+    <uses-permission android:name="android.permission.ANSWER_PHONE_CALLS" />
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-permission android:name="android.permission.READ_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -26,11 +34,11 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesPermission" />
 
 
     <uses-feature android:name="android.hardware.camera" android:required="false" />
@@ -62,12 +70,14 @@
         android:theme="@style/Theme.MyApplication">
         <activity
             android:name=".MainActivity"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:exported="true"
+            android:hardwareAccelerated="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.MyApplication">
+            android:theme="@style/Theme.MyApplication"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
@@ -132,9 +142,21 @@
 
         <receiver
             android:name=".automation.scheduler.TaskReceiver"
-            android:exported="false">
+            android:exported="true">
             <intent-filter>
                 <action android:name="com.example.scheduler.ACTION_RUN_TASK" />
+                <action android:name="com.example.automation.scheduler.ACTION_RUN_TASK" />
+                <action android:name="com.example.ACTION_EXECUTE_GOAL" />
+                <action android:name="com.example.ACTION_CANCEL_GOAL" />
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name=".receiver.IncomingCallReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PHONE_STATE" />
+                <action android:name="android.telephony.action.PHONE_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 
@@ -195,10 +217,17 @@
 
         <!-- Jarvis Continuous Listening Foreground Service -->
         <service
-            android:name=".service.JarvisForegroundService"
+            android:name=".service.VoiceForegroundService"
             android:foregroundServiceType="microphone"
             android:exported="false" />
-        <service android:name=".service.FloatingHudService" android:foregroundServiceType="specialUse" android:exported="false" />
+        <service 
+            android:name=".service.MaxCapsuleOverlayService" 
+            android:foregroundServiceType="specialUse" 
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Interactive Dynamic Capsule Floating Overlay and HUD system for AI voice assistant" />
+        </service>
         <service
             android:name=".service.NotificationListenerBridge"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
@@ -207,8 +236,22 @@
                 <action android:name="android.service.notification.NotificationListenerService" />
             </intent-filter>
         </service>
-        <service android:name=".service.TelegramBotService" android:foregroundServiceType="specialUse" android:exported="false" />
-        <service android:name=".network.agent.CompanionConnectionService" android:foregroundServiceType="specialUse" android:exported="false" />
+        <service 
+            android:name=".service.TelegramBotService" 
+            android:foregroundServiceType="specialUse" 
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Telegram Bot long-polling server integration for remote automation execution" />
+        </service>
+        <service 
+            android:name=".network.agent.CompanionConnectionService" 
+            android:foregroundServiceType="specialUse" 
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local network companion connection service for Windows PC desktop pairing and tool execution" />
+        </service>
 
         <service
             android:name=".service.DesktopLinkTileService"
@@ -220,6 +263,7 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+
 
         <provider
 

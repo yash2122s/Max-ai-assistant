@@ -16,7 +16,7 @@ object PeriodDataSeeder {
     suspend fun seedPeriodData(context: Context) = withContext(Dispatchers.IO) {
         val db = AppDatabase.getDatabase(context)
         val periodDao = db.periodLogDao()
-        val repository = MemoryRepository(context)
+        val repository = MemoryRepository.getInstance(context)
 
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).apply {
             timeZone = TimeZone.getTimeZone("Asia/Kolkata")

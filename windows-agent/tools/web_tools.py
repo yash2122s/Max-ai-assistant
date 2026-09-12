@@ -59,6 +59,21 @@ def search_google(query: str) -> dict:
         return {"status": "error", "message": str(e)}
 
 
+async def search_web_fast(query: str) -> dict:
+    """
+    Rapidly search the web using parallel provider racing. Returns direct summarized answers
+    without requiring manual browser interaction.
+    
+    Args:
+        query: The factual search query or question to research.
+    """
+    try:
+        from core.search_racer import search_racer
+        return await search_racer.race(query)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
 def search_youtube(query: str) -> dict:
     """
     Search YouTube in the default browser.
@@ -212,11 +227,26 @@ TOOL_DECLARATIONS = [
             },
         },
     },
+    {
+        "name": "search_web_fast",
+        "description": "Rapidly search the web using parallel provider racing. Returns direct summarized answers without requiring manual browser interaction.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The factual search query or question to research",
+                }
+            },
+            "required": ["query"],
+        },
+    },
 ]
 
 TOOL_FUNCTIONS = {
     "open_website": open_website,
     "search_google": search_google,
+    "search_web_fast": search_web_fast,
     "search_youtube": search_youtube,
     "get_weather": get_weather,
     "get_news": get_news,

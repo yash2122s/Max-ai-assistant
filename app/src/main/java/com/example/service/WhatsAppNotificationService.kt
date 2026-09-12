@@ -42,8 +42,12 @@ class WhatsAppNotificationService : NotificationListenerService() {
     @Suppress("DEPRECATION")
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
-        val pkg = sbn.packageName
-        if (pkg != "com.whatsapp" && pkg != "com.whatsapp.w4b") return
+        val pkg = sbn.packageName ?: return
+        
+        // EARLY PRIVACY CHECK: Immediately ignore if app is NOT enabled in MAX Notification Access settings
+        if (!NotificationAppAccessManager.isAppEnabled(applicationContext, pkg)) {
+            return
+        }
 
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return

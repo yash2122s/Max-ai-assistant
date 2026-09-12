@@ -9,7 +9,7 @@ import org.json.JSONObject
 class OpenAppTool(private val openAppAction: OpenAppAction) : Tool {
     override val name: String = "open_app"
     override val supportedActions: Set<String> = setOf("OPEN_APP")
-    override val retryPolicy: RetryPolicy = RetryPolicy.ImmediateRetry(2)
+    override val retryPolicy: RetryPolicy = RetryPolicy.NoRetry
     override val capabilities: ToolCapabilities = ToolCapabilities(
         supportsPlanner = true,
         requiresAccessibility = false,
@@ -41,7 +41,7 @@ class OpenAppTool(private val openAppAction: OpenAppAction) : Tool {
                 toolName = name,
                 errorCode = "LAUNCH_FAILED",
                 message = e.message ?: "Launch failed",
-                retryable = true
+                retryable = false
             )
         }
     }

@@ -20,7 +20,13 @@ class AssistantToolRegistry(
         onResult: (String) -> Unit
     ) {
         scope.launch {
-            // 1. Authorization check
+            // 1. Authorization pre-check (Android permission + execution capability).
+            // P0-1: this is a capacity pre-flight only — full intent authorization is
+            // performed by the canonical upstream gates (AssistantEngine.onExecuteAutomation
+            // for Live calls). Execution itself now always flows through
+            // ActionDispatcher → ExecutionEngine so voice actions receive the SAME
+            // interpolation, retry, verification, timeout, metrics and events as
+            // typed/scheduled actions. No direct tool.execute() is allowed here.
             if (!authorizationManager.authorize(actionName)) {
                 onResult(JSONObject().apply {
                     put("status", "error")
@@ -29,49 +35,48 @@ class AssistantToolRegistry(
                 return@launch
             }
 
-            // 2. Resolve matching tool in the plugin registry
-            val tool = ToolRegistry.getToolForAction(actionName)
-            if (tool == null) {
-                // If not found in the custom registry, delegate to the legacy ActionDispatcher fallback
-                AssistantLogger.logWarn("No plugin tool registered for action: $actionName. Falling back to ActionDispatcher.")
-                AssistantEventBus.emit(AssistantEvent.ToolProgress(actionName, "Running..."))
-                val res = com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, arguments)
-                onResult(res)
-                return@launch
+            // 2. Produce an ExecutionRequest (canonical shape). Legacy callers may
+            // pass the original Live function-call JSON which omits the ACTION key;
+            // ActionDispatcher.normalizeJson derives the canonical action from it.
+            val canonicalArguments = if (arguments.has("action")) {
+                arguments
+            } else {
+                JSONObject(arguments.toString()).put("action", actionName)
             }
 
-            // 3. Asymmetric execution with state updates
-            AssistantLogger.logInfo("Executing tool: ${tool.name} for action: $actionName")
-            AssistantEventBus.emit(AssistantEvent.ToolProgress(tool.name, "Executing ${tool.name}..."))
-            
+            AssistantLogger.logInfo("Executing tool: $actionName for action: $actionName")
+            AssistantEventBus.emit(AssistantEvent.ToolProgress(actionName, "Running..."))
+
             try {
-                val request = com.example.automation.engine.ExecutionRequest(
-                    action = actionName,
-                    arguments = com.google.gson.JsonParser.parseString(arguments.toString()).asJsonObject,
-                    source = com.example.automation.engine.ExecutionSource.GEMINI_LIVE
-                )
-                
-                val result = tool.execute(context, request)
-                val status = if (result.success) "success" else "error"
+                // 3. Canonical convergence: ActionDispatcher → ExecutionEngine.
+                // dispatchWithResult returns the standard {success,message,error,data}
+                // JSON contract with metadata flattened into "data".
+                android.util.Log.d("VOICE_EXECUTION", "dispatching through ActionDispatcher (action=$actionName)")
+                val resultJson = com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, canonicalArguments)
+
+                // 4. Preserve the Gemini Live toolResponse contract:
+                // {status: success|error, reason?, <metadata keys>...}
+                val parsed = JSONObject(resultJson)
                 val responseJson = JSONObject().apply {
-                    put("status", status)
-                    if (!result.success) {
-                        put("reason", result.message ?: "Failed executing tool")
+                    put("status", if (parsed.optBoolean("success")) "success" else "error")
+                    if (!parsed.optBoolean("success")) {
+                        put("reason", parsed.optString("message").ifEmpty {
+                            parsed.optJSONObject("error")?.optString("message") ?: "Failed executing tool"
+                        })
                     }
-                    val meta = result.metadata
-                    if (meta != null) {
-                        val keys = meta.keys()
+                    parsed.optJSONObject("data")?.let { data ->
+                        val keys = data.keys()
                         while (keys.hasNext()) {
                             val key = keys.next()
-                            put(key, meta.get(key))
+                            put(key, data.get(key))
                         }
                     }
                 }
-                
-                AssistantLogger.logInfo("Tool ${tool.name} execution completed with status: $status")
+
+                AssistantLogger.logInfo("Tool $actionName execution completed with status: ${responseJson.optString("status")}")
                 onResult(responseJson.toString())
             } catch (e: Exception) {
-                AssistantLogger.logError("Error executing tool: ${tool.name}", e)
+                AssistantLogger.logError("Error executing tool: $actionName", e)
                 onResult(JSONObject().apply {
                     put("status", "error")
                     put("reason", e.message ?: "Unknown execution error")

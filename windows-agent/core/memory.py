@@ -8,14 +8,16 @@ import os
 import json
 import logging
 from typing import Dict, Any
+from core.settings_manager import STORAGE_DIR
+from core.security import security_guard
 
 logger = logging.getLogger("jarvis.memory")
 
-MEMORY_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), "memory.json")
+MEMORY_FILE = os.path.join(STORAGE_DIR, "memory.json")
 
 
 def _load_memory() -> Dict[str, Any]:
-    """Load memories from memory.json file."""
+    """Load memories from secure storage memory.json file."""
     if not os.path.exists(MEMORY_FILE):
         return {}
     try:
@@ -27,8 +29,9 @@ def _load_memory() -> Dict[str, Any]:
 
 
 def _save_memory(memory: Dict[str, Any]) -> bool:
-    """Save memories to memory.json file."""
+    """Save memories to secure storage memory.json file."""
     try:
+        os.makedirs(STORAGE_DIR, exist_ok=True)
         with open(MEMORY_FILE, "w", encoding="utf-8") as f:
             json.dump(memory, f, indent=2, ensure_ascii=False)
         return True
@@ -46,21 +49,10 @@ def remember_fact(key: str, value: str) -> dict:
         value: The detail/fact value to remember (e.g., 'Yaswanth', '9876543210', 'Biryani').
     """
     try:
-        key_clean = key.lower().strip().replace(" ", "_")
-        memories = _load_memory()
-        memories[key_clean] = {
-            "value": value,
-            "original_key": key.strip(),
-        }
-        if _save_memory(memories):
-            return {
-                "status": "success",
-                "message": f"Remembered '{key}': '{value}' in permanent memory.",
-                "key": key,
-                "value": value,
-            }
-        return {"status": "error", "message": "Failed to save memory file."}
+        from core.state_database import state_db
+        return state_db.save_memory(key=key, value=value)
     except Exception as e:
+        logger.error(f"Save memory error: {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -72,31 +64,10 @@ def recall_fact(query: str) -> dict:
         query: Search term or key to look up (e.g., 'bannu', 'name', 'food').
     """
     try:
-        memories = _load_memory()
-        if not memories:
-            return {"status": "info", "message": "Permanent memory is currently empty.", "results": {}}
-        
-        query_clean = query.lower().strip()
-        results = {}
-        
-        for k, item in memories.items():
-            val = item.get("value", "")
-            orig_k = item.get("original_key", k)
-            if query_clean in k or query_clean in str(val).lower() or query_clean in orig_k.lower():
-                results[orig_k] = val
-        
-        if results:
-            return {
-                "status": "success",
-                "message": f"Found {len(results)} memory entry(ies) for '{query}'",
-                "results": results,
-            }
-        return {
-            "status": "info",
-            "message": f"No memory entries found matching '{query}'",
-            "all_keys": [item.get("original_key", k) for k, item in memories.items()],
-        }
+        from core.state_database import state_db
+        return state_db.recall_memory(query=query)
     except Exception as e:
+        logger.error(f"Recall memory error: {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -105,17 +76,10 @@ def list_memories() -> dict:
     List all stored permanent memories and facts.
     """
     try:
-        memories = _load_memory()
-        if not memories:
-            return {"status": "info", "message": "Permanent memory is currently empty.", "memories": {}}
-        
-        formatted = {item.get("original_key", k): item.get("value") for k, item in memories.items()}
-        return {
-            "status": "success",
-            "total_memories": len(formatted),
-            "memories": formatted,
-        }
+        from core.state_database import state_db
+        return state_db.list_all_memories()
     except Exception as e:
+        logger.error(f"List memories error: {e}")
         return {"status": "error", "message": str(e)}
 
 
@@ -127,24 +91,21 @@ def forget_fact(key: str) -> dict:
         key: The key or fact name to forget/delete.
     """
     try:
-        key_clean = key.lower().strip().replace(" ", "_")
-        memories = _load_memory()
-        if key_clean in memories:
-            del memories[key_clean]
-            _save_memory(memories)
-            return {"status": "success", "message": f"Forgot '{key}' from permanent memory."}
-        return {"status": "error", "message": f"Fact '{key}' not found in permanent memory."}
+        from core.state_database import state_db
+        return state_db.delete_memory(key=key)
     except Exception as e:
+        logger.error(f"Forget memory error: {e}")
         return {"status": "error", "message": str(e)}
 
 
 def get_all_memories_summary() -> str:
     """Return a formatted string of all memories for auto-injection into System Prompt."""
-    memories = _load_memory()
-    if not memories:
+    try:
+        from core.state_database import state_db
+        return state_db.get_summary_text()
+    except Exception as e:
+        logger.error(f"Memory summary error: {e}")
         return "No saved memories yet."
-    lines = [f"- {item.get('original_key', k)}: {item.get('value')}" for k, item in memories.items()]
-    return "\n".join(lines)
 
 
 # ─── Tool Declarations ──────────────────────────────────────────────────────

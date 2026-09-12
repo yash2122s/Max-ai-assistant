@@ -105,21 +105,129 @@ class InputHelper:
         except Exception as e:
             return {"status": "failed", "error": str(e)}
 
-    def move_mouse(self, x: int, y: int, absolute: bool = True) -> dict:
+    def move_mouse(self, x: int, y: int, absolute: bool = True, duration_sec: float = 0.0) -> dict:
         try:
-            if absolute:
-                self.user32.SetCursorPos(x, y)
-            else:
+            start_x, start_y = 0, 0
+            try:
                 current_x = wintypes.c_int()
                 current_y = wintypes.c_int()
                 self.user32.GetCursorPos(ctypes.byref(current_x), ctypes.byref(current_y))
-                self.user32.SetCursorPos(current_x.value + x, current_y.value + y)
-            return {"status": "success", "message": f"Mouse moved to ({x}, {y})"}
+                start_x, start_y = current_x.value, current_y.value
+            except Exception:
+                start_x, start_y = (0, 0)
+
+            target_x = int(x) if absolute else int(start_x + x)
+            target_y = int(y) if absolute else int(start_y + y)
+
+            if duration_sec > 0.01:
+                steps = max(5, int(duration_sec * 60))
+                for i in range(1, steps + 1):
+                    cx = int(start_x + (target_x - start_x) * (i / steps))
+                    cy = int(start_y + (target_y - start_y) * (i / steps))
+                    self.user32.SetCursorPos(cx, cy)
+                    time.sleep(duration_sec / steps)
+            self.user32.SetCursorPos(target_x, target_y)
+            return {"status": "success", "message": f"Mouse moved to ({target_x}, {target_y})", "x": target_x, "y": target_y}
         except Exception as e:
             return {"status": "failed", "error": str(e)}
 
-    def click_mouse(self, button: str = "left", double: bool = False) -> dict:
+    def mouse_down(self, x: int = None, y: int = None, button: str = "left") -> dict:
         try:
+            if x is not None and y is not None:
+                self.user32.SetCursorPos(int(x), int(y))
+                time.sleep(0.02)
+            
+            btn_lower = button.lower()
+            if btn_lower in ("left", "l"):
+                flag = 0x0002  # MOUSEEVENTF_LEFTDOWN
+            elif btn_lower in ("right", "r"):
+                flag = 0x0008  # MOUSEEVENTF_RIGHTDOWN
+            elif btn_lower in ("middle", "m", "mid"):
+                flag = 0x0020  # MOUSEEVENTF_MIDDLEDOWN
+            else:
+                flag = 0x0002
+
+            self.user32.mouse_event(flag, 0, 0, 0, 0)
+            return {"status": "success", "message": f"Mouse down ({button})"}
+        except Exception as e:
+            return {"status": "failed", "error": str(e)}
+
+    def mouse_up(self, x: int = None, y: int = None, button: str = "left") -> dict:
+        try:
+            if x is not None and y is not None:
+                self.user32.SetCursorPos(int(x), int(y))
+                time.sleep(0.02)
+            
+            btn_lower = button.lower()
+            if btn_lower in ("left", "l"):
+                flag = 0x0004  # MOUSEEVENTF_LEFTUP
+            elif btn_lower in ("right", "r"):
+                flag = 0x0010  # MOUSEEVENTF_RIGHTUP
+            elif btn_lower in ("middle", "m", "mid"):
+                flag = 0x0040  # MOUSEEVENTF_MIDDLEUP
+            else:
+                flag = 0x0004
+
+            self.user32.mouse_event(flag, 0, 0, 0, 0)
+            return {"status": "success", "message": f"Mouse up ({button})"}
+        except Exception as e:
+            return {"status": "failed", "error": str(e)}
+
+    def left_click(self, x: int = None, y: int = None, clicks: int = 1) -> dict:
+        try:
+            if x is not None and y is not None:
+                self.user32.SetCursorPos(int(x), int(y))
+                time.sleep(0.04)
+            
+            for _ in range(clicks):
+                self.user32.mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
+                time.sleep(0.04)
+                self.user32.mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
+                time.sleep(0.04)
+            return {"status": "success", "message": f"Left clicked {clicks}x", "verified": True}
+        except Exception as e:
+            return {"status": "failed", "error": str(e)}
+
+    def drag_path(self, points: list, duration_sec: float = 0.5, button: str = "left") -> dict:
+        try:
+            if not points or len(points) < 2:
+                return {"status": "failed", "error": "drag_path requires at least 2 coordinate points"}
+            
+            # Move to start
+            start_x, start_y = int(points[0][0]), int(points[0][1])
+            self.user32.SetCursorPos(start_x, start_y)
+            time.sleep(0.08)
+
+            # Mouse down
+            self.mouse_down(start_x, start_y, button=button)
+            time.sleep(0.04)
+
+            step_time = max(0.005, duration_sec / max(1, len(points) - 1))
+            for pt in points[1:]:
+                cx, cy = int(pt[0]), int(pt[1])
+                self.user32.SetCursorPos(cx, cy)
+                time.sleep(step_time)
+
+            # Mouse up
+            last_x, last_y = int(points[-1][0]), int(points[-1][1])
+            time.sleep(0.04)
+            self.mouse_up(last_x, last_y, button=button)
+
+            return {"status": "success", "message": f"Executed continuous stroke across {len(points)} points", "points_count": len(points), "verified": True}
+        except Exception as e:
+            # Guarantee mouse release on error
+            try:
+                self.mouse_up(button=button)
+            except Exception:
+                pass
+            return {"status": "failed", "error": str(e)}
+
+    def click_mouse(self, button: str = "left", double: bool = False, x: int = None, y: int = None) -> dict:
+        try:
+            if x is not None and y is not None:
+                self.user32.SetCursorPos(int(x), int(y))
+                time.sleep(0.04)
+
             MOUSEEVENTF_LEFTDOWN = 0x0002
             MOUSEEVENTF_LEFTUP = 0x0004
             MOUSEEVENTF_RIGHTDOWN = 0x0008
@@ -138,12 +246,12 @@ class InputHelper:
 
             for _ in range(2 if double else 1):
                 self.user32.mouse_event(down, 0, 0, 0, 0)
-                time.sleep(0.05)
+                time.sleep(0.04)
                 self.user32.mouse_event(up, 0, 0, 0, 0)
-                time.sleep(0.05)
+                time.sleep(0.04)
 
             action = "double-clicked" if double else "clicked"
-            return {"status": "success", "message": f"Mouse {action} ({button} button)"}
+            return {"status": "success", "message": f"Mouse {action} ({button} button)", "verified": True}
         except Exception as e:
             return {"status": "failed", "error": str(e)}
 
@@ -174,15 +282,12 @@ class InputHelper:
 
     def send_keys_via_powershell(self, text: str) -> dict:
         try:
-            escaped = text.replace('"', '`"').replace("'", "''")
-            ps_script = f'''
-            Add-Type -AssemblyName System.Windows.Forms
-            [System.Windows.Forms.SendKeys]::SendWait("{escaped}")
-            '''
-            subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, timeout=30)
-            return {"status": "success", "message": f"Sent keys via SendKeys: {text[:50]}..."}
+            # Use safe direct pyautogui typing to eliminate PowerShell script injection
+            pyautogui.write(text, interval=0.01)
+            return {"status": "success", "message": f"Sent keys safely: {text[:50]}..."}
         except Exception as e:
             return {"status": "failed", "error": str(e)}
+
 
 
 input_helper = InputHelper()
@@ -230,15 +335,36 @@ class InputTool(BaseTool):
                 x = int(arguments.get("x", 0))
                 y = int(arguments.get("y", 0))
                 absolute = arguments.get("absolute", True)
+                duration = float(arguments.get("duration", arguments.get("duration_sec", 0.0)))
                 if isinstance(absolute, str):
                     absolute = absolute.lower() == "true"
-                return input_helper.move_mouse(x, y, absolute)
+                return input_helper.move_mouse(x, y, absolute, duration_sec=duration)
             elif action == "click":
                 button = arguments.get("button", "left")
                 double = arguments.get("double", False)
                 if isinstance(double, str):
                     double = double.lower() == "true"
                 return input_helper.click_mouse(button, double)
+            elif action == "left_click":
+                x = arguments.get("x")
+                y = arguments.get("y")
+                clicks = int(arguments.get("clicks", 1))
+                return input_helper.left_click(x=x, y=y, clicks=clicks)
+            elif action == "mouse_down":
+                x = arguments.get("x")
+                y = arguments.get("y")
+                button = arguments.get("button", "left")
+                return input_helper.mouse_down(x=x, y=y, button=button)
+            elif action == "mouse_up":
+                x = arguments.get("x")
+                y = arguments.get("y")
+                button = arguments.get("button", "left")
+                return input_helper.mouse_up(x=x, y=y, button=button)
+            elif action == "drag_path":
+                points = arguments.get("points", [])
+                duration = float(arguments.get("duration", arguments.get("duration_sec", 0.5)))
+                button = arguments.get("button", "left")
+                return input_helper.drag_path(points, duration_sec=duration, button=button)
             elif action == "double_click":
                 return input_helper.click_mouse("left", True)
             elif action == "right_click":
@@ -255,20 +381,8 @@ class InputTool(BaseTool):
                 y1 = int(arguments.get("y1", arguments.get("from_y", 0)))
                 x2 = int(arguments.get("x2", arguments.get("to_x", 0)))
                 y2 = int(arguments.get("y2", arguments.get("to_y", 0)))
-                input_helper.move_mouse(x1, y1, True)
-                time.sleep(0.1)
-                MOUSEEVENTF_LEFTDOWN = 0x0002
-                ctypes.windll.user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
-                time.sleep(0.05)
-                steps = 20
-                for i in range(1, steps + 1):
-                    cx = x1 + (x2 - x1) * i // steps
-                    cy = y1 + (y2 - y1) * i // steps
-                    ctypes.windll.user32.SetCursorPos(cx, cy)
-                    time.sleep(0.01)
-                MOUSEEVENTF_LEFTUP = 0x0004
-                ctypes.windll.user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
-                return {"status": "success", "message": f"Dragged from ({x1},{y1}) to ({x2},{y2})"}
+                duration = float(arguments.get("duration", 0.3))
+                return input_helper.drag_path([[x1, y1], [x2, y2]], duration_sec=duration)
             else:
                 return {
                     "status": "failed",

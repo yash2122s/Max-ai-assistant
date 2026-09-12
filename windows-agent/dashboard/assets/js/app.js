@@ -5,6 +5,10 @@ import { initRouter } from "./router.js";
 // DOM Elements
 const devModeToggle = document.getElementById("dev-mode-toggle");
 const themeSelector = document.getElementById("theme-selector");
+const themeToggleBtn = document.getElementById("theme-toggle-btn");
+const themeIconSun = document.getElementById("theme-icon-sun");
+const themeIconMoon = document.getElementById("theme-icon-moon");
+const themeBtnLabel = document.getElementById("theme-btn-label");
 const statusBadge = document.getElementById("connection-status-badge");
 const themeLink = document.getElementById("theme-link");
 
@@ -31,6 +35,17 @@ AppState.subscribe(state => {
             themeLink.setAttribute("href", targetHref);
         }
     }
+    if (themeBtnLabel && themeIconSun && themeIconMoon) {
+        if (state.theme === "light") {
+            themeBtnLabel.textContent = "Light Mode";
+            themeIconSun.style.display = "inline";
+            themeIconMoon.style.display = "none";
+        } else {
+            themeBtnLabel.textContent = "Dark Mode";
+            themeIconSun.style.display = "none";
+            themeIconMoon.style.display = "inline";
+        }
+    }
 });
 
 // 2. Bind change listeners to interactive options
@@ -47,6 +62,15 @@ if (themeSelector) {
         const themeVal = e.target.value;
         localStorage.setItem("theme", themeVal);
         AppState.set({ theme: themeVal });
+    });
+}
+
+if (themeToggleBtn) {
+    themeToggleBtn.addEventListener("click", () => {
+        const currentTheme = AppState.get().theme || "dark";
+        const newTheme = currentTheme === "dark" ? "light" : "dark";
+        localStorage.setItem("theme", newTheme);
+        AppState.set({ theme: newTheme });
     });
 }
 

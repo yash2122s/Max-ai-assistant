@@ -40,14 +40,12 @@ class JarvisVoiceSession(context: Context) : VoiceInteractionSession(context) {
         com.example.network.agent.WindowsToolExecutor.initialize(context)
         
         val viewModel = com.example.voice.assistant.AssistantSessionManager.viewModel
-        if (viewModel.appContext == null) {
-            val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-            val savedKey = prefs.getString("api_key", "") ?: ""
-            val savedVoice = prefs.getString("voice_name", "Aoede") ?: "Aoede"
-            val savedLanguage = prefs.getString("response_language", "Tenglish") ?: "Tenglish"
-            val initialKey = if (savedKey.isNotEmpty()) savedKey else com.example.BuildConfig.GEMINI_API_KEY
+            val settings = com.example.data.preferences.SettingsManager(context)
+            val savedKey = settings.geminiApiKey.trim()
+            val savedVoice = settings.liveVoiceName
+            val savedLanguage = settings.languagePreference
+            val initialKey = savedKey
             viewModel.initialize(context.applicationContext, initialKey, savedVoice, savedLanguage)
-        }
         
         if (!viewModel.uiState.value.isRecording) {
             viewModel.toggleRecording()

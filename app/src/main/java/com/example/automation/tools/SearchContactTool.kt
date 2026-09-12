@@ -8,6 +8,8 @@ import com.example.automation.verification.RetryPolicy
 import org.json.JSONArray
 import org.json.JSONObject
 
+import com.example.utils.asStringOrNull
+
 class SearchContactTool(private val searchContactAction: SearchContactAction) : Tool {
     override val name: String = "search_contact"
     override val supportedActions: Set<String> = setOf("SEARCH_CONTACT")
@@ -25,7 +27,7 @@ class SearchContactTool(private val searchContactAction: SearchContactAction) : 
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
         return try {
-            val query = request.arguments.get("query").asString
+            val query = request.arguments.get("query").asStringOrNull() ?: ""
             var matches = searchContactAction.searchContacts(context, query)
 
             val cleanQuery = query.trim().replace(Regex("[\\s\\-()]"), "")

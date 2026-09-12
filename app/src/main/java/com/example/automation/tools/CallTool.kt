@@ -19,7 +19,7 @@ class CallTool(private val callPhoneAction: CallPhoneAction) : Tool {
 
     override fun validate(request: ExecutionRequest): Boolean {
         val arguments = request.arguments
-        return arguments.has("contactId") && arguments.has("phoneId")
+        return (arguments.has("contactId") && arguments.has("phoneId")) || arguments.has("contact")
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {

@@ -20,8 +20,14 @@ data class ActionStep(
     val resourceId: String? = null,
     val contentDescription: String? = null,
     val fallbackX: Float? = null,
-    val fallbackY: Float? = null
+    val fallbackY: Float? = null,
+    val dependsOn: List<String> = emptyList(),
+    val params: Map<String, String> = emptyMap(),
+    val fallbackAction: String? = null,
+    val outputKey: String? = null,
+    val status: String = "PENDING"
 )
+
 
 data class WorldState(
     val currentApp: String = "",

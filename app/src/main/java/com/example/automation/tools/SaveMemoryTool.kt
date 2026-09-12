@@ -17,7 +17,7 @@ class SaveMemoryTool : Tool {
     override val supportedActions: Set<String> = setOf("SAVE_MEMORY")
     override val retryPolicy: RetryPolicy = RetryPolicy.NoRetry
     override val capabilities: ToolCapabilities = ToolCapabilities(
-        supportsPlanner = true,
+        supportsPlanner = false,
         requiresAccessibility = false,
         requiresNetwork = true,
         cancellable = false
@@ -66,14 +66,27 @@ class SaveMemoryTool : Tool {
                 tags = tagsStr
             )
 
-            val repository = MemoryRepository(context.applicationContext)
+            // Use singleton repository — NO new instance per call
+            val repository = MemoryRepository.getInstance(context)
             val result = repository.addMemory(memory)
 
-            return@withContext ToolResult(
-                success = true,
-                toolName = name,
-                message = "Memory successfully saved: '$title - $content'"
-            )
+            return@withContext when (result) {
+                is com.example.memory.data.MemoryValidationResult.Success -> {
+                    ToolResult(
+                        success = true,
+                        toolName = name,
+                        message = "Memory successfully saved: '$title - $content'"
+                    )
+                }
+                is com.example.memory.data.MemoryValidationResult.Error -> {
+                    ToolResult(
+                        success = false,
+                        toolName = name,
+                        errorCode = "VALIDATION_FAILED",
+                        message = result.message
+                    )
+                }
+            }
         } catch (e: Exception) {
             return@withContext ToolResult(
                 success = false,

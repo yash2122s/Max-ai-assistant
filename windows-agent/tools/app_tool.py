@@ -152,11 +152,15 @@ class AppHelper:
         target_clean = target.strip()
         target_lower = target_clean.lower()
 
+        # Reject dangerous shell chaining metacharacters
+        if any(c in target_clean for c in ["&", "|", ";", ">", "<", "`", "$"]):
+            raise ValueError(f"Invalid application target containing illegal characters: '{target_clean}'")
+
         # 1. Alias lookup & direct system launch
         if target_lower in COMMON_APP_ALIASES:
             app_cmd = COMMON_APP_ALIASES[target_lower]
             try:
-                subprocess.Popen(f'start "" "{app_cmd}"', shell=True)
+                subprocess.Popen(["cmd.exe", "/c", "start", "", app_cmd], shell=False)
                 return {
                     "status": "success",
                     "message": f"Successfully launched '{target}' ({app_cmd}).",
@@ -241,7 +245,7 @@ class AppHelper:
             }
         except Exception:
             try:
-                subprocess.Popen(f'start "" "{target_clean}"', shell=True)
+                subprocess.Popen(["cmd.exe", "/c", "start", "", target_clean], shell=False)
                 return {
                     "status": "success",
                     "message": f"Dispatched launch command for '{target}' via cmd start.",
@@ -249,6 +253,7 @@ class AppHelper:
                 }
             except Exception as e:
                 raise FileNotFoundError(f"Could not locate installed app or executable matching: '{target}' ({e})")
+
 
     def is_running(self, target: str) -> dict:
         """

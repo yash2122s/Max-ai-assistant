@@ -2,11 +2,14 @@ package com.example.network
 
 import android.util.Log
 import org.json.JSONObject
+import com.example.utils.asStringOrNull
+import com.example.utils.asLongOrNull
 
 object ToolDispatcher {
     private const val TAG = "ToolDispatcher"
     
     val supportedTools = setOf(
+        "task_intent",
         "execute_automation", 
         "open_app", 
         "send_whatsapp_message", 
@@ -62,13 +65,36 @@ object ToolDispatcher {
         "search_contact",
         "system_action",
         "save_memory",
+        "forget_memory",
         "set_reminder",
         "create_reminder",
-        "unlock_device"
+        "unlock_device",
+        "click_element",
+        "scroll_screen",
+        "get_screen_context",
+        "answer_call",
+        "reject_call",
+        "send_sms",
+        "type_text",
+        "press_enter",
+        "press_key",
+        "clear_text"
     )
 
     private val functionToActionMap = mapOf(
+        "task_intent" to "TASK_INTENT",
+        "get_screen_context" to "GET_SCREEN_CONTEXT",
+        "click_element" to "CLICK_TEXT",
+        "scroll_screen" to "SCROLL_SCREEN",
+        "type_text" to "TYPE_TEXT",
+        "press_enter" to "PRESS_ENTER",
+        "press_key" to "PRESS_KEY",
+        "clear_text" to "CLEAR_TEXT",
         "unlock_device" to "UNLOCK_DEVICE",
+        "answer_call" to "ANSWER_CALL",
+        "reject_call" to "REJECT_CALL",
+        "send_sms" to "SEND_SMS",
+        "send_whatsapp_message" to "SEND_WHATSAPP",
         "get_battery_status" to "GET_BATTERY_STATUS",
         "get_dnd_status" to "GET_DND",
         "set_dnd" to "SET_DND",
@@ -113,6 +139,7 @@ object ToolDispatcher {
         "search_contact" to "SEARCH_CONTACT",
         "system_action" to "SYSTEM_ACTION",
         "save_memory" to "SAVE_MEMORY",
+        "forget_memory" to "FORGET_MEMORY",
         "set_reminder" to "SET_REMINDER",
         "create_reminder" to "SET_REMINDER"
     )
@@ -121,6 +148,9 @@ object ToolDispatcher {
         val name = functionCall.name
         val argsObj = JSONObject(functionCall.args?.toString() ?: "{}")
         argsObj.put("function_name", name)
+        if (lastInputTranscription.isNotBlank()) {
+            argsObj.put("last_input_transcription", lastInputTranscription)
+        }
 
         if (name == "control_media") {
             val mediaAction = argsObj.optString("media_action", "PLAY_MEDIA")
@@ -133,6 +163,19 @@ object ToolDispatcher {
         if (action != null) {
             argsObj.put("action", action)
             // Perform basic parameter normalization
+            if (name == "send_whatsapp_message") {
+                val contact = argsObj.optString("contact").ifEmpty { argsObj.optString("name") }
+                val message = argsObj.optString("message").ifEmpty { argsObj.optString("text") }
+                argsObj.put("contact", contact)
+                argsObj.put("message", message)
+                argsObj.put("text", message)
+            }
+            if (name == "send_sms") {
+                val num = argsObj.optString("number").ifEmpty { argsObj.optString("phone") }
+                val msg = argsObj.optString("message").ifEmpty { argsObj.optString("text") }
+                argsObj.put("number", num)
+                argsObj.put("message", msg)
+            }
             if (name == "set_dnd" && argsObj.has("enabled")) {
                 argsObj.put("dndEnabled", argsObj.optBoolean("enabled", true))
             }
@@ -140,7 +183,7 @@ object ToolDispatcher {
                 argsObj.put("settingsTarget", argsObj.optString("target", "main"))
             }
             if (name == "system_action") {
-                val actionVal = functionCall.args?.get("action")?.asString ?: ""
+                val actionVal = functionCall.args?.get("action").asStringOrNull() ?: ""
                 argsObj.put("system_action_str", actionVal)
             }
             if (name == "run_routine") {
@@ -159,27 +202,61 @@ object ToolDispatcher {
         // Special handling / fallback cases
         when (name) {
             "call_contact" -> {
-                val contactIdVal = functionCall.args?.get("contactId")?.asLong ?: -1L
-                val phoneIdVal = functionCall.args?.get("phoneId")?.asLong ?: -1L
-                argsObj.put("action", "CALL_PHONE")
-                argsObj.put("contactId", contactIdVal)
-                argsObj.put("phoneId", phoneIdVal)
+                val lowerTranscription = lastInputTranscription.trim().lowercase()
+                val isMessagingIntent = lowerTranscription.contains("whatsapp") ||
+                    lowerTranscription.contains("send ") ||
+                    lowerTranscription.contains("message") ||
+                    lowerTranscription.contains("msg") ||
+                    lowerTranscription.contains("text ") ||
+                    lowerTranscription.contains("tell ") ||
+                    lowerTranscription.contains("పంపు") ||
+                    lowerTranscription.contains("పెట్టు") ||
+                    lowerTranscription.contains("మెసేజ్")
+
+                val isExplicitVoiceCall = lowerTranscription.startsWith("call ") ||
+                    lowerTranscription.startsWith("dial ") ||
+                    lowerTranscription.contains("call on whatsapp") ||
+                    lowerTranscription.contains("whatsapp call") ||
+                    lowerTranscription.contains("phone chey") ||
+                    lowerTranscription.contains("call chey")
+
+                if (isMessagingIntent && !isExplicitVoiceCall) {
+                    Log.w(TAG, "Intercepted spurious call_contact tool call for messaging utterance: '$lastInputTranscription'")
+                    // Reroute to TASK_INTENT
+                    argsObj.put("action", "TASK_INTENT")
+                    argsObj.put("goal", "send_whatsapp_message")
+                    argsObj.put("target_entity", "WhatsApp")
+                    argsObj.put("required_outcome", "MessageSent")
+                    
+                    val params = JSONObject()
+                    if (argsObj.has("contact")) params.put("contact", argsObj.optString("contact"))
+                    if (argsObj.has("message")) params.put("message", argsObj.optString("message"))
+                    argsObj.put("parameters", params)
+                    argsObj.put("function_name", "task_intent")
+                } else {
+                    val contactIdVal = functionCall.args?.get("contactId").asLongOrNull() ?: -1L
+                    val phoneIdVal = functionCall.args?.get("phoneId").asLongOrNull() ?: -1L
+                    argsObj.put("action", "CALL_PHONE")
+                    argsObj.put("contactId", contactIdVal)
+                    argsObj.put("phoneId", phoneIdVal)
+                }
             }
             "youtube_search" -> {
-                val queryVal = functionCall.args?.get("query")?.asString ?: ""
+                val queryVal = functionCall.args?.get("query").asStringOrNull() ?: ""
                 argsObj.put("action", "YOUTUBE_SEARCH")
                 argsObj.put("query", queryVal)
             }
             "open_app" -> {
-                val appName = functionCall.args?.get("app_name")?.asString ?: ""
+                val appName = functionCall.args?.get("app_name").asStringOrNull() ?: ""
                 val normalizedApp = appName.trim().lowercase()
-                val mappedSystemAction = when (normalizedApp) {
-                    "home", "home screen", "homepage" -> "home"
-                    "back" -> "back"
-                    "recent", "recents", "recent apps" -> "recent"
-                    "notifications", "notification" -> "notifications"
-                    "quick settings", "quick_settings", "quicksetting" -> "quick_settings"
-                    "screenshot", "take screenshot" -> "screenshot"
+                val mappedSystemAction = when {
+                    normalizedApp in listOf("home", "home screen", "homepage", "homescreen", "home screen ki vellu", "home ki vellu") ||
+                    normalizedApp.contains("హోమ్") || normalizedApp.contains("హోం") -> "home"
+                    normalizedApp in listOf("back", "go back") || normalizedApp.contains("వెనక్కి") || normalizedApp.contains("వెనుకకు") -> "back"
+                    normalizedApp in listOf("recent", "recents", "recent apps") || normalizedApp.contains("రీసెంట్") -> "recent"
+                    normalizedApp in listOf("notifications", "notification") || normalizedApp.contains("నోటిఫికేషన్") -> "notifications"
+                    normalizedApp in listOf("quick settings", "quick_settings", "quicksetting") || normalizedApp.contains("క్విక్ సెట్టింగ్స్") -> "quick_settings"
+                    normalizedApp in listOf("screenshot", "take screenshot") || normalizedApp.contains("స్క్రీన్‌షాట్") || normalizedApp.contains("స్క్రీన్ షాట్") -> "screenshot"
                     else -> null
                 }
                 

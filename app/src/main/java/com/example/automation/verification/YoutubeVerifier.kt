@@ -6,7 +6,7 @@ import com.example.automation.engine.ExecutionRequest
 import com.example.automation.tools.ToolResult
 
 class YoutubeVerifier : Verifier {
-    override val supportedTools: Set<String> = setOf("youtube_search")
+    override val supportedTools: Set<String> = setOf("youtube", "youtube_search")
 
     override fun verify(
         context: Context,

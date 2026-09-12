@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 class DndTool(private val dndAction: DndAction) : Tool {
     override val name: String = "dnd"
-    override val supportedActions: Set<String> = setOf("SET_DND", "GET_DND")
+    override val supportedActions: Set<String> = setOf("SET_DND", "GET_DND", "DND_ON", "DND_OFF", "ENABLE_DND", "DISABLE_DND")
     override val retryPolicy: RetryPolicy = RetryPolicy.NoRetry
     override val capabilities: ToolCapabilities = ToolCapabilities(
         supportsPlanner = true,

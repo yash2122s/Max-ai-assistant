@@ -12,7 +12,7 @@ object WindowsToolExecutor {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var heartbeatJob: Job? = null
     
-    private var storedIp: String = "192.168.1.100"
+    private var storedIp: String = "192.168.0.152"
     private var storedPort: Int = 9000
 
     fun isDesktopConnectionEnabled(context: Context): Boolean {
@@ -76,7 +76,7 @@ object WindowsToolExecutor {
     private fun loadConfig(context: Context) {
         val prefs = context.getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
         storedIp = prefs.getString("agent_ip", "192.168.0.152") ?: "192.168.0.152"
-        storedPort = prefs.getInt("agent_port", 9500)
+        storedPort = prefs.getInt("agent_port", 9000)
     }
 
     fun saveConfig(context: Context, ip: String, port: Int) {
@@ -86,7 +86,12 @@ object WindowsToolExecutor {
         storedPort = port
     }
 
-    fun getClient(): WindowsAgentClient? = client
+    fun getClient(context: Context? = null): WindowsAgentClient? {
+        if (client == null && context != null) {
+            initialize(context)
+        }
+        return client
+    }
 
     fun markConnected(connected: Boolean) {
         isConnected.set(connected)

@@ -15,6 +15,10 @@ class NotificationListenerBridge : NotificationListenerService() {
         val packageName = sbn.packageName ?: return
         if (packageName == applicationContext.packageName) return // Ignore self
 
+        if (!NotificationAppAccessManager.isAppEnabled(applicationContext, packageName)) {
+            return
+        }
+
         val extras = sbn.notification?.extras ?: return
         val title = extras.getCharSequence("android.title")?.toString() ?: ""
         val text = extras.getCharSequence("android.text")?.toString() ?: ""

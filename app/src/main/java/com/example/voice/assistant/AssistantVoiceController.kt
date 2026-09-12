@@ -32,9 +32,6 @@ class AssistantVoiceController {
     init {
         scope.launch {
             viewModel.uiState.collect { chatState ->
-                val userMsg = chatState.messages.firstOrNull { it.role == "You" }?.content ?: ""
-                val geminiMsg = chatState.messages.firstOrNull { it.role == "Gemini" }?.content ?: ""
-                
                 val sessionState = when {
                     chatState.error != null -> SessionState.ERROR
                     chatState.isRecording -> SessionState.LISTENING
@@ -47,10 +44,10 @@ class AssistantVoiceController {
                     sessionState = sessionState,
                     isRecording = chatState.isRecording,
                     error = chatState.error,
-                    userTranscription = userMsg,
-                    geminiResponse = geminiMsg,
-                    statusText = if (chatState.isRecording) "Listening..." else "Connected",
-                    visualizerRms = if (chatState.isRecording) ChatViewModel.rmsFlow.value else 0f
+                    userTranscription = chatState.liveUserCaption,
+                    geminiResponse = chatState.liveAiCaption,
+                    statusText = if (chatState.isRecording) "Listening..." else if (chatState.isAiSpeaking) "MAX Speaking..." else "Connected",
+                    visualizerRms = if (chatState.isRecording || chatState.isAiSpeaking) ChatViewModel.rmsFlow.value else 0f
                 ) }
             }
         }

@@ -16,6 +16,10 @@
 local.properties
 .env
 debug.keystore
+*.jks
+*.keystore
+keystore.properties
+release-keystore.properties
 
 # Python
 __pycache__/
@@ -40,3 +44,23 @@ clean_*.txt
 extracted_user_code.txt
 gemini_logs*.txt
 log_*.txt
+
+# Root/Test media and audit dumps
+/*.png
+/*.mp4
+app/*.mp4
+audit/
+audit_notes/
+*.db-shm
+*.db-wal
+windows-agent/storage/*.db*
+windows-agent/storage/*.json
+windows-agent/storage/worktrees/
+
+# Node & Frontend
+node_modules/
+**/node_modules/
+frontend/build/
+frontend/dist/
+windows-agent/test_profile/
+

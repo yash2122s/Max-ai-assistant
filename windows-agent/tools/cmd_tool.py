@@ -2,10 +2,11 @@ import os
 import shutil
 import subprocess
 from .base_tool import BaseTool
+from core.security import security_guard
 
 class CmdTool(BaseTool):
     def __init__(self):
-        self.cwd = os.getcwd()
+        self.cwd = os.path.abspath(os.path.expanduser("~"))
 
     @property
     def name(self) -> str:
@@ -19,6 +20,16 @@ class CmdTool(BaseTool):
                 target_path = arguments.get("path", ".")
                 target_path = os.path.expanduser(target_path)
                 full_path = os.path.abspath(os.path.join(self.cwd, target_path))
+                
+                if not security_guard.is_safe_path(full_path):
+                    return {
+                        "status": "failed",
+                        "error": {
+                            "code": "PERMISSION_DENIED",
+                            "message": f"Access denied: Path '{target_path}' is outside sandbox.",
+                            "retryable": False
+                        }
+                    }
                 
                 if not os.path.exists(full_path):
                     return {
@@ -42,13 +53,23 @@ class CmdTool(BaseTool):
                 
             elif action == "echo":
                 message = arguments.get("message", "")
-                return {"status": "success", "output": message}
+                return {"status": "success", "output": security_guard.mask_secrets(message)}
                 
             elif action == "cd":
                 target_path = arguments.get("path", ".")
                 target_path = os.path.expanduser(target_path)
                 full_path = os.path.abspath(os.path.join(self.cwd, target_path))
                 
+                if not security_guard.is_safe_path(full_path):
+                    return {
+                        "status": "failed",
+                        "error": {
+                            "code": "PERMISSION_DENIED",
+                            "message": f"Access denied: Path '{target_path}' is outside sandbox.",
+                            "retryable": False
+                        }
+                    }
+
                 if not os.path.exists(full_path):
                     return {
                         "status": "failed",

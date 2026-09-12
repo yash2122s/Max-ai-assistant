@@ -52,7 +52,7 @@ class HTTPServer:
             body = b""
             content_length = int(headers.get("content-length", 0))
             if content_length > 0:
-                body = await reader.readexact(content_length)
+                body = await reader.readexactly(content_length)
 
             # Get client IP address
             peername = writer.get_extra_info("peername")

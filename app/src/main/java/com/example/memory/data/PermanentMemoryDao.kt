@@ -13,8 +13,17 @@ interface PermanentMemoryDao {
     @Query("SELECT * FROM permanent_memory ORDER BY pinned DESC, updatedAt DESC")
     fun getAllFlow(): Flow<List<PermanentMemory>>
 
+    @Query("SELECT * FROM permanent_memory ORDER BY pinned DESC, updatedAt DESC")
+    fun getAgentMemoriesFlow(): Flow<List<PermanentMemory>>
+
+    @Query("SELECT * FROM permanent_memory ORDER BY pinned DESC, updatedAt DESC")
+    fun getPrivateMemoriesFlow(): Flow<List<PermanentMemory>>
+
     @Query("SELECT * FROM permanent_memory WHERE enabled = 1 ORDER BY pinned DESC, updatedAt DESC")
     fun getEnabledFlow(): Flow<List<PermanentMemory>>
+
+    @Query("SELECT * FROM permanent_memory WHERE enabled = 1 ORDER BY pinned DESC, updatedAt DESC LIMIT :limit")
+    fun getTopMemoriesForPromptFlow(limit: Int = 30): Flow<List<PermanentMemory>>
 
     @Query("SELECT * FROM permanent_memory ORDER BY pinned DESC, updatedAt DESC")
     suspend fun getAll(): List<PermanentMemory>
@@ -55,6 +64,12 @@ interface PermanentMemoryDao {
     @Update
     suspend fun update(memory: PermanentMemory)
 
+    @Query("DELETE FROM permanent_memory WHERE isPrivate = :isPrivate")
+    suspend fun deleteBySpace(isPrivate: Int)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAll(memories: List<PermanentMemory>)
+
     @Query("DELETE FROM permanent_memory WHERE memoryId = :memoryId")
     suspend fun deleteById(memoryId: String)
 
@@ -81,4 +96,18 @@ interface PermanentMemoryDao {
 
     @Query("SELECT COUNT(*) FROM permanent_memory WHERE pinned = 1")
     suspend fun getPinnedCount(): Int
+
+    // -- Universal Import & Sync Extension Queries ------------------------------
+
+    @Query("SELECT * FROM permanent_memory WHERE importChecksum = :checksum LIMIT 1")
+    suspend fun getByImportChecksum(checksum: String): PermanentMemory?
+
+    @Query("SELECT * FROM permanent_memory WHERE provider = :provider AND sourceRecordId = :sourceRecordId LIMIT 1")
+    suspend fun getBySourceRecordId(provider: String, sourceRecordId: String): PermanentMemory?
+
+    @Query("SELECT * FROM permanent_memory WHERE contentHash = :hash LIMIT 1")
+    suspend fun getByContentHash(hash: String): PermanentMemory?
+
+    @Query("SELECT importChecksum FROM permanent_memory WHERE importChecksum IS NOT NULL")
+    suspend fun getAllImportChecksums(): List<String>
 }

@@ -52,7 +52,12 @@ class CompanionConnectionService : Service() {
         Log.d("CompanionConnectionService", "MAX Link Foreground Service created")
         
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, createNotification("MAX Link Service Active"))
+        val notification = createNotification("MAX Link Service Active")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            startForeground(NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
         
         nsdManager = getSystemService(Context.NSD_SERVICE) as NsdManager
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -94,7 +99,7 @@ class CompanionConnectionService : Service() {
     }
 
     private fun createNotification(statusText: String): Notification {
-        val notificationIntent = Intent(this, MainActivity::class.java)
+        val notificationIntent = Intent(this, com.example.MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
             this, 0, notificationIntent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -187,6 +192,18 @@ class CompanionConnectionService : Service() {
                 Log.d("CompanionConnectionService", "Resolved mDNS service: $ip:$port, device_id: $deviceId (paired matching: $pairedId)")
                 
                 if (!ip.isNullOrEmpty() && (pairedId.isEmpty() || pairedId.startsWith(deviceId) || deviceId.isEmpty())) {
+                    val client = WindowsToolExecutor.getClient()
+                    if (client?.isPairingInProgress() == true) {
+                        Log.d("CompanionConnectionService", "Pairing in progress. Suppressing mDNS auto-connect.")
+                        return@onServiceResolved
+                    }
+                    val prefs = getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
+                    val authToken = prefs.getString("auth_token", null)
+                    if (authToken.isNullOrEmpty()) {
+                        Log.d("CompanionConnectionService", "Device is unpaired (no auth_token). Suppressing mDNS auto-connect.")
+                        return@onServiceResolved
+                    }
+
                     Log.d("CompanionConnectionService", "Device match or auto-discovery! Triggering WSS connection to $ip:$port.")
                     serviceScope.launch {
                         connectToAgent(ip, port)
@@ -287,12 +304,19 @@ class CompanionConnectionService : Service() {
         autoReconnectJob?.cancel()
         autoReconnectJob = serviceScope.launch {
             while (isActive) {
+                val client = WindowsToolExecutor.getClient()
+                if (client?.isPairingInProgress() == true) {
+                    delay(15000)
+                    continue
+                }
+
                 if (!WindowsToolExecutor.isAgentAvailable() && !isConnecting.get()) {
                     val prefs = getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
+                    val authToken = prefs.getString("auth_token", null)
                     val lastIp = prefs.getString("agent_ip", null)
                     val lastPort = prefs.getInt("agent_port", -1)
                     
-                    if (lastIp != null && lastPort != -1) {
+                    if (!authToken.isNullOrEmpty() && lastIp != null && lastPort != -1) {
                         Log.d("CompanionConnectionService", "mDNS idle: Trying saved fallback IP connection at $lastIp:$lastPort")
                         connectToAgent(lastIp, lastPort)
                     }
@@ -302,15 +326,25 @@ class CompanionConnectionService : Service() {
         }
     }
 
+    private var reconnectJob: kotlinx.coroutines.Job? = null
+
     // Connection execution and exponential backoff
     private fun connectToAgent(ip: String, port: Int) {
         if (WindowsToolExecutor.isAgentAvailable()) {
             Log.d("CompanionConnectionService", "Already connected to agent. Skipping connection attempt.")
             return
         }
+        val client = WindowsToolExecutor.getClient() ?: return
+        if (client.isPairingInProgress()) {
+            Log.d("CompanionConnectionService", "Pairing in progress. Skipping normal connectToAgent.")
+            return
+        }
+        if (client.isConnected() || client.isConnecting()) {
+            Log.d("CompanionConnectionService", "Client is already connecting or connected. Skipping.")
+            return
+        }
         if (!isConnecting.compareAndSet(false, true)) return
         
-        val client = WindowsToolExecutor.getClient() ?: return
         Log.d("CompanionConnectionService", "Initiating WebSocket connection to wss://$ip:$port")
         
         client.connect(ip, port, object : WindowsAgentClient.ConnectionListener {
@@ -340,6 +374,21 @@ class CompanionConnectionService : Service() {
     private fun handleConnectionFailure(ip: String, port: Int) {
         isConnecting.set(false)
         WindowsToolExecutor.markConnected(false)
+        
+        val client = WindowsToolExecutor.getClient()
+        if (client?.isPairingInProgress() == true) {
+            Log.d("CompanionConnectionService", "Pairing in progress. Suppressing reconnect loop.")
+            return
+        }
+
+        val prefs = getSharedPreferences("windows_agent_prefs", Context.MODE_PRIVATE)
+        val authToken = prefs.getString("auth_token", null)
+        if (authToken.isNullOrEmpty()) {
+            Log.d("CompanionConnectionService", "Device is unpaired (no auth_token). Suppressing automatic reconnect loop.")
+            updateNotification("MAX Desktop Link: Unpaired")
+            return
+        }
+
         updateNotification("Reconnecting to Yaswanth Laptop...")
         
         val delayTime = backoffDelays[backoffIndex]
@@ -347,9 +396,12 @@ class CompanionConnectionService : Service() {
         
         backoffIndex = (backoffIndex + 1).coerceAtMost(backoffDelays.size - 1)
         
-        serviceScope.launch {
+        reconnectJob?.cancel()
+        reconnectJob = serviceScope.launch {
             delay(delayTime)
-            connectToAgent(ip, port)
+            if (!WindowsToolExecutor.isAgentAvailable()) {
+                connectToAgent(ip, port)
+            }
         }
     }
 }

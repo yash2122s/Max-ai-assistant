@@ -1,4 +1,5 @@
 import AppState from "../state.js";
+import NotificationCenter from "../notifications.js";
 
 const tools = [
     { name: "Windows Agent", icon: "🖥️", actions: ["clipboard", "window", "vision", "filesystem", "terminal", "app"] },
@@ -25,6 +26,16 @@ export default {
                     <span class="status-badge connected">v3.0 Full GA</span>
                 </div>
                 <p style="color: var(--text-secondary); margin: 8px 0 16px 0;">MAX Windows Agent with <strong>13 tools</strong> and <strong>80+ actions</strong>. Click any action to execute.</p>
+                
+                <!-- Output Result Inspector Box -->
+                <div id="tool-output-box" style="display: none; margin-bottom: 20px; background-color: var(--bg-color); border: 1px solid var(--accent-color); border-radius: 8px; padding: 16px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <strong style="color: var(--accent-color); font-size: 13px;" id="tool-output-title">Tool Execution Output</strong>
+                        <button id="close-tool-output" class="btn btn-sm btn-secondary" style="padding: 2px 8px; font-size: 11px;">Close</button>
+                    </div>
+                    <pre id="tool-output-content" style="font-family: monospace; font-size: 12px; color: var(--text-primary); white-space: pre-wrap; word-break: break-all; margin: 0; max-height: 250px; overflow-y: auto;"></pre>
+                </div>
+
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px;">
         `;
 
@@ -44,6 +55,17 @@ export default {
         html += `</div></div>`;
         container.innerHTML = html;
 
+        const outputBox = container.querySelector('#tool-output-box');
+        const outputTitle = container.querySelector('#tool-output-title');
+        const outputContent = container.querySelector('#tool-output-content');
+        const closeBtn = container.querySelector('#close-tool-output');
+
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                outputBox.style.display = 'none';
+            });
+        }
+
         container.querySelectorAll('[data-tool]').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const tool = btn.dataset.tool;
@@ -52,11 +74,26 @@ export default {
                 btn.disabled = true;
 
                 try {
-                    const resp = await fetch('/api/v1/status');
+                    const resp = await fetch('/api/v1/tool', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tool, action, args: {} })
+                    });
                     const data = await resp.json();
-                    AppState.notify(`Tool: ${tool}/${action} — Status: ${data.success ? 'OK' : 'Error'}`, data.success ? 'success' : 'error');
+
+                    if (data.success) {
+                        NotificationCenter.success(`Executed ${tool}/${action}`, `Action returned successfully.`);
+                        if (outputBox && outputTitle && outputContent) {
+                            outputTitle.textContent = `Result: ${tool} / ${action}`;
+                            outputContent.textContent = typeof data.data === 'object' ? JSON.stringify(data.data, null, 2) : String(data.data);
+                            outputBox.style.display = 'block';
+                            outputBox.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                        }
+                    } else {
+                        NotificationCenter.error(`Tool Execution Error`, data.error?.message || `Failed to execute ${tool}/${action}`);
+                    }
                 } catch (e) {
-                    AppState.notify(`Failed to reach agent: ${e.message}`, 'error');
+                    NotificationCenter.error(`Execution Failed`, `Failed to reach agent: ${e.message}`);
                 }
 
                 btn.classList.remove('btn-loading');
@@ -69,4 +106,4 @@ export default {
 
     destroy() {}
 };
-export const view = { init: (c)=>container.innerHTML="" };
+

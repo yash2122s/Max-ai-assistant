@@ -16,16 +16,45 @@ class CameraAction : BaseAction<JSONObject>() {
         try {
             when (action) {
                 "TAKE_PHOTO" -> {
+                    val time = System.currentTimeMillis()
+                    val values = android.content.ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, "MAX_PHOTO_$time.jpg")
+                        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/MAX")
+                        }
+                    }
+                    val imageUri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
                     val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        if (imageUri != null) {
+                            putExtra(MediaStore.EXTRA_OUTPUT, imageUri)
+                        }
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                     }
                     context.startActivity(intent)
-                    log("Launched Camera app to take a photo")
+                    log("Launched Camera app with MediaStore output: $imageUri")
                 }
                 "TAKE_SCREENSHOT" -> {
                     val jpeg = com.example.voice.vision.ScreenCaptureProvider.captureCompressedJpeg()
                     if (jpeg != null) {
-                        log("Captured silent background screenshot (${jpeg.size} bytes JPEG)")
+                        val time = System.currentTimeMillis()
+                        val values = android.content.ContentValues().apply {
+                            put(MediaStore.Images.Media.DISPLAY_NAME, "MAX_Screenshot_$time.jpg")
+                            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/Screenshots")
+                            }
+                        }
+                        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                        if (uri != null) {
+                            context.contentResolver.openOutputStream(uri)?.use { os ->
+                                os.write(jpeg)
+                                os.flush()
+                            }
+                            log("Captured and persisted screenshot to MediaStore: $uri (${jpeg.size} bytes)")
+                        } else {
+                            log("Captured screenshot (${jpeg.size} bytes) but MediaStore insert failed")
+                        }
                     } else {
                         log("Silent background screenshot unavailable (Shizuku/Accessibility disabled).")
                     }

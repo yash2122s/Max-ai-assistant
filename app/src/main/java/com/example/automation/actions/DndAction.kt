@@ -9,9 +9,9 @@ import org.json.JSONObject
 
 class DndAction : BaseAction<JSONObject>() {
     override fun execute(context: Context, payload: JSONObject) {
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            ?: throw IllegalStateException("NotificationManager service unavailable")
         val action = payload.optString("action", "").uppercase()
-        val dndEnabled = payload.optBoolean("dndEnabled", false)
 
         // Check Notification Policy Access
         if (!notificationManager.isNotificationPolicyAccessGranted) {
@@ -26,21 +26,30 @@ class DndAction : BaseAction<JSONObject>() {
             } catch (e: Exception) {
                 logError("Failed to launch Notification Policy Access settings", e)
             }
-            return
+            throw IllegalStateException("Notification Policy Access permission not granted for MAX. Prompted user to allow.")
         }
 
-        try {
-            if (action == "SET_DND") {
-                if (dndEnabled) {
-                    log("Enabling DND")
-                    notificationManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
-                } else {
-                    log("Disabling DND")
-                    notificationManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
-                }
-            }
-        } catch (e: Exception) {
-            logError("Failed to execute DND action: ${e.message}", e)
+        val dndEnabled = if (payload.has("enabled")) {
+            payload.optBoolean("enabled")
+        } else if (payload.has("dndEnabled")) {
+            payload.optBoolean("dndEnabled")
+        } else if (payload.has("state")) {
+            val st = payload.optString("state").trim()
+            st.equals("ON", ignoreCase = true) || st.equals("TRUE", ignoreCase = true) || st == "1"
+        } else if (action in listOf("DND_ON", "ENABLE_DND")) {
+            true
+        } else if (action in listOf("DND_OFF", "DISABLE_DND")) {
+            false
+        } else {
+            true
+        }
+
+        if (dndEnabled) {
+            log("Enabling DND (NotificationManager.INTERRUPTION_FILTER_NONE)")
+            notificationManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_NONE)
+        } else {
+            log("Disabling DND (NotificationManager.INTERRUPTION_FILTER_ALL)")
+            notificationManager.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL)
         }
     }
 

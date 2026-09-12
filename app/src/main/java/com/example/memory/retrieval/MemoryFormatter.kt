@@ -6,13 +6,14 @@ import com.example.memory.data.PermanentMemory
 object MemoryFormatter {
 
     fun formatForPrompt(memories: List<PermanentMemory>): String {
-        if (memories.isEmpty()) return ""
+        val safeMemories = memories.filter { !it.isPrivate }
+        if (safeMemories.isEmpty()) return ""
 
         val sections = mutableListOf<String>()
         sections.add("### User Permanent Memory")
 
         // Group memories with tags vs untagged
-        val (taggedMemories, untaggedMemories) = memories.partition { it.tags.isNotBlank() }
+        val (taggedMemories, untaggedMemories) = safeMemories.partition { it.tags.isNotBlank() }
 
         if (taggedMemories.isNotEmpty()) {
             sections.add("")

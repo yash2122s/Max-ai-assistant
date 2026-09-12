@@ -8,7 +8,7 @@ import org.json.JSONObject
 
 class VolumeTool(private val volumeAction: VolumeAction) : Tool {
     override val name: String = "volume"
-    override val supportedActions: Set<String> = setOf("SET_VOLUME", "VOLUME_UP", "VOLUME_DOWN")
+    override val supportedActions: Set<String> = setOf("SET_VOLUME", "VOLUME_UP", "VOLUME_DOWN", "GET_VOLUME")
     override val retryPolicy: RetryPolicy = RetryPolicy.NoRetry
     override val capabilities: ToolCapabilities = ToolCapabilities(
         supportsPlanner = true,
@@ -22,11 +22,15 @@ class VolumeTool(private val volumeAction: VolumeAction) : Tool {
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
         return try {
             val jsonPayload = JSONObject(request.arguments.toString())
+            if (!jsonPayload.has("action")) {
+                jsonPayload.put("action", request.action)
+            }
             volumeAction.execute(context, jsonPayload)
             ToolResult(
                 success = true,
                 toolName = name,
-                verificationRequired = true
+                verificationRequired = true,
+                metadata = JSONObject().put("action", request.action)
             )
         } catch (e: Exception) {
             ToolResult(

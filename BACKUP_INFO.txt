@@ -1,0 +1,35 @@
+MAX MEMORY SYSTEM AUDIT BACKUP INFO
+==================================================
+Timestamp: 2026-08-15 18:27:03 IST
+Project Path: C:\Users\yaswa\Downloads\gemini-live
+Backup Location: C:\Users\yaswa\Downloads\MAX_Backups\MAX_memory_audit_backup_20260815_182703
+Git Commit: 49ab9f2ec605f939968b22445fb9d3126d48c72a
+Git Branch: main
+
+Memory-Related Files:
+- app/src/main/java/com/example/memory/config/MemoryConfig.kt
+- app/src/main/java/com/example/memory/data/GeminiEmbeddingClient.kt
+- app/src/main/java/com/example/memory/data/MemoryCategory.kt
+- app/src/main/java/com/example/memory/data/MemoryRepository.kt
+- app/src/main/java/com/example/memory/data/MemorySource.kt
+- app/src/main/java/com/example/memory/data/MemoryType.kt
+- app/src/main/java/com/example/memory/data/MemoryTypeConverters.kt
+- app/src/main/java/com/example/memory/data/PermanentMemory.kt
+- app/src/main/java/com/example/memory/data/PermanentMemoryDao.kt
+- app/src/main/java/com/example/memory/retrieval/MemoryFormatter.kt
+- app/src/main/java/com/example/memory/retrieval/MemoryProvider.kt
+- app/src/main/java/com/example/memory/retrieval/MemoryRetrieval.kt
+- app/src/main/java/com/example/memory/ui/AddMemoryDialog.kt
+- app/src/main/java/com/example/memory/ui/EditMemoryDialog.kt
+- app/src/main/java/com/example/memory/ui/MemoryScreen.kt
+- app/src/main/java/com/example/memory/viewmodel/MemoryViewModel.kt
+- app/src/main/java/com/example/automation/tools/SaveMemoryTool.kt
+- app/src/main/java/com/example/network/PromptBuilder.kt
+- app/src/main/java/com/example/network/GeminiWebSocketClient.kt
+- app/src/main/java/com/example/voice/assistant/ConnectionManager.kt
+- app/src/main/java/com/example/data/local/AppDatabase.kt
+- app/src/main/java/com/example/data/local/ChatMessage.kt
+- app/src/main/java/com/example/data/local/ChatMessageDao.kt
+
+Backup Status: Successfully created and verified.
+==================================================

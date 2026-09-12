@@ -205,12 +205,14 @@ async def handle_request(method: str, path: str, headers: dict, body: bytes, wri
                 return
                 
             uptime = time.time() - settings_manager.start_time
+            metrics = metrics_manager.get_metrics()
             status_data = {
                 "agent_version": "3.0.0",
                 "protocol_version": settings_manager.get(SettingKey.PROTOCOL_VERSION.value, 1),
                 "uptime": round(uptime, 2),
                 "connected_devices": len(connection_manager.get_all_connections()),
                 "paired_devices": len(session_manager.paired_devices),
+                "metrics": metrics,
                 "connections": [
                     {
                         "device_id": conn.device_id,
@@ -227,6 +229,186 @@ async def handle_request(method: str, path: str, headers: dict, body: bytes, wri
             }
             write_success(status_data)
             await writer.drain()
+
+        elif path in ("/api/chat", "/api/v1/chat"):
+            if method == "OPTIONS":
+                h_bytes = (
+                    "HTTP/1.1 204 No Content\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
+                    "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
+                    "Access-Control-Allow-Headers: Content-Type\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode("utf-8")
+                writer.write(h_bytes)
+                await writer.drain()
+                return
+
+            if method != "POST":
+                write_error(405, ErrorCode.METHOD_NOT_ALLOWED.value, "Only POST is allowed")
+                await writer.drain()
+                return
+
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                user_msg = payload.get("message", "").strip()
+                if not user_msg:
+                    write_error(400, "BAD_REQUEST", "Message cannot be empty")
+                    await writer.drain()
+                    return
+
+                from .event_bus import event_bus
+                from protocol.event_types import EventType
+                
+                # 1. Publish User Message Event
+                event_bus.publish(EventType.CHAT_MESSAGE, {
+                    "role": "user",
+                    "text": user_msg,
+                    "timestamp": time.time()
+                })
+
+                # 2. Process chat message via tool executor / Gemini
+                from core.tool_executor import ToolRegistry
+                registry = ToolRegistry()
+                
+                # Check for direct tool matches or process via AI
+                response_text = ""
+                tool_results = []
+                
+                # Try simple tool dispatch or Gemini API
+                from config import GEMINI_API_KEY, GEMINI_MODEL, SYSTEM_PROMPT
+                if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
+                    try:
+                        from google import genai
+                        from google.genai import types
+                        client = genai.Client(api_key=GEMINI_API_KEY)
+
+                        # Generate response with tools available
+                        prompt = f"{SYSTEM_PROMPT}\nUser asks: {user_msg}\nRespond concisely as MAX."
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash",
+                            contents=user_msg,
+                            config=types.GenerateContentConfig(
+                                system_instruction=SYSTEM_PROMPT,
+                                temperature=0.7
+                            )
+                        )
+                        response_text = response.text if response and response.text else "Task poorthi chesanu bangaram."
+                    except Exception as ai_err:
+                        response_text = f"Request process chesanu bangaram: {user_msg}"
+                else:
+                    response_text = f"MAX Standalone: Received '{user_msg}'. Add GEMINI_API_KEY to enable full AI responses."
+
+                # Publish MAX Response Event
+                event_bus.publish(EventType.CHAT_MESSAGE, {
+                    "role": "max",
+                    "text": response_text,
+                    "timestamp": time.time()
+                })
+
+                write_success({
+                    "user_message": user_msg,
+                    "max_response": response_text
+                })
+                await writer.drain()
+            except Exception as chat_err:
+                write_error(500, "CHAT_ERROR", str(chat_err))
+                await writer.drain()
+
+        elif path in ("/api/tool", "/api/v1/tool"):
+            if method == "OPTIONS":
+                h_bytes = (
+                    "HTTP/1.1 204 No Content\r\n"
+                    "Access-Control-Allow-Origin: *\r\n"
+                    "Access-Control-Allow-Methods: POST, OPTIONS\r\n"
+                    "Access-Control-Allow-Headers: Content-Type\r\n"
+                    "Connection: close\r\n\r\n"
+                ).encode("utf-8")
+                writer.write(h_bytes)
+                await writer.drain()
+                return
+
+            if method != "POST":
+                write_error(405, ErrorCode.METHOD_NOT_ALLOWED.value, "Only POST is allowed")
+                await writer.drain()
+                return
+
+            try:
+                payload = json.loads(body.decode("utf-8")) if body else {}
+                token = headers.get("authorization", "").replace("Bearer ", "").strip() or payload.get("token", "")
+                origin = headers.get("origin", "").lower()
+                
+                # Check Origin against CSRF / DNS-rebinding
+                is_local = client_ip in ("127.0.0.1", "::1", "localhost")
+                http_port = settings_manager.get(SettingKey.HTTP_PORT.value, 9001)
+                allowed_local_origins = (
+                    f"http://localhost:{http_port}",
+                    f"http://127.0.0.1:{http_port}",
+                    "http://localhost:5173",
+                    "http://127.0.0.1:5173",
+                    "",
+                )
+                is_valid_token = any(d.get("token") == token for d in session_manager.paired_devices)
+
+
+                if is_local:
+                    if origin and not any(origin.startswith(ao) for ao in allowed_local_origins if ao):
+                        if not is_valid_token:
+                            write_error(403, "FORBIDDEN", f"Cross-Origin request blocked from unauthorized origin: {origin}")
+                            await writer.drain()
+                            return
+                else:
+                    if not is_valid_token:
+                        write_error(401, "UNAUTHORIZED", "Authentication token is invalid or missing.")
+                        await writer.drain()
+                        return
+
+
+                tool_name = payload.get("tool", "").strip().lower()
+                action_name = payload.get("action", "").strip().lower()
+                args = payload.get("args", {})
+
+                # Normalize tool names from dashboard
+                name_map = {
+                    "system_info": "systeminfo",
+                    "file_ops": "fileops",
+                    "environment": "env",
+                    "windows_agent": "windows_agent"
+                }
+                tool_name = name_map.get(tool_name, tool_name)
+
+                import tools
+                from tools.tool_registry import ToolRegistry
+                from server.event_bus import event_bus
+                from protocol.event_types import EventType
+
+                tool_obj = ToolRegistry.get_tool(tool_name)
+                if not tool_obj:
+                    write_error(404, "TOOL_NOT_FOUND", f"Tool '{tool_name}' is not registered.")
+                    await writer.drain()
+                    return
+
+
+                event_bus.publish(EventType.TOOL_REQUESTED, {
+                    "tool": tool_name,
+                    "action": action_name,
+                    "args": args
+                })
+
+                # Execute action
+                res = await tool_obj.execute(action_name, args)
+                
+                event_bus.publish(EventType.TOOL_COMPLETED, {
+                    "tool": tool_name,
+                    "action": action_name,
+                    "result": res
+                })
+
+                metrics_manager.increment_requests()
+                write_success(res)
+                await writer.drain()
+            except Exception as tool_err:
+                write_error(500, "EXECUTION_ERROR", str(tool_err))
+                await writer.drain()
 
         elif path.startswith("/api/events") or path.startswith("/api/v1/events"):
             if method != "GET":

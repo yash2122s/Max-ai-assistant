@@ -13,3 +13,28 @@ class EventType(Enum):
     TOOL_COMPLETED = "tool_completed"
     TOOL_FAILED = "tool_failed"
     HEARTBEAT = "heartbeat"
+    CHAT_MESSAGE = "chat_message"
+    CORE_STATE = "core_state"
+    NOTIFICATION_RECEIVED = "notification_received"
+    # Task Engine Events
+    TASK_CREATED = "task_created"
+    TASK_STARTED = "task_started"
+    STEP_STARTED = "step_started"
+    STEP_COMPLETED = "step_completed"
+    STEP_FAILED = "step_failed"
+    STEP_RETRYING = "step_retrying"
+    TASK_COMPLETED = "task_completed"
+    TASK_FAILED = "task_failed"
+    TASK_CANCELLED = "task_cancelled"
+    TASK_INTERRUPTED = "task_interrupted"
+
+    # Multi-Device Ecosystem Events
+    DEVICE_REGISTERED = "device_registered"
+    DEVICE_UPDATED = "device_updated"
+    DEVICE_STATE_CHANGED = "device_state_changed"
+    DEVICE_CAPABILITIES_UPDATED = "device_capabilities_updated"
+    COMMAND_REQUEST_SENT = "command_request_sent"
+    COMMAND_RESULT_RECEIVED = "command_result_received"
+
+
+

@@ -1,21 +1,42 @@
-# Add project specific ProGuard rules here.
-# You can control the set of applied configuration files using the
-# proguardFiles setting in build.gradle.
-#
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
+# MAX Production Release ProGuard / R8 Rules
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# Preserve source file & line numbers for production crash reporting
+-keepattributes SourceFile,LineNumberTable
+-renamesourcefileattribute SourceFile
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Preserve Room entities, DAOs, and generated Room database
+-keep class androidx.room.RoomDatabase
+-keep class * extends androidx.room.RoomDatabase
+-keep @androidx.room.Entity class * { *; }
+-keep @androidx.room.Dao interface * { *; }
+-keep class com.example.data.local.** { *; }
+-keep class com.example.memory.data.** { *; }
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Preserve Moshi & Gson serialization data models
+-keepattributes *Annotation*,Signature,InnerClasses,EnclosingMethod
+-keep @com.squareup.moshi.JsonClass class * { *; }
+-keep class * {
+    @com.squareup.moshi.Json(name=*) <fields>;
+}
+-keep class * implements com.google.gson.TypeAdapter { *; }
+-keep class com.example.network.model.** { *; }
+-keep class com.example.automation.agent.** { *; }
+-keep class com.example.memory.universal.** { *; }
+
+# Preserve Shizuku privileged IPC bindings
+-keep class moe.shizuku.** { *; }
+-keep class rikka.shizuku.** { *; }
+-keep interface moe.shizuku.** { *; }
+-keep interface rikka.shizuku.** { *; }
+
+# Preserve Android Services, Receivers, and Accessibility
+-keep public class * extends android.app.Service
+-keep public class * extends android.content.BroadcastReceiver
+-keep public class * extends android.accessibilityservice.AccessibilityService
+-keep public class * extends android.service.notification.NotificationListenerService
+-keep public class * extends android.service.voice.VoiceInteractionService
+-keep public class * extends android.speech.RecognitionService
+
+# Preserve Jetpack Compose runtime and animation metadata
+-keep class androidx.compose.runtime.** { *; }
+-keep class androidx.compose.animation.** { *; }

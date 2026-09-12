@@ -6,6 +6,7 @@ import android.content.Intent
 import android.util.Log
 import com.example.automation.engine.ExecutionEngine
 import com.example.automation.engine.ExecutionResult
+import com.example.automation.engine.GoalPlanner
 import com.example.automation.engine.TaskContext
 import com.example.automation.engine.TaskSource
 import kotlinx.coroutines.CoroutineScope
@@ -17,6 +18,29 @@ class TaskReceiver : BroadcastReceiver() {
     private val TAG = "TaskReceiver"
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == "com.example.ACTION_CANCEL_GOAL") {
+            Log.i("GoalPlannerRunner", "Received ACTION_CANCEL_GOAL broadcast.")
+            GoalPlanner.cancelActivePlan()
+            return
+        }
+
+        if (intent.action == "com.example.ACTION_EXECUTE_GOAL") {
+            val goal = intent.getStringExtra("GOAL") ?: intent.getStringExtra("goal") ?: return
+            Log.d("GoalPlannerRunner", "Received goal via broadcast: '$goal'")
+            val pendingResult = goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try {
+                    val result = GoalPlanner.planAndExecute(context.applicationContext, goal)
+                    Log.d("GoalPlannerRunner", "Broadcast goal execution finished: success=${result.success}, executed=${result.executedStepsCount}/${result.totalStepsCount}, error=${result.errorMessage}")
+                } catch (e: Exception) {
+                    Log.e("GoalPlannerRunner", "Error executing broadcast goal: $goal", e)
+                } finally {
+                    pendingResult.finish()
+                }
+            }
+            return
+        }
+
         if (intent.action == AlarmScheduler.ACTION_RUN_TASK) {
             val taskId = intent.getStringExtra("TASK_ID") ?: return
             Log.d(TAG, "Alarm triggered for task: $taskId")

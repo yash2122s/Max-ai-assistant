@@ -75,7 +75,7 @@ object MemoryRetrieval {
         queryEmbedding: FloatArray? = null
     ): List<PermanentMemory> {
         return memories
-            .filter { it.enabled }
+            .filter { it.enabled && !it.isPrivate }
             .sortedWith(
                 compareByDescending<PermanentMemory> { it.pinned }
                     .thenByDescending { scoreMemoryHybrid(it, query, queryEmbedding) }
@@ -105,7 +105,7 @@ object MemoryRetrieval {
         val result = mutableListOf<PermanentMemory>()
         for (memory in selected) {
             val memoryChars = memory.title.length + memory.content.length + memory.category.length + 10
-            if (charCount + memoryChars > MemoryConfig.MAX_PROMPT_CHARS) break
+            if (charCount + memoryChars > MemoryConfig.MAX_PROMPT_CHARS) continue
             charCount += memoryChars
             result.add(memory)
         }

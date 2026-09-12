@@ -104,6 +104,15 @@ class MyApplication : Application() {
         val searchContactTool = com.example.automation.tools.SearchContactTool(searchContactAction)
         val searchContactVerifier = com.example.automation.verification.SearchContactVerifier()
 
+        val answerCallAction = com.example.automation.actions.AnswerCallAction()
+        val answerCallTool = com.example.automation.tools.AnswerCallTool(answerCallAction)
+        
+        val rejectCallAction = com.example.automation.actions.RejectCallAction()
+        val rejectCallTool = com.example.automation.tools.RejectCallTool(rejectCallAction)
+        
+        val sendSmsAction = com.example.automation.actions.SendSmsAction()
+        val smsTool = com.example.automation.tools.SmsTool(sendSmsAction)
+
         VerificationRegistry.register(openAppVerifier)
         VerificationRegistry.register(whatsAppVerifier)
         VerificationRegistry.register(volumeVerifier)
@@ -123,6 +132,8 @@ class MyApplication : Application() {
         VerificationRegistry.register(calendarVerifier)
         VerificationRegistry.register(periodTrackerVerifier)
         VerificationRegistry.register(searchContactVerifier)
+        VerificationRegistry.register(com.example.automation.verification.ClickUiVerifier())
+        VerificationRegistry.register(com.example.automation.verification.PressEnterVerifier())
 
         ToolRegistry.register(openAppTool)
         ToolRegistry.register(flashlightTool)
@@ -158,41 +169,82 @@ class MyApplication : Application() {
         ToolRegistry.register(routineTool)
         ToolRegistry.register(periodTrackerTool)
         ToolRegistry.register(searchContactTool)
+        ToolRegistry.register(answerCallTool)
+        ToolRegistry.register(rejectCallTool)
+        ToolRegistry.register(smsTool)
         ToolRegistry.register(com.example.automation.tools.SaveMemoryTool())
+        ToolRegistry.register(com.example.automation.tools.ForgetMemoryTool())
         ToolRegistry.register(com.example.automation.tools.ReminderTool())
         ToolRegistry.register(com.example.automation.tools.UnlockTool())
+        ToolRegistry.register(com.example.automation.tools.ClickUiTool())
+        ToolRegistry.register(com.example.automation.tools.TypeTextTool())
+        ToolRegistry.register(com.example.automation.tools.PressEnterTool())
+        ToolRegistry.register(com.example.automation.tools.ScrollTool())
+        ToolRegistry.register(com.example.automation.tools.ScreenContextTool())
+        ToolRegistry.register(com.example.automation.tools.UiAgentTool())
+        ToolRegistry.register(com.example.automation.tools.KeyboardActionTool())
+        ToolRegistry.register(com.example.automation.tools.ClearTextTool())
 
         VerificationRegistry.freeze()
         ToolRegistry.freeze()
+
+        // Inject LLM Planning Provider into GoalPlanner
+        val planningProvider = com.example.network.provider.GeminiPlanningProvider(this)
+        com.example.automation.engine.GoalPlanner.setPlanningProvider(planningProvider)
         
-        // Start Telegram Bot Service only when fully configured (token + authorized chat)
-        val settings = com.example.data.preferences.SettingsManager(this)
-        if (settings.isTelegramBotEnabled &&
-            settings.telegramBotToken.isNotBlank() &&
-            settings.telegramChatId.isNotBlank()
-        ) {
-            try {
-                val serviceIntent = android.content.Intent(this, com.example.service.TelegramBotService::class.java)
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                    startForegroundService(serviceIntent)
-                } else {
-                    startService(serviceIntent)
-                }
-            } catch (e: java.lang.Exception) {
-                Log.e("MyApplication", "Failed to start TelegramBotService on startup", e)
-            }
-        } else if (settings.isTelegramBotEnabled) {
-            Log.w("MyApplication", "Telegram bot enabled but token/chat ID missing — not starting service")
-        }
-        
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-            try {
-                com.example.data.local.PeriodDataSeeder.seedPeriodData(this@MyApplication)
-            } catch (e: Exception) {
-                Log.e("MyApplication", "Error seeding period data", e)
-            }
+        // Initialize central MaxRuntimeManager
+        com.example.core.lifecycle.MaxRuntimeManager.initialize(this)
+
+        // Initialize and start lifecycle-driven visual execution feedback overlay
+        try {
+            val visualFeedbackManager = com.example.ui.overlay.MaxVisualFeedbackManager(this)
+            visualFeedbackManager.startListening(kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main))
+        } catch (e: Exception) {
+            Log.w("MyApplication", "Visual feedback overlay initialization deferred/failed: ${e.message}")
         }
 
+        // Defer non-critical background services & scans to IO scope so Compose paints first frame immediately
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            // Background app scan
+            try {
+                com.example.knowledge.apps.InstalledAppsRepository.scanAndSaveInstalledApps(applicationContext)
+            } catch (e: Exception) {
+                Log.w("MyApplication", "Background apps scan deferred error", e)
+            }
+
+            // Restore runtime services safely if MAX is enabled
+            com.example.core.lifecycle.MaxRuntimeManager.restoreRuntimeState(this@MyApplication)
+        }
+
+        // Foreground/Background Activity Tracker for Dynamic Capsule Overlay
+        var startedActivities = 0
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            override fun onActivityCreated(activity: android.app.Activity, savedInstanceState: android.os.Bundle?) {}
+            override fun onActivityStarted(activity: android.app.Activity) {
+                startedActivities++
+                _isMaxForeground.value = (startedActivities > 0)
+            }
+            override fun onActivityResumed(activity: android.app.Activity) {
+                _isMaxForeground.value = true
+            }
+            override fun onActivityPaused(activity: android.app.Activity) {}
+            override fun onActivityStopped(activity: android.app.Activity) {
+                startedActivities = (startedActivities - 1).coerceAtLeast(0)
+                _isMaxForeground.value = (startedActivities > 0)
+            }
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, outState: android.os.Bundle) {}
+            override fun onActivityDestroyed(activity: android.app.Activity) {}
+        })
+
         Log.d("MyApplication", "MAX execution framework successfully initialized.")
+    }
+
+    companion object {
+        private val _isMaxForeground = kotlinx.coroutines.flow.MutableStateFlow(false)
+        val isMaxForeground: kotlinx.coroutines.flow.StateFlow<Boolean> = _isMaxForeground
+
+        fun setForegroundForTesting(foreground: Boolean) {
+            _isMaxForeground.value = foreground
+        }
     }
 }

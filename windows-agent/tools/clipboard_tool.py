@@ -1,3 +1,8 @@
+"""
+MAX AI — Win32 Native Clipboard Helper
+Fast, low-latency, memory-safe clipboard reading and writing with pyperclip fallback.
+"""
+
 import ctypes
 import hashlib
 import logging
@@ -43,61 +48,72 @@ GlobalUnlock.restype = ctypes.c_bool
 GMEM_DDESHARE = 0x2000
 CF_UNICODETEXT = 13
 
+
 class ClipboardHelper:
     def __init__(self):
         self.last_hash = ""
 
     def get_text(self) -> str:
+        """Read unicode text from clipboard using Win32 API with pyperclip fallback."""
         try:
-            if not OpenClipboard(None):
-                return ""
-            try:
-                handle = GetClipboardData(CF_UNICODETEXT)
-                if not handle:
-                    return ""
-                ptr = GlobalLock(handle)
-                if not ptr:
-                    return ""
-                text = ctypes.wstring_at(ptr)
-                GlobalUnlock(handle)
-                return text
-            finally:
-                CloseClipboard()
+            if OpenClipboard(None):
+                try:
+                    handle = GetClipboardData(CF_UNICODETEXT)
+                    if handle:
+                        ptr = GlobalLock(handle)
+                        if ptr:
+                            text = ctypes.wstring_at(ptr)
+                            GlobalUnlock(handle)
+                            return text
+                finally:
+                    CloseClipboard()
         except Exception as e:
-            logger.error(f"Failed to read from Windows clipboard: {e}")
+            logger.debug(f"Win32 clipboard read fallback to pyperclip: {e}")
+
+        try:
+            import pyperclip
+            return pyperclip.paste() or ""
+        except Exception as pe:
+            logger.error(f"Failed to read from clipboard: {pe}")
             return ""
 
     def set_text(self, text: str) -> bool:
+        """Write unicode text to clipboard using Win32 API with pyperclip fallback."""
+        if text is None:
+            text = ""
+
         try:
-            # Hash to prevent circular synchronization loops
             text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
             if text_hash == self.last_hash:
-                logger.info("Clipboard set ignored to prevent circular feedback loop")
                 return True
 
-            if not OpenClipboard(None):
-                logger.error("Failed to open Windows clipboard")
-                return False
-            try:
-                EmptyClipboard()
-                # Unicode is 2 bytes per char + null terminator
-                bytes_count = (len(text) + 1) * 2
-                h_global = GlobalAlloc(GMEM_DDESHARE, bytes_count)
-                ptr = GlobalLock(h_global)
-                if not ptr:
-                    return False
-                ctypes.memmove(ptr, ctypes.c_wchar_p(text), bytes_count)
-                GlobalUnlock(h_global)
-                
-                res = SetClipboardData(CF_UNICODETEXT, h_global)
-                if res:
-                    self.last_hash = text_hash
-                    return True
-                return False
-            finally:
-                CloseClipboard()
+            if OpenClipboard(None):
+                try:
+                    EmptyClipboard()
+                    bytes_count = (len(text) + 1) * 2
+                    h_global = GlobalAlloc(GMEM_DDESHARE, bytes_count)
+                    if h_global:
+                        ptr = GlobalLock(h_global)
+                        if ptr:
+                            ctypes.memmove(ptr, ctypes.c_wchar_p(text), bytes_count)
+                            GlobalUnlock(h_global)
+                            res = SetClipboardData(CF_UNICODETEXT, h_global)
+                            if res:
+                                self.last_hash = text_hash
+                                return True
+                finally:
+                    CloseClipboard()
         except Exception as e:
-            logger.error(f"Failed to write to Windows clipboard: {e}")
+            logger.debug(f"Win32 clipboard write fallback to pyperclip: {e}")
+
+        try:
+            import pyperclip
+            pyperclip.copy(text)
+            self.last_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            return True
+        except Exception as pe:
+            logger.error(f"Failed to write to clipboard: {pe}")
             return False
+
 
 clipboard_helper = ClipboardHelper()

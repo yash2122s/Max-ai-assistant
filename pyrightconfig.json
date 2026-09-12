@@ -1,0 +1,11 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "extraPaths": [
+    "./windows-agent",
+    "./windows-agent/core",
+    "./windows-agent/server"
+  ],
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic"
+}

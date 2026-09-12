@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import time
+from typing import Optional, Dict, Any, List
 import websockets
 from config import LOG_PATH
 from .pairing_manager import PairingManager
@@ -34,11 +35,13 @@ class MDNSAdvertiser:
     async def start(self, local_ip: str):
         self.aio_zeroconf = AsyncZeroconf(ip_version=IPVersion.V4Only)
         
+        from core.cert_generator import get_cert_fingerprint
         # TXT record properties
         txt_records = {
             "device_id": self.device_id[:12],
             "device_name": self.name,
-            "version": "3.0"
+            "version": "3.0",
+            "cert_fingerprint": get_cert_fingerprint()
         }
         
         clean_name = f"{self.name.replace(' ', '-').replace('.', '-')}-{self.device_id[:6]}"
@@ -62,16 +65,28 @@ class MDNSAdvertiser:
             try:
                 await self.aio_zeroconf.async_unregister_service(self.service_info)
                 await self.aio_zeroconf.async_close()
+                # Allow Zeroconf background tasks to drain before event loop exits
+                await asyncio.sleep(0.2)
                 logger.info("mDNS advertising stopped.")
             except Exception as e:
                 logger.error(f"Error stopping mDNS: {e}")
+            finally:
+                self.aio_zeroconf = None
+                self.service_info = None
+
+# Module-level server singleton
+websocket_server: Optional['WebSocketServer'] = None
 
 class WebSocketServer:
     def __init__(self, host: str, port: int):
+        global websocket_server
+        websocket_server = self
         self.host = host
         self.port = port
         self.pairing_manager = PairingManager()
         self.mdns_advertiser = None
+        self._server = None
+        self._closing = False
         self.active_session_tokens = {}
         # Track active websocket per device_id to prevent reconnection storms
         self.active_device_sockets = {}  # device_id -> websocket
@@ -98,17 +113,49 @@ class WebSocketServer:
         await self.mdns_advertiser.start(local_ip)
 
         try:
-            async with websockets.serve(
+            self._server = await websockets.serve(
                 self.handler,
                 self.host,
                 self.port,
-                ssl=ssl_context
-            ):
-                logger.info(f"WebSocket Secure (WSS) server listening on wss://{self.host}:{self.port}")
-                await asyncio.Future()  # run forever
+                ssl=ssl_context,
+                ping_interval=15,
+                ping_timeout=25,
+                close_timeout=10
+            )
+            logger.info(f"WebSocket Secure (WSS) server listening on wss://{self.host}:{self.port}")
+            await self._server.wait_closed()
+        except asyncio.CancelledError:
+            pass
         finally:
-            if self.mdns_advertiser:
+            await self.stop()
+
+    async def stop(self):
+        if self._closing:
+            return
+        self._closing = True
+        logger.info("🛑 Stopping WebSocket server...")
+        if self._server:
+            try:
+                self._server.close()
+                await self._server.wait_closed()
+            except Exception as e:
+                logger.debug(f"Error closing websocket server: {e}")
+            self._server = None
+        if self.mdns_advertiser:
+            try:
                 await self.mdns_advertiser.stop()
+            except Exception as e:
+                logger.debug(f"Error stopping mDNS: {e}")
+            self.mdns_advertiser = None
+        # Close open client sockets
+        for ws in list(self.active_device_sockets.values()):
+            try:
+                await ws.close(CloseCode.NORMAL.value, "Server shutdown")
+            except Exception:
+                pass
+        self.active_device_sockets.clear()
+        logger.info("✅ WebSocket server stopped")
+
 
 
     async def handler(self, websocket):
@@ -170,11 +217,13 @@ class WebSocketServer:
             from server.event_bus import event_bus
             from core.connection_manager import connection_manager
             from core.metrics_manager import metrics_manager
+            from core.cert_generator import get_cert_fingerprint
 
             if msg_type == PacketType.PAIR_REQUEST.value:
                 payload = envelope.get("payload", {})
                 code = payload.get("pairing_code")
                 dev_name = payload.get("device_name", "Unknown Android Device")
+                logger.info(f"[PAIR_REQUEST_RX] Received pair_request from {client_address} (device_id={device_id}, device_name={dev_name})")
                 
                 event_bus.publish(EventType.PAIR_STARTED, {
                     "device_id": device_id,
@@ -184,14 +233,15 @@ class WebSocketServer:
                 # Pair device
                 token = session_manager.pair_device(device_id, dev_name, code)
                 if token:
-                    logger.info(f"Pairing SUCCESS for device: {device_id} ({dev_name})")
+                    logger.info(f"[PAIR_SUCCESS] Pairing SUCCESS for device: {device_id} ({dev_name})")
                     session_token = secrets.token_hex(16)
                     self.active_session_tokens[device_id] = session_token
                     
                     resp_payload = {
                         "status": "success",
                         "token": token,
-                        "session_token": session_token
+                        "session_token": session_token,
+                        "cert_fingerprint": get_cert_fingerprint()
                     }
                     event_bus.publish(EventType.PAIR_SUCCESS, {
                         "device_id": device_id,
@@ -206,7 +256,11 @@ class WebSocketServer:
                     await websocket.send(json.dumps(response_envelope))
                     authenticated = True
                 else:
-                    logger.warning(f"Pairing FAILED for device: {device_id}")
+                    logger.warning(f"[PAIR_FAIL] Pairing FAILED for device: {device_id} - Incorrect pairing code")
+                    logger.warning(
+                        f"[WS_4001] reason='Incorrect pairing code' device_id='{device_id}' "
+                        f"message_type='{msg_type}' session_state='HANDSHAKE' pairing_state='FAILED' remote_ip='{client_address}'"
+                    )
                     resp_payload = {"status": "error", "message": "Incorrect pairing code"}
                     event_bus.publish(EventType.PAIR_FAILED, {
                         "device_id": device_id,
@@ -223,9 +277,14 @@ class WebSocketServer:
                     return
 
             elif msg_type == PacketType.HELLO.value:
+                logger.info(f"[HELLO_RX] Received HELLO handshake from {client_address} (device_id={device_id})")
                 is_paired = any(d.get("device_id") == device_id for d in session_manager.paired_devices)
                 if not is_paired:
-                    logger.warning(f"Unpaired device {device_id} sent HELLO. Closing connection.")
+                    logger.warning(f"[HELLO_REJECT] Unpaired device {device_id} sent HELLO. Closing connection.")
+                    logger.warning(
+                        f"[WS_4001] reason='Device not paired' device_id='{device_id}' "
+                        f"message_type='{msg_type}' session_state='HANDSHAKE' pairing_state='UNPAIRED' remote_ip='{client_address}'"
+                    )
                     await websocket.close(CloseCode.UNAUTHORIZED.value, "Device not paired")
                     return
 
@@ -264,6 +323,10 @@ class WebSocketServer:
                     auth_envelope = json.loads(auth_response_msg)
                     if auth_envelope.get("type") != "auth_response":
                         logger.warning(f"Handshake auth failed: expected auth_response, got {auth_envelope.get('type')}")
+                        logger.warning(
+                            f"[WS_4001] reason='Expected auth_response' device_id='{device_id}' "
+                            f"message_type='{auth_envelope.get('type')}' session_state='CHALLENGE' pairing_state='PAIRED' remote_ip='{client_address}'"
+                        )
                         await websocket.close(CloseCode.UNAUTHORIZED.value, "Expected auth_response")
                         return
 
@@ -283,53 +346,106 @@ class WebSocketServer:
                         }
                         await websocket.send(json.dumps(success_envelope))
                         authenticated = True
-                        logger.info(f"Challenge-Response Authentication SUCCESS: device {device_id} is authenticated.")
+                        logger.info(f"[AUTH_SUCCESS] Challenge-Response Authentication SUCCESS: device {device_id} authenticated.")
                     else:
-                        logger.warning(f"Challenge-Response Authentication FAILED: invalid signature from device {device_id}.")
+                        logger.warning(f"[AUTH_FAIL] Challenge-Response Authentication FAILED: invalid signature from device {device_id}.")
+                        logger.warning(
+                            f"[WS_4001] reason='Authentication signature invalid' device_id='{device_id}' "
+                            f"message_type='auth_response' session_state='VERIFYING' pairing_state='PAIRED' remote_ip='{client_address}'"
+                        )
                         await websocket.close(CloseCode.UNAUTHORIZED.value, "Authentication signature invalid")
                         return
                 except asyncio.TimeoutError:
-                    logger.warning(f"Authentication TIMEOUT: device {device_id} did not respond within 5 seconds.")
+                    logger.warning(f"[AUTH_TIMEOUT] Authentication TIMEOUT: device {device_id} did not respond within 5 seconds.")
+                    logger.warning(
+                        f"[WS_4001] reason='Authentication timeout' device_id='{device_id}' "
+                        f"message_type='auth_challenge' session_state='AWAITING_AUTH_RESPONSE' pairing_state='PAIRED' remote_ip='{client_address}'"
+                    )
                     await websocket.close(CloseCode.UNAUTHORIZED.value, "Authentication timeout")
                     return
                 except Exception as e:
                     logger.warning(f"Authentication error during handshake: {e}")
+                    logger.warning(
+                        f"[WS_4001] reason='Auth exception: {e}' device_id='{device_id}' "
+                        f"message_type='auth_response' session_state='CHALLENGE' pairing_state='PAIRED' remote_ip='{client_address}'"
+                    )
                     await websocket.close(CloseCode.UNAUTHORIZED.value, f"Auth exception: {e}")
                     return
             else:
                 logger.warning(f"Closed connection: Unknown first packet type: {msg_type}")
-                await websocket.close(CloseCode.INVALID_PAYLOAD.value, "Hello handshake expected")
+                logger.warning(
+                    f"[WS_4001] reason='Unknown first packet type: {msg_type}' device_id='{device_id}' "
+                    f"message_type='{msg_type}' session_state='HANDSHAKE' pairing_state='UNKNOWN' remote_ip='{client_address}'"
+                )
+                await websocket.close(CloseCode.INVALID_PAYLOAD.value, "Hello or pair_request handshake expected")
                 return
 
             if authenticated:
                 # Track this as the active connection for this device
                 self.active_device_sockets[device_id] = websocket
 
+                from core.device_registry import device_registry, ConnectionState
+                hello_payload = envelope.get("payload", {})
+                dev_name = hello_payload.get("deviceName") or hello_payload.get("device_name") or "Unknown Device"
+                dev_type = hello_payload.get("deviceType") or hello_payload.get("device_type") or "phone"
+                dev_model = hello_payload.get("model") or dev_name
+                os_ver = hello_payload.get("osVersion") or hello_payload.get("os_version") or ""
+                app_ver = hello_payload.get("appVersion") or hello_payload.get("app_version") or ""
+                caps = hello_payload.get("capabilities") or []
+                ip_str = client_address[0] if isinstance(client_address, tuple) and len(client_address) > 0 else str(client_address)
+
+                # Register/update in canonical DeviceRegistry
+                device_registry.register_device(
+                    device_id=device_id,
+                    display_name=dev_name,
+                    device_type=dev_type,
+                    platform=source.get("platform", "android"),
+                    capabilities=caps,
+                    model=dev_model,
+                    os_version=os_ver,
+                    app_version=app_ver,
+                    ip_address=ip_str,
+                    session_id=session_token or "",
+                    authority_state="STANDALONE"
+                )
+
                 connection_manager.register(
                     websocket,
                     device_id,
                     source.get("platform", "unknown"),
-                    envelope.get("payload", {}).get("device_name", "")
+                    dev_name
                 )
                 metrics_manager.increment_connections()
                 
+                logger.info(f"[DEVICE_REGISTERED] Registered device [{device_id}] '{dev_name}' (type={dev_type}, state=CONNECTED)")
+                
+                event_bus.publish(EventType.DEVICE_REGISTERED, {
+                    "device_id": device_id,
+                    "display_name": dev_name,
+                    "device_type": dev_type,
+                    "platform": source.get("platform", "android"),
+                    "capabilities": caps
+                })
+
                 event_bus.publish(EventType.CLIENT_CONNECTED, {
                     "device_id": device_id,
                     "platform": source.get("platform", "unknown"),
-                    "device_name": envelope.get("payload", {}).get("device_name", "")
+                    "device_name": dev_name
                 })
 
                 # 2. Main Transaction Loop
                 async for message in websocket:
                     await self.process_packet(websocket, message, device_id)
 
-        except websockets.exceptions.ConnectionClosed as e:
-            logger.info(f"Connection closed by {client_address} (code={e.code}, reason='{e.reason}')")
+        except websockets.ConnectionClosed as e:
+            logger.info(f"[WS_CLOSE] Connection closed by {client_address} (code={e.code}, reason='{e.reason}')")
+
         except Exception as e:
             logger.error(f"Error handling session: {e}", exc_info=True)
         finally:
             from core.connection_manager import connection_manager
             from core.metrics_manager import metrics_manager
+            from core.device_registry import device_registry, ConnectionState
             from server.event_bus import event_bus
             
             # Clean up active device socket tracking
@@ -338,10 +454,20 @@ class WebSocketServer:
 
             connection_manager.unregister(websocket)
             if device_id:
+                from orchestrator.device_router import device_router
+                device_router.handle_device_disconnected(device_id)
+
+                device_registry.set_connection_state(device_id, ConnectionState.DISCONNECTED)
                 metrics_manager.decrement_connections()
+                event_bus.publish(EventType.DEVICE_STATE_CHANGED, {
+                    "device_id": device_id,
+                    "state": ConnectionState.DISCONNECTED
+                })
                 event_bus.publish(EventType.CLIENT_DISCONNECTED, {
                     "device_id": device_id
                 })
+
+
 
     async def process_packet(self, websocket, raw_message: str, client_device_id: str):
         try:
@@ -501,7 +627,34 @@ class WebSocketServer:
                 resp_payload = {"status": "success" if cancelled else "failed", "output": f"Task cancellation status: {cancelled}"}
                 await self.send_envelope(websocket, msg_id, PacketType.TOOL_RESPONSE, client_device_id, resp_payload)
 
+            elif msg_type == PacketType.COMMAND_RESULT.value:
+                # Handle incoming command result from Android worker
+                from server.event_bus import event_bus
+                from core.device_registry import device_registry
+                from orchestrator.device_router import device_router
+                
+                device_registry.touch(client_device_id)
+                cmd_id = payload.get("command_id")
+                status = payload.get("status")
+                action = payload.get("action")
+                logger.info(f"Received command_result from [{client_device_id}] for command [{cmd_id}]: status={status}, action={action}")
+                
+                # Pass to DeviceRouter to resolve correlated future
+                device_router.handle_command_result(payload)
+                
+                event_bus.publish(EventType.COMMAND_RESULT_RECEIVED, {
+                    "device_id": client_device_id,
+                    "command_id": cmd_id,
+                    "status": status,
+                    "action": action,
+                    "data": payload.get("data", {}),
+                    "error": payload.get("error"),
+                    "execution_time_ms": payload.get("execution_time_ms", 0)
+                })
+
             elif msg_type == PacketType.HEARTBEAT.value:
+
+
                 # Heartbeat acknowledgement (log and echo)
                 logger.debug(f"Heartbeat received from {client_device_id}")
                 
@@ -539,8 +692,69 @@ class WebSocketServer:
                         "agent_version": "3.0"
                     }
                     await self.send_envelope(websocket, msg_id, PacketType.HEARTBEAT, client_device_id, heartbeat_payload)
+                elif event_name == "notification:synced":
+                    from core.security import security_guard
+                    from server.event_bus import event_bus
+
+                    pkg = payload.get("packageName", "")
+                    title = payload.get("title", "")
+                    text = payload.get("text", "")
+                    ts = payload.get("timestamp", int(time.time() * 1000))
+
+                    # Mask sensitive patterns before logging or passing along
+                    safe_title = security_guard.mask_secrets(str(title))
+                    safe_text = security_guard.mask_secrets(str(text))
+
+                    logger.info(f"📱 Received synced notification from [{client_device_id}] [{pkg}]: {safe_title} - {safe_text}")
+
+                    # Publish notification event to EventBus for context consumers
+                    event_bus.publish(EventType.NOTIFICATION_RECEIVED, {
+                        "device_id": client_device_id,
+                        "package_name": pkg,
+                        "title": safe_title,
+                        "text": safe_text,
+                        "timestamp": ts
+                    })
+
+                    # Insert notification into ContextStore as an ephemeral NOTIFICATIONS record
+                    try:
+                        from context.store import context_store
+                        from context.models import ContextRecord, ContextCategory, ContextOrigin
+                        notif_record = ContextRecord(
+                            record_id=f"notif_{int(ts)}",
+                            category=ContextCategory.NOTIFICATIONS,
+                            origin=ContextOrigin.REMOTE_ANDROID,
+                            payload={
+                                "device_id": client_device_id,
+                                "package_name": pkg,
+                                "title": safe_title,
+                                "text": safe_text,
+                                "timestamp": ts
+                            },
+                            updated_at=time.time(),
+                            ttl_seconds=300.0
+                        )
+                        context_store.put(notif_record)
+                    except Exception as ex:
+                        logger.debug(f"Could not store notification in context_store: {ex}")
+
+                    # Acknowledge notification reception back to Android
+                    ack_payload = {
+                        "event_name": "notification:ack",
+                        "status": "received",
+                        "timestamp": ts
+                    }
+
+                    await self.send_envelope(websocket, msg_id, PacketType.EVENT, client_device_id, ack_payload)
+                elif event_name in ["capabilities:update", "capabilities_update", "capabilities.update"]:
+                    from core.device_registry import device_registry
+                    caps = payload.get("capabilities", [])
+                    device_registry.update_capabilities(client_device_id, caps)
+                    device_registry.touch(client_device_id)
+                    logger.info(f"📱 Dynamic capabilities updated from [{client_device_id}]: {len(caps)} actions")
                 else:
                     logger.warning(f"Unknown event name: {event_name}")
+
 
 
             else:

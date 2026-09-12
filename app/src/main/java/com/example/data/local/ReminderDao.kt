@@ -11,6 +11,9 @@ interface ReminderDao {
     @Query("SELECT * FROM reminders ORDER BY triggerAt ASC")
     fun getAllRemindersFlow(): Flow<List<Reminder>>
 
+    @Query("SELECT * FROM reminders ORDER BY triggerAt ASC")
+    suspend fun getAllReminders(): List<Reminder>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReminder(reminder: Reminder): Long
 

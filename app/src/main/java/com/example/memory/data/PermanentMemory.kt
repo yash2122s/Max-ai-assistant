@@ -3,6 +3,7 @@ package com.example.memory.data
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 import androidx.room.Index
+import java.security.MessageDigest
 import java.util.UUID
 
 @Entity(
@@ -11,7 +12,9 @@ import java.util.UUID
         Index(value = ["pinned"]),
         Index(value = ["enabled"]),
         Index(value = ["category"]),
-        Index(value = ["type"])
+        Index(value = ["type"]),
+        Index(value = ["importChecksum"]),
+        Index(value = ["sourceRecordId"])
     ]
 )
 data class PermanentMemory(
@@ -29,8 +32,37 @@ data class PermanentMemory(
     val lastUsedAt: Long? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis(),
-    val embedding: FloatArray? = null
+    val embedding: FloatArray? = null,
+    val isPrivate: Boolean = false,
+    val sourceRecordId: String? = null,
+    val importChecksum: String? = null,
+    val provider: String? = null,
+    val confidence: Float = 1.0f,
+    val extractedAt: Long? = null,
+    val lastSyncAt: Long? = null,
+    val contentHash: String? = null,
+    val metadataJson: String? = null
 ) {
+    companion object {
+        fun computeContentHash(title: String, content: String, category: String, tags: String = ""): String {
+            val normalized = "${title.trim()}|${content.trim()}|${category.trim().uppercase()}|${tags.trim()}"
+            val digest = MessageDigest.getInstance("SHA-256")
+            val hashBytes = digest.digest(normalized.toByteArray(Charsets.UTF_8))
+            return hashBytes.joinToString("") { "%02x".format(it) }
+        }
+
+        fun computeImportChecksum(rawContent: String): String {
+            val normalized = rawContent.trim()
+            val digest = MessageDigest.getInstance("SHA-256")
+            val hashBytes = digest.digest(normalized.toByteArray(Charsets.UTF_8))
+            return hashBytes.joinToString("") { "%02x".format(it) }
+        }
+    }
+
+    fun effectiveContentHash(): String {
+        return contentHash ?: computeContentHash(title, content, category, tags)
+    }
+
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (javaClass != other?.javaClass) return false
@@ -45,10 +77,19 @@ data class PermanentMemory(
         if (source != other.source) return false
         if (pinned != other.pinned) return false
         if (enabled != other.enabled) return false
+        if (isPrivate != other.isPrivate) return false
         if (usageCount != other.usageCount) return false
         if (lastUsedAt != other.lastUsedAt) return false
         if (createdAt != other.createdAt) return false
         if (updatedAt != other.updatedAt) return false
+        if (sourceRecordId != other.sourceRecordId) return false
+        if (importChecksum != other.importChecksum) return false
+        if (provider != other.provider) return false
+        if (confidence != other.confidence) return false
+        if (extractedAt != other.extractedAt) return false
+        if (lastSyncAt != other.lastSyncAt) return false
+        if (contentHash != other.contentHash) return false
+        if (metadataJson != other.metadataJson) return false
         if (embedding != null) {
             if (other.embedding == null) return false
             if (!embedding.contentEquals(other.embedding)) return false
@@ -66,10 +107,19 @@ data class PermanentMemory(
         result = 31 * result + source.hashCode()
         result = 31 * result + pinned.hashCode()
         result = 31 * result + enabled.hashCode()
+        result = 31 * result + isPrivate.hashCode()
         result = 31 * result + usageCount
         result = 31 * result + (lastUsedAt?.hashCode() ?: 0)
         result = 31 * result + createdAt.hashCode()
         result = 31 * result + updatedAt.hashCode()
+        result = 31 * result + (sourceRecordId?.hashCode() ?: 0)
+        result = 31 * result + (importChecksum?.hashCode() ?: 0)
+        result = 31 * result + (provider?.hashCode() ?: 0)
+        result = 31 * result + confidence.hashCode()
+        result = 31 * result + (extractedAt?.hashCode() ?: 0)
+        result = 31 * result + (lastSyncAt?.hashCode() ?: 0)
+        result = 31 * result + (contentHash?.hashCode() ?: 0)
+        result = 31 * result + (metadataJson?.hashCode() ?: 0)
         result = 31 * result + (embedding?.contentHashCode() ?: 0)
         return result
     }

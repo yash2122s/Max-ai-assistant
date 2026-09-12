@@ -1,0 +1,10 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/windows-agent",
+    "${workspaceFolder}/windows-agent/core",
+    "${workspaceFolder}/windows-agent/server"
+  ],
+  "python.analysis.autoSearchPaths": true,
+  "git.ignoreLimitWarning": true
+}

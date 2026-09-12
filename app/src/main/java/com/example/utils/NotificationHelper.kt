@@ -50,7 +50,13 @@ object NotificationHelper {
         notificationManager.notify(101, notification)
     }
 
-    fun showPendingReplyNotification(context: Context, msgId: String, sender: String, replyText: String) {
+    fun showPendingReplyNotification(
+        context: Context,
+        confirmationId: String,
+        sender: String,
+        incomingMessage: String,
+        proposedReply: String
+    ) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -58,71 +64,45 @@ object NotificationHelper {
             notificationManager.createNotificationChannel(channel)
         }
 
+        val confirmIntent = Intent(context, AutoReplyActionReceiver::class.java).apply {
+            action = "com.example.ACTION_CONFIRM_REPLY"
+            putExtra("confirmation_id", confirmationId)
+        }
+        val confirmPendingIntent = PendingIntent.getBroadcast(
+            context,
+            confirmationId.hashCode(),
+            confirmIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val cancelIntent = Intent(context, AutoReplyActionReceiver::class.java).apply {
             action = "com.example.ACTION_CANCEL_REPLY"
-            putExtra("msg_id", msgId)
+            putExtra("confirmation_id", confirmationId)
         }
         val cancelPendingIntent = PendingIntent.getBroadcast(
-            context, 
-            msgId.hashCode(), 
-            cancelIntent, 
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val sendNowIntent = Intent(context, AutoReplyActionReceiver::class.java).apply {
-            action = "com.example.ACTION_SEND_REPLY_NOW"
-            putExtra("msg_id", msgId)
-        }
-        val sendNowPendingIntent = PendingIntent.getBroadcast(
-            context, 
-            msgId.hashCode() + 1, 
-            sendNowIntent, 
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val quickRepliesStr = com.example.data.preferences.SettingsManager(context).quickReplies
-        val quickRepliesList = quickRepliesStr.split(",").map { it.trim() }.filter { it.isNotEmpty() }.toTypedArray()
-        
-        val remoteInput = androidx.core.app.RemoteInput.Builder("quick_reply_text")
-            .setLabel("Quick Reply")
-            .setChoices(quickRepliesList)
-            .build()
-            
-        val quickReplyIntent = Intent(context, AutoReplyActionReceiver::class.java).apply {
-            action = "com.example.ACTION_QUICK_REPLY"
-            putExtra("msg_id", msgId)
-        }
-        
-        val quickReplyPendingIntent = PendingIntent.getBroadcast(
             context,
-            msgId.hashCode() + 2,
-            quickReplyIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+            confirmationId.hashCode() + 1,
+            cancelIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        
-        val quickReplyAction = NotificationCompat.Action.Builder(
-            android.R.drawable.ic_menu_send,
-            "Quick Reply",
-            quickReplyPendingIntent
-        ).addRemoteInput(remoteInput).build()
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Auto-replying to $sender in 8s")
-            .setContentText(replyText)
+            .setContentTitle("Auto-Reply Confirmation: $sender")
+            .setContentText("Incoming: \"$incomingMessage\" | Proposed: \"$proposedReply\"")
+            .setStyle(NotificationCompat.BigTextStyle().bigText("Sender: $sender\nIncoming: \"$incomingMessage\"\nProposed Reply: \"$proposedReply\""))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(false)
-            .setOngoing(true)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPendingIntent)
-            .addAction(android.R.drawable.ic_menu_send, "Send Now", sendNowPendingIntent)
-            .addAction(quickReplyAction)
+            .setAutoCancel(true)
+            .setOngoing(false)
+            .addAction(android.R.drawable.ic_menu_send, "CONFIRM", confirmPendingIntent)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "CANCEL", cancelPendingIntent)
             .build()
 
-        notificationManager.notify(msgId.hashCode(), notification)
+        notificationManager.notify(confirmationId.hashCode(), notification)
     }
 
-    fun cancelPendingReplyNotification(context: Context, msgId: String) {
+    fun cancelPendingReplyNotification(context: Context, confirmationId: String) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(msgId.hashCode())
+        notificationManager.cancel(confirmationId.hashCode())
     }
 }

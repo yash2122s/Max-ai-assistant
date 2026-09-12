@@ -13,6 +13,9 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
+import kotlinx.coroutines.asExecutor
+import kotlinx.coroutines.Dispatchers
+
 object ScreenCaptureProvider {
     private const val TAG = "ScreenCaptureProvider"
     private const val TARGET_MAX_DIMENSION = 720
@@ -84,7 +87,7 @@ object ScreenCaptureProvider {
                 try {
                     service.takeScreenshot(
                         Display.DEFAULT_DISPLAY,
-                        service.mainExecutor,
+                        Dispatchers.IO.asExecutor(),
                         object : AccessibilityService.TakeScreenshotCallback {
                             override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
                                 try {

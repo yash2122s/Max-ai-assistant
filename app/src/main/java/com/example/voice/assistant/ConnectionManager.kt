@@ -20,14 +20,16 @@ class ConnectionManager(
     private val onMessageReceived: (String) -> Unit,
     private val onAudioReceived: (ByteArray) -> Unit,
     private val onConnectionStateChanged: (ConnectionState) -> Unit,
-    private val onExecuteAutomation: (String) -> String
+    private val onExecuteAutomation: suspend (String) -> String,
+    private val onUserTranscription: ((String) -> Unit)? = null,
+    private val onTurnComplete: (() -> Unit)? = null
 ) {
     private var webSocketClient: GeminiWebSocketClient? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var reconnectJob: Job? = null
     private var reconnectDelayMs = 1000L
     private val MAX_RECONNECT_DELAY_MS = 30000L
-    private val memoryRepository = MemoryRepository(context)
+    private val memoryRepository = MemoryRepository.getInstance(context)
     private var currentMemoriesMarkdown: String = ""
 
     var connectionState: ConnectionState = ConnectionState.DISCONNECTED
@@ -59,42 +61,44 @@ class ConnectionManager(
     }
 
     init {
-        scope.launch {
-            memoryRepository.memoriesMarkdownFlow.collect { latestMarkdown ->
-                if (connectionState == ConnectionState.CONNECTED && currentMemoriesMarkdown != latestMarkdown) {
-                    Log.d("ConnectionManager", "Memories updated, reconnecting voice assistant client...")
-                    forceReconnect()
-                }
-            }
-        }
+        // Dynamic RAG injects relevant memories dynamically on every query.
+        // We do not disconnect/reconnect the live WebSocket session when memories change.
     }
+
+    private var isNewSession = true
 
     @Synchronized
     fun forceReconnect() {
-        createNewConnection()
+        createNewConnection(isNew = false)
     }
 
     @Synchronized
     fun connect() {
         ServiceRegistry.register(ServiceType.VOICE, this)
         isExplicitlyDisconnected = false
+        isNewSession = true
         registerNetworkCallback()
-        createNewConnection()
+        createNewConnection(isNew = true)
     }
 
     @Synchronized
-    private fun createNewConnection() {
+    private fun createNewConnection(isNew: Boolean = isNewSession) {
         destroyOldConnection()
 
-        val prefs = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
-        val savedKey = prefs.getString("api_key", "") ?: ""
-        val savedVoice = prefs.getString("voice_name", "Aoede") ?: "Aoede"
-        val savedLanguage = prefs.getString("response_language", "Tenglish") ?: "Tenglish"
-        val apiKey = if (savedKey.isNotEmpty()) savedKey else BuildConfig.GEMINI_API_KEY
+        val settings = com.example.data.preferences.SettingsManager(context)
+        val savedKey = settings.geminiApiKey.trim()
+        val savedVoice = settings.liveVoiceName
+        val savedLanguage = settings.languagePreference
+        val savedModel = settings.liveVoiceModelName
+        val apiKey = savedKey
 
-        if (apiKey.isEmpty()) {
-            Log.e("ConnectionManager", "API Key is empty, cannot connect")
-            handleConnectionStateChange(ConnectionState.FAILED)
+        val keyPresent = apiKey.isNotEmpty()
+        Log.d("GeminiFlow", "[GeminiFlow] key_present=$keyPresent")
+
+        if (!keyPresent) {
+            Log.w("ConnectionManager", "[SECURITY_GATE] Gemini API Key is missing. Connection blocked. User must configure key in Settings or Onboarding.")
+            Log.w("GeminiFlow", "[GeminiFlow] error=API key is missing")
+            handleConnectionStateChange(ConnectionState.DISCONNECTED)
             return
         }
 
@@ -113,7 +117,9 @@ class ConnectionManager(
                     apiKey = apiKey,
                     voiceName = savedVoice,
                     responseLanguage = savedLanguage,
+                    preferredModel = savedModel,
                     memoriesMarkdown = markdown,
+                    isNewSession = isNew,
                     onMessageReceived = { msg -> 
                         synchronized(this@ConnectionManager) {
                             if (currentGen == connectionGeneration) {
@@ -138,7 +144,21 @@ class ConnectionManager(
                             }
                         }
                     },
-                    onExecuteAutomation = onExecuteAutomation
+                    onExecuteAutomation = onExecuteAutomation,
+                    onUserTranscription = { transcription ->
+                        synchronized(this@ConnectionManager) {
+                            if (currentGen == connectionGeneration) {
+                                onUserTranscription?.invoke(transcription)
+                            }
+                        }
+                    },
+                    onTurnComplete = {
+                        synchronized(this@ConnectionManager) {
+                            if (currentGen == connectionGeneration) {
+                                onTurnComplete?.invoke()
+                            }
+                        }
+                    }
                 )
                 webSocketClient?.connect()
             }
@@ -174,6 +194,13 @@ class ConnectionManager(
             reconnectInProgress = true
         }
 
+        val settings = com.example.data.preferences.SettingsManager(context)
+        if (!settings.hasValidGeminiApiKey()) {
+            Log.d("ConnectionManager", "[SECURITY_GATE] Reconnect aborted: No Gemini API Key configured.")
+            handleConnectionStateChange(ConnectionState.DISCONNECTED)
+            return
+        }
+
         reconnectJob = scope.launch {
             delay(reconnectDelayMs)
             Log.d("ConnectionManager", "Attempting automatic reconnect...")
@@ -196,12 +223,21 @@ class ConnectionManager(
 
     @Synchronized
     fun sendText(text: String) {
+        if (webSocketClient == null || !isConnected()) {
+            Log.d("ConnectionManager", "WebSocket not connected. Initiating connection for sendText...")
+            connect()
+        }
         webSocketClient?.sendText(text)
     }
 
     @Synchronized
     fun sendAudio(audio: ByteArray) {
         webSocketClient?.sendAudio(audio)
+    }
+
+    @Synchronized
+    fun commitAudioTurn() {
+        webSocketClient?.commitAudioTurn()
     }
 
     @Synchronized
@@ -228,6 +264,19 @@ class ConnectionManager(
         unregisterNetworkCallback()
         handleConnectionStateChange(ConnectionState.DISCONNECTED)
     }
+
+    @Synchronized
+    fun suspendForWorkerMode() {
+        disconnect()
+        Log.i("ConnectionManager", "[WorkerMode] GEMINI_SUSPENDED")
+    }
+
+    @Synchronized
+    fun resumeFromWorkerMode() {
+        isExplicitlyDisconnected = false
+        Log.i("ConnectionManager", "[WorkerMode] GEMINI_RESUMED")
+    }
+
 
     private fun registerNetworkCallback() {
         if (isNetworkCallbackRegistered) return

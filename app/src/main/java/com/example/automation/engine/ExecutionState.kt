@@ -5,6 +5,7 @@ enum class ExecutionState {
     RUNNING,
     VERIFYING,
     RETRYING,
+    WAITING_FOR_USER_INPUT,
     SUCCEEDED,
     FAILED,
     CANCELLED

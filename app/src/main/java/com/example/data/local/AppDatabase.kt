@@ -13,17 +13,22 @@ import com.example.automation.scheduler.ScheduledTaskDao
 import com.example.automation.scheduler.SchedulerTypeConverters
 import com.example.data.local.PeriodLog
 import com.example.data.local.PeriodLogDao
+import com.example.memory.data.MemorySyncState
+import com.example.memory.data.MemorySyncStateDao
 import com.example.memory.data.MemoryTypeConverters
 import com.example.memory.data.PermanentMemory
 import com.example.memory.data.PermanentMemoryDao
+import com.example.rag.data.RagChunkEntity
+import com.example.rag.data.RagChunkDao
 
 @Database(
     entities = [
         ChatMessage::class, Reminder::class, AutoReplyRule::class, 
         ActionReward::class, InstalledApp::class, ScheduledTask::class, 
-        TaskExecutionLog::class, PeriodLog::class, PermanentMemory::class
+        TaskExecutionLog::class, PeriodLog::class, PermanentMemory::class,
+        MemorySyncState::class, RagChunkEntity::class
     ], 
-    version = 13, 
+    version = 16, 
     exportSchema = false
 )
 @TypeConverters(SchedulerTypeConverters::class, MemoryTypeConverters::class)
@@ -36,6 +41,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun scheduledTaskDao(): ScheduledTaskDao
     abstract fun periodLogDao(): PeriodLogDao
     abstract fun permanentMemoryDao(): PermanentMemoryDao
+    abstract fun memorySyncStateDao(): MemorySyncStateDao
+    abstract fun ragChunkDao(): RagChunkDao
 
     companion object {
         val MIGRATION_9_10 = object : Migration(9, 10) {
@@ -91,6 +98,63 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN isPrivate INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATION_14_15 = object : Migration(14, 15) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN sourceRecordId TEXT")
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN importChecksum TEXT")
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN provider TEXT")
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN confidence REAL NOT NULL DEFAULT 1.0")
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN extractedAt INTEGER")
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN lastSyncAt INTEGER")
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN contentHash TEXT")
+                db.execSQL("ALTER TABLE permanent_memory ADD COLUMN metadataJson TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_permanent_memory_importChecksum` ON `permanent_memory` (`importChecksum`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_permanent_memory_sourceRecordId` ON `permanent_memory` (`sourceRecordId`)")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `memory_sync_state` (
+                        `id` INTEGER PRIMARY KEY NOT NULL, 
+                        `lastWrittenFileHash` TEXT, 
+                        `lastSyncTimestamp` INTEGER NOT NULL DEFAULT 0, 
+                        `lastSyncedMemoryCount` INTEGER NOT NULL DEFAULT 0, 
+                        `syncStatus` TEXT NOT NULL DEFAULT 'IDLE', 
+                        `pendingChanges` TEXT
+                    )
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `rag_chunks` (
+                        `chunkId` TEXT NOT NULL PRIMARY KEY,
+                        `memoryId` TEXT NOT NULL,
+                        `chunkIndex` INTEGER NOT NULL,
+                        `content` TEXT NOT NULL,
+                        `contentHash` TEXT NOT NULL,
+                        `embedding` BLOB,
+                        `embeddingModel` TEXT NOT NULL,
+                        `embeddingDimension` INTEGER NOT NULL,
+                        `category` TEXT NOT NULL,
+                        `tags` TEXT NOT NULL,
+                        `provider` TEXT,
+                        `sourceRecordId` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_rag_chunks_memoryId` ON `rag_chunks` (`memoryId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_rag_chunks_contentHash` ON `rag_chunks` (`contentHash`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_rag_chunks_memoryId_chunkIndex` ON `rag_chunks` (`memoryId`, `chunkIndex`)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -101,7 +165,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "jarvis_database"
                 )
-                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance

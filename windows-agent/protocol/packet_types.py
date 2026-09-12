@@ -11,4 +11,7 @@ class PacketType(Enum):
     CANCEL = "cancel"
     EVENT = "event"
     ERROR = "error"
+    COMMAND_REQUEST = "command_request"
+    COMMAND_RESULT = "command_result"
+
 

@@ -13,15 +13,49 @@ class StreamingResponseManager(
     private val onExecuteToolResponse: (String, String, String) -> Unit, // id, name, resultJson
     private val onStateTransition: (SessionState) -> Unit
 ) {
+    private val currentTurnText = StringBuilder()
+
     fun handleIncomingText(text: String) {
+        val sanitized = com.example.utils.InternalReasoningFilter.sanitize(text)
+        if (sanitized.isBlank()) return
         AssistantLogger.recordFirstTranscript()
-        AssistantEventBus.emit(AssistantEvent.TextTranscribed("Gemini", text))
+        onStateTransition(SessionState.STREAMING_TEXT)
+        synchronized(currentTurnText) {
+            if (currentTurnText.isNotEmpty()) {
+                val lastChar = currentTurnText.last()
+                val firstChar = sanitized.first()
+                if (!lastChar.isWhitespace() && lastChar != '\n' && !sanitized.startsWith(" ") && firstChar.isLetterOrDigit()) {
+                    currentTurnText.append(' ')
+                }
+            }
+            currentTurnText.append(sanitized)
+        }
+        AssistantEventBus.emit(AssistantEvent.ResponseChunk(sanitized))
     }
 
+    private var firstAudioLogged = false
+
     fun handleIncomingAudio(audioData: ByteArray, onRmsChanged: (Float) -> Unit) {
+        if (!firstAudioLogged) {
+            firstAudioLogged = true
+            android.util.Log.d("VoiceLatency", "[VoiceLatency] first_audio ts=${System.currentTimeMillis()}")
+        }
         AssistantLogger.recordFirstAudioResponse()
         onStateTransition(SessionState.STREAMING_AUDIO)
         audioPlayer.play(audioData, onRmsChanged)
+    }
+
+    fun handleTurnComplete() {
+        android.util.Log.d("VoiceLatency", "[VoiceLatency] response_complete ts=${System.currentTimeMillis()}")
+        android.util.Log.d("GeminiFlow", "[GeminiFlow] thinking_cleared (turn_complete)")
+        firstAudioLogged = false
+        val fullText = synchronized(currentTurnText) {
+            val res = currentTurnText.toString()
+            currentTurnText.setLength(0)
+            res
+        }
+        onStateTransition(SessionState.CONNECTED)
+        AssistantEventBus.emit(AssistantEvent.TurnComplete(fullText))
     }
 
     fun handleToolCall(callId: String, toolName: String, args: String) {
@@ -53,11 +87,7 @@ class StreamingResponseManager(
     }
 
     fun handleUserSpeaking() {
-        if (audioPlayer.isPlaying()) {
-            AssistantLogger.logInfo("Barge-in triggered: user speech detected during assistant playback. Stopping TTS output.")
-            audioPlayer.stopAndFlush()
-            onStateTransition(SessionState.LISTENING)
-        }
+        // Interruption / barge-in disabled
     }
 
     fun stopAllPlayback() {

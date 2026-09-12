@@ -17,6 +17,24 @@ class BluetoothAction : BaseAction<JSONObject>() {
             return
         }
 
+        val hasConnectPermission = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.BLUETOOTH_CONNECT
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        } else {
+            true
+        }
+
+        if (!hasConnectPermission) {
+            log("BLUETOOTH_CONNECT permission not granted. Launching Bluetooth settings as fallback.")
+            val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(intent)
+            return
+        }
+
         try {
             when (action) {
                 "SET_BLUETOOTH" -> {

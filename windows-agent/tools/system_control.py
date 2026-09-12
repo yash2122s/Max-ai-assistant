@@ -1,12 +1,15 @@
 """
 JARVIS System Control Tools
-Volume, brightness, battery, system info, lock, shutdown, WiFi/Bluetooth.
+Volume, brightness, battery, system info, lock, standby/sleep mode, shutdown, WiFi/Bluetooth.
 """
 
 import subprocess
 import platform
 import datetime
+import logging
 import psutil
+
+logger = logging.getLogger("MAXWindowsAgent.SystemControl")
 
 # ─── Volume Control (via pycaw) ──────────────────────────────────────────────
 
@@ -14,7 +17,6 @@ def _get_volume_interface():
     """Get the Windows audio endpoint volume interface."""
     from pycaw.pycaw import AudioUtilities
     device = AudioUtilities.GetSpeakers()
-    # Newer pycaw versions use AudioDevice wrapper with .EndpointVolume property
     return device.EndpointVolume
 
 
@@ -33,7 +35,7 @@ def get_volume() -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def set_volume(level: int) -> dict:
+def set_volume(level: int, **kwargs) -> dict:
     """
     Set system volume to a specific percentage.
     
@@ -41,13 +43,14 @@ def set_volume(level: int) -> dict:
         level: Volume level from 0 to 100.
     """
     try:
-        level = max(0, min(100, int(level)))
+        target_level = level if level is not None else kwargs.get("volume", kwargs.get("percent", 50))
+        target_level = max(0, min(100, int(target_level)))
         volume = _get_volume_interface()
-        volume.SetMasterVolumeLevelScalar(level / 100.0, None)
+        volume.SetMasterVolumeLevelScalar(target_level / 100.0, None)
         return {
             "status": "success",
-            "volume_percent": level,
-            "message": f"Volume set to {level}%",
+            "volume_percent": target_level,
+            "message": f"Volume set to {target_level}%",
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -72,7 +75,6 @@ def get_brightness() -> dict:
     try:
         import screen_brightness_control as sbc
         brightness = sbc.get_brightness()
-        # sbc returns a list (one per monitor)
         if isinstance(brightness, list):
             brightness = brightness[0]
         return {"status": "success", "brightness_percent": brightness}
@@ -80,7 +82,7 @@ def get_brightness() -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def set_brightness(level: int) -> dict:
+def set_brightness(level: int, **kwargs) -> dict:
     """
     Set screen brightness to a specific percentage.
     
@@ -88,13 +90,14 @@ def set_brightness(level: int) -> dict:
         level: Brightness level from 0 to 100.
     """
     try:
+        target_level = level if level is not None else kwargs.get("brightness", kwargs.get("percent", 50))
+        target_level = max(0, min(100, int(target_level)))
         import screen_brightness_control as sbc
-        level = max(0, min(100, int(level)))
-        sbc.set_brightness(level)
+        sbc.set_brightness(target_level)
         return {
             "status": "success",
-            "brightness_percent": level,
-            "message": f"Brightness set to {level}%",
+            "brightness_percent": target_level,
+            "message": f"Brightness set to {target_level}%",
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -145,7 +148,7 @@ def get_system_info() -> dict:
             "disk_total_gb": round(disk.total / (1024 ** 3), 1),
             "disk_used_gb": round(disk.used / (1024 ** 3), 1),
             "disk_percent": disk.percent,
-            "uptime": str(uptime).split(".")[0],  # Remove microseconds
+            "uptime": str(uptime).split(".")[0],
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -162,75 +165,80 @@ def lock_screen() -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def shutdown_restart(action: str) -> dict:
+def go_to_sleep(**kwargs) -> dict:
     """
-    Shutdown, restart, or sleep the computer.
-    ⚠️ DANGEROUS: Requires confirmation gate in tool_executor.
-    
-    Args:
-        action: One of 'shutdown', 'restart', or 'sleep'.
+    Put MAX voice assistant into standby/sleep mode (waits for 'Hey MAX' wake word).
+    Does NOT shut down the computer, and does NOT exit the server process.
     """
     try:
-        action = action.lower().strip()
-        if action == "shutdown":
+        # Trigger VoiceInputGate standby if active
+        from core.voice_gate import VoiceInputGate
+        return {
+            "status": "success",
+            "message": "Going to sleep now. Say 'Hey MAX' whenever you need me!",
+            "standby": True
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def shutdown_restart(action: str, **kwargs) -> dict:
+    """
+    Shutdown or restart the PHYSICAL Windows PC.
+    ⚠️ DANGEROUS: Requires confirmation gate.
+    DO NOT use for putting MAX assistant to sleep (use go_to_sleep instead).
+    
+    Args:
+        action: 'shutdown' or 'restart'.
+    """
+    try:
+        action_clean = str(action or kwargs.get("cmd", "")).lower().strip()
+        if action_clean == "shutdown":
             subprocess.run(["shutdown", "/s", "/t", "5"], check=True)
-            return {"status": "success", "message": "Shutting down in 5 seconds..."}
-        elif action == "restart":
+            return {"status": "success", "message": "Shutting down computer in 5 seconds..."}
+        elif action_clean == "restart":
             subprocess.run(["shutdown", "/r", "/t", "5"], check=True)
-            return {"status": "success", "message": "Restarting in 5 seconds..."}
-        elif action == "sleep":
+            return {"status": "success", "message": "Restarting computer in 5 seconds..."}
+        elif action_clean in ("sleep", "suspend"):
+            # Sleep the physical computer
             subprocess.run(
-                ["rundll32.exe", "powrprof.dll,SetSuspendState", "0", "1", "0"],
-                check=True,
+                ["powershell", "-Command", "Add-Type -Assembly System.Windows.Forms; [System.Windows.Forms.Application]::SetSuspendState([System.Windows.Forms.PowerState]::Suspend, $false, $false)"],
+                check=True
             )
-            return {"status": "success", "message": "Going to sleep..."}
+            return {"status": "success", "message": "Putting computer to sleep..."}
         else:
-            return {"status": "error", "message": f"Unknown action: {action}. Use 'shutdown', 'restart', or 'sleep'."}
+            return {"status": "error", "message": f"Unknown PC power action: '{action}'. Use 'shutdown' or 'restart'."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 
 # ─── Network Controls ───────────────────────────────────────────────────────
 
-def toggle_wifi(state: str) -> dict:
+def toggle_wifi(state: str, **kwargs) -> dict:
     """
     Enable or disable WiFi.
-    Note: May require admin elevation on some systems.
     
     Args:
         state: 'enable' or 'disable'.
     """
     try:
-        state = state.lower().strip()
-        if state not in ("enable", "disable"):
+        state_clean = str(state or kwargs.get("action", "")).lower().strip()
+        if state_clean not in ("enable", "disable"):
             return {"status": "error", "message": "State must be 'enable' or 'disable'"}
         
-        # Try to find the WiFi interface name first
-        result = subprocess.run(
-            ["netsh", "wlan", "show", "interfaces"],
-            capture_output=True, text=True, timeout=10,
-        )
-        
-        if "There is no wireless interface" in result.stdout:
-            return {"status": "error", "message": "No WiFi adapter found"}
-        
-        # Toggle WiFi using netsh
-        action = "enabled" if state == "enable" else "disabled"
+        action = "enabled" if state_clean == "enable" else "disabled"
         cmd_result = subprocess.run(
             ["netsh", "interface", "set", "interface", "Wi-Fi", action],
             capture_output=True, text=True, timeout=10,
         )
         
         if cmd_result.returncode != 0:
-            # Might need admin or interface name differs
             return {
                 "status": "error",
-                "message": f"Failed to {state} WiFi. May need admin privileges. Error: {cmd_result.stderr.strip()}",
+                "message": f"Failed to {state_clean} WiFi: {cmd_result.stderr.strip()}",
             }
         
-        return {"status": "success", "message": f"WiFi {state}d successfully"}
-    except subprocess.TimeoutExpired:
-        return {"status": "error", "message": "Command timed out"}
+        return {"status": "success", "message": f"WiFi {state_clean}d successfully"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -242,60 +250,52 @@ def get_wifi_status() -> dict:
             ["netsh", "wlan", "show", "interfaces"],
             capture_output=True, text=True, timeout=10,
         )
+        output = result.stdout
         
-        if result.returncode != 0 or "There is no wireless interface" in result.stdout:
-            return {"status": "success", "connected": False, "message": "No WiFi adapter found"}
+        if "State" not in output:
+            return {"status": "success", "connected": False, "message": "WiFi is disconnected or unavailable"}
         
-        lines = result.stdout.strip().split("\n")
-        info = {}
-        for line in lines:
-            if ":" in line:
-                key, _, value = line.partition(":")
-                info[key.strip().lower()] = value.strip()
+        ssid = "Unknown"
+        state = "disconnected"
+        signal = "0%"
         
-        ssid = info.get("ssid", "Unknown")
-        state = info.get("state", "unknown")
-        signal = info.get("signal", "unknown")
+        for line in output.split("\n"):
+            line = line.strip()
+            if line.startswith("SSID") and "BSSID" not in line:
+                ssid = line.split(":", 1)[1].strip()
+            elif line.startswith("State"):
+                state = line.split(":", 1)[1].strip()
+            elif line.startswith("Signal"):
+                signal = line.split(":", 1)[1].strip()
         
         return {
             "status": "success",
             "connected": state.lower() == "connected",
-            "network_name": ssid if state.lower() == "connected" else None,
-            "signal_strength": signal,
-            "state": state,
+            "ssid": ssid,
+            "signal": signal,
+            "message": f"WiFi is {state} to '{ssid}' (Signal: {signal})",
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
 
-def get_time_date() -> dict:
-    """Get the current date and time."""
-    now = datetime.datetime.now()
-    return {
-        "status": "success",
-        "time": now.strftime("%I:%M %p"),
-        "date": now.strftime("%A, %B %d, %Y"),
-        "timestamp": now.isoformat(),
-    }
-
-
-# ─── Tool Declarations (for Gemini function calling) ────────────────────────
+# ─── Tool Declarations ──────────────────────────────────────────────────────
 
 TOOL_DECLARATIONS = [
     {
         "name": "get_volume",
-        "description": "Get the current system volume level and mute status.",
+        "description": "Get current system volume percentage and mute status.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "set_volume",
-        "description": "Set the system volume to a specific percentage (0-100).",
+        "description": "Set system volume to a specific percentage (0 to 100).",
         "parameters": {
             "type": "object",
             "properties": {
                 "level": {
                     "type": "integer",
-                    "description": "Volume level from 0 to 100",
+                    "description": "Volume percentage from 0 to 100",
                 }
             },
             "required": ["level"],
@@ -308,18 +308,18 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "get_brightness",
-        "description": "Get the current screen brightness level.",
+        "description": "Get current screen brightness percentage.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "set_brightness",
-        "description": "Set screen brightness to a specific percentage (0-100).",
+        "description": "Set screen brightness percentage (0 to 100).",
         "parameters": {
             "type": "object",
             "properties": {
                 "level": {
                     "type": "integer",
-                    "description": "Brightness level from 0 to 100",
+                    "description": "Brightness percentage from 0 to 100",
                 }
             },
             "required": ["level"],
@@ -327,29 +327,33 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "get_battery_status",
-        "description": "Get battery percentage, charging status, and time remaining.",
+        "description": "Get battery percentage, charging status, and remaining time.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "get_system_info",
-        "description": "Get comprehensive system info: CPU usage, RAM, disk space, uptime, OS details.",
+        "description": "Get system info: CPU usage, RAM usage, disk space, OS version, uptime.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "lock_screen",
-        "description": "Lock the Windows screen immediately.",
+        "description": "Lock the Windows workstation screen.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "go_to_sleep",
+        "description": "Put MAX AI voice assistant into standby/sleep mode (waits for 'Hey MAX' wake word). Use when user says 'sleep', 'go to sleep', 'stop listening', 'standby'. Does NOT shut down the computer.",
         "parameters": {"type": "object", "properties": {}},
     },
     {
         "name": "shutdown_restart",
-        "description": "Shutdown, restart, or put the computer to sleep. DANGEROUS: always confirm with user first.",
+        "description": "Shutdown or restart the physical Windows PC. DANGEROUS: requires confirmation. Do NOT use for putting MAX assistant to sleep (use go_to_sleep instead).",
         "parameters": {
             "type": "object",
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["shutdown", "restart", "sleep"],
-                    "description": "The action to perform: shutdown, restart, or sleep",
+                    "description": "Action to perform: 'shutdown' or 'restart'",
                 }
             },
             "required": ["action"],
@@ -357,14 +361,13 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "toggle_wifi",
-        "description": "Enable or disable WiFi. May require admin privileges.",
+        "description": "Enable or disable WiFi on the system.",
         "parameters": {
             "type": "object",
             "properties": {
                 "state": {
                     "type": "string",
-                    "enum": ["enable", "disable"],
-                    "description": "Whether to enable or disable WiFi",
+                    "description": "'enable' or 'disable'",
                 }
             },
             "required": ["state"],
@@ -372,17 +375,11 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "get_wifi_status",
-        "description": "Get current WiFi connection status, network name, and signal strength.",
-        "parameters": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "get_time_date",
-        "description": "Get the current date, time, and day of the week.",
+        "description": "Get WiFi connection status, SSID network name, and signal strength.",
         "parameters": {"type": "object", "properties": {}},
     },
 ]
 
-# Map function names to callables
 TOOL_FUNCTIONS = {
     "get_volume": get_volume,
     "set_volume": set_volume,
@@ -392,8 +389,24 @@ TOOL_FUNCTIONS = {
     "get_battery_status": get_battery_status,
     "get_system_info": get_system_info,
     "lock_screen": lock_screen,
+    "go_to_sleep": go_to_sleep,
+    "sleep_mode": go_to_sleep,
+    "standby": go_to_sleep,
+    "stop_listening": go_to_sleep,
     "shutdown_restart": shutdown_restart,
     "toggle_wifi": toggle_wifi,
     "get_wifi_status": get_wifi_status,
-    "get_time_date": get_time_date,
 }
+
+
+def find_window(target_name: str) -> int:
+    """
+    Finds a window handle (HWND) by searching process names and window titles.
+    """
+    try:
+        from tools.system_tool import system_helper
+        return system_helper.find_window(target_name)
+    except Exception as e:
+        logger.debug(f"find_window failed for '{target_name}': {e}")
+        return 0
+

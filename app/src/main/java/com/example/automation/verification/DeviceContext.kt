@@ -64,9 +64,26 @@ data class DeviceContext(
 
             val nodes = mutableListOf<UiNode>()
             var pkgName = ""
-            if (rootNode != null) {
-                pkgName = rootNode.packageName?.toString().orEmpty()
-                extractNodes(rootNode, nodes)
+            val service = com.example.service.JarvisAccessibilityService.instance
+            val effectiveRoot = rootNode ?: service?.rootInActiveWindow
+
+            if (effectiveRoot != null) {
+                pkgName = effectiveRoot.packageName?.toString().orEmpty()
+                extractNodes(effectiveRoot, nodes)
+            }
+
+            if (pkgName.isEmpty()) {
+                val activeWindowRoot = service?.windows?.firstOrNull { it.isFocused || it.isActive }?.root
+                if (activeWindowRoot != null) {
+                    pkgName = activeWindowRoot.packageName?.toString().orEmpty()
+                    if (nodes.isEmpty()) {
+                        extractNodes(activeWindowRoot, nodes)
+                    }
+                }
+            }
+
+            if (pkgName.isEmpty()) {
+                pkgName = com.example.automation.state.WorldStateManager.getCurrentState().currentApp
             }
 
             return DeviceContext(

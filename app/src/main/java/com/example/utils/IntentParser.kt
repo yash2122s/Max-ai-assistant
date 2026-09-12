@@ -41,6 +41,18 @@ object IntentParser {
             return ParsedRequest(intent = "QUICK_ACTION", quickActionType = "WIFI_SETTINGS")
         }
 
+        // 2.5 Semantic UI Automation (Compound app + UI target)
+        val parsedUi = com.example.automation.engine.SemanticUiCommandParser.parse(text)
+        if (parsedUi != null && !parsedUi.app.isNullOrBlank()) {
+            val (pName, cleanAppName) = getAppPackageAndName(parsedUi.app)
+            return ParsedRequest(
+                intent = "UI_AUTOMATION",
+                appName = if (cleanAppName.isNotEmpty()) cleanAppName else parsedUi.app,
+                packageName = pName.ifEmpty { null },
+                message = parsedUi.target
+            )
+        }
+
         // 3. Open App (Feature 6)
         if (t.startsWith("open ") && !t.contains("search") && !t.contains("and") && !t.contains("play")) {
             val app = t.substringAfter("open ").trim()

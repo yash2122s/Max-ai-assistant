@@ -16,22 +16,55 @@ object InstalledAppsRepository {
     @Volatile
     private var cachedApps: List<InstalledApp>? = null
 
+    @Volatile
+    var isTesting: Boolean = false
+
+    fun clearCache() {
+        cachedApps = null
+    }
+
+    fun setCachedAppsForTesting(apps: List<InstalledApp>?) {
+        isTesting = true
+        cachedApps = apps
+    }
+
     private val aliases = mapOf(
-        "wa" to "WhatsApp",
-        "whatsapp" to "WhatsApp",
-        "yt" to "YouTube",
-        "youtube" to "YouTube",
-        "insta" to "Instagram",
-        "instagram" to "Instagram",
-        "maps" to "Google Maps",
-        "google maps" to "Google Maps",
-        "chrome" to "Google Chrome",
-        "google chrome" to "Google Chrome",
-        "fb" to "Facebook"
+        "wa" to "com.whatsapp",
+        "whatsapp" to "com.whatsapp",
+        "yt" to "com.google.android.youtube",
+        "youtube" to "com.google.android.youtube",
+        "insta" to "com.instagram.android",
+        "instagram" to "com.instagram.android",
+        "maps" to "com.google.android.apps.maps",
+        "google maps" to "com.google.android.apps.maps",
+        "google map" to "com.google.android.apps.maps",
+        "gmaps" to "com.google.android.apps.maps",
+        "map" to "com.google.android.apps.maps",
+        "chrome" to "com.android.chrome",
+        "google chrome" to "com.android.chrome",
+        "fb" to "com.facebook.katana",
+        "calc" to "com.google.android.calculator",
+        "calculator" to "com.google.android.calculator",
+        "settings" to "com.android.settings",
+        "setting" to "com.android.settings",
+        "photos" to "com.google.android.apps.photos",
+        "gallery" to "com.google.android.apps.photos",
+        "phone" to "com.google.android.dialer",
+        "dialer" to "com.google.android.dialer",
+        "notes" to "com.google.android.keep",
+        "keep" to "com.google.android.keep",
+        "క్యాలిక్యులేటర్" to "com.google.android.calculator",
+        "క్రోమ్" to "com.android.chrome",
+        "వాట్సాప్" to "com.whatsapp",
+        "యూట్యూబ్" to "com.google.android.youtube",
+        "మ్యాప్స్" to "com.google.android.apps.maps",
+        "సెట్టింగ్స్" to "com.android.settings"
     )
 
     fun scanAndSaveInstalledApps(context: Context) {
+        if (isTesting) return
         CoroutineScope(Dispatchers.IO).launch {
+            if (isTesting) return@launch
             try {
                 val pm = context.packageManager
                 val intent = Intent(Intent.ACTION_MAIN, null).apply {
@@ -48,49 +81,131 @@ object InstalledAppsRepository {
                 }.distinctBy { it.packageName }
 
                 // Update memory cache
-                cachedApps = installedApps
-                Log.d(TAG, "Memory cache updated with ${installedApps.size} apps.")
+                if (installedApps.isNotEmpty()) {
+                    cachedApps = installedApps
+                    Log.d(TAG, "Memory cache updated with ${installedApps.size} apps.")
 
-                // Backup to Room
-                val db = AppDatabase.getDatabase(context)
-                db.installedAppDao().deleteAllApps()
-                db.installedAppDao().insertApps(installedApps)
-                Log.d(TAG, "Room database backup updated with ${installedApps.size} apps.")
+                    // Backup to Room
+                    val db = AppDatabase.getDatabase(context)
+                    db.installedAppDao().deleteAllApps()
+                    db.installedAppDao().insertApps(installedApps)
+                    Log.d(TAG, "Room database backup updated with ${installedApps.size} apps.")
+                }
             } catch (e: Exception) {
                 Log.e(TAG, "Error scanning and saving apps", e)
             }
         }
     }
 
-    private fun getApps(context: Context): List<InstalledApp> {
-        return cachedApps ?: run {
-            val db = AppDatabase.getDatabase(context)
-            val apps = runBlocking {
-                try {
-                    db.installedAppDao().getAllApps()
-                } catch (e: Exception) {
-                    emptyList()
+    fun getApps(context: Context? = null): List<InstalledApp> {
+        if (isTesting) {
+            return cachedApps ?: emptyList()
+        }
+        cachedApps?.let { if (it.isNotEmpty()) return it }
+        if (context == null) return cachedApps ?: emptyList()
+
+        val db = AppDatabase.getDatabase(context)
+        val apps = runBlocking {
+            try {
+                db.installedAppDao().getAllApps()
+            } catch (e: Exception) {
+                emptyList()
+            }
+        }
+        if (apps.isNotEmpty()) {
+            cachedApps = apps
+            return apps
+        }
+
+        // Direct fallback to PackageManager if cache and database are not yet populated
+        return try {
+            val pm = context.packageManager
+            val intent = Intent(Intent.ACTION_MAIN, null).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+            }
+            val pmApps = pm.queryIntentActivities(intent, 0).map { resolveInfo ->
+                InstalledApp(
+                    packageName = resolveInfo.activityInfo.packageName,
+                    appName = resolveInfo.loadLabel(pm).toString()
+                )
+            }.distinctBy { it.packageName }
+            if (pmApps.isNotEmpty()) {
+                cachedApps = pmApps
+                CoroutineScope(Dispatchers.IO).launch {
+                    try {
+                        db.installedAppDao().insertApps(pmApps)
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error caching scanned apps: ${e.message}")
+                    }
                 }
             }
-            cachedApps = apps
-            apps
+            pmApps
+        } catch (e: Exception) {
+            Log.w(TAG, "Error querying package manager: ${e.message}")
+            emptyList()
         }
     }
 
-    fun findApp(context: Context, query: String): String? {
-        val apps = getApps(context)
-        if (apps.isEmpty()) return null
+    fun extractAndMatchApp(context: Context? = null, intent: String): String? {
+        val cleanIntent = intent.trim().lowercase()
+        if (cleanIntent.isBlank()) return null
 
+        val apps = getApps(context)
+
+        // 1. Direct package name or app name in intent
+        for (app in apps) {
+            val appNameLower = app.appName.lowercase()
+            val pkgLower = app.packageName.lowercase()
+            if (pkgLower.isNotBlank() && cleanIntent.contains(pkgLower)) {
+                return app.packageName
+            }
+            if (appNameLower.isNotBlank() && cleanIntent.contains(appNameLower)) {
+                return app.packageName
+            }
+        }
+
+        // 2. Check alias map matches within intent
+        for ((aliasKey, aliasPkg) in aliases) {
+            val pattern = "\\b${Regex.escape(aliasKey)}\\b".toRegex(RegexOption.IGNORE_CASE)
+            if (pattern.containsMatchIn(cleanIntent) || cleanIntent.contains(aliasKey)) {
+                return aliasPkg
+            }
+        }
+
+        // 3. Fallback: try findApp on full intent
+        return findApp(context, cleanIntent)
+    }
+
+    fun findApp(context: Context? = null, query: String): String? {
         val cleanQuery = query.trim().lowercase()
+        if (cleanQuery.isBlank()) return null
+
+        val apps = getApps(context)
+
+        // 0. Direct package name match in app list
+        val packageMatch = apps.firstOrNull { it.packageName.equals(cleanQuery, ignoreCase = true) }
+        if (packageMatch != null) return packageMatch.packageName
 
         // 1. Alias Match
         val resolvedName = aliases[cleanQuery]
         if (resolvedName != null) {
+            if (resolvedName.contains(".")) {
+                val pkgMatch = apps.firstOrNull { it.packageName.equals(resolvedName, ignoreCase = true) }
+                if (pkgMatch != null) return pkgMatch.packageName
+                if (context != null) {
+                    try {
+                        if (context.packageManager.getLaunchIntentForPackage(resolvedName) != null) {
+                            return resolvedName
+                        }
+                    } catch (_: Exception) {}
+                }
+                return resolvedName
+            }
             val aliasMatch = apps.firstOrNull { it.appName.equals(resolvedName, ignoreCase = true) }
             if (aliasMatch != null) return aliasMatch.packageName
         }
 
-        // 2. Exact Match
+        // 2. Exact Match (case-insensitive)
         val exactMatch = apps.firstOrNull { it.appName.equals(cleanQuery, ignoreCase = true) }
         if (exactMatch != null) return exactMatch.packageName
 
@@ -101,6 +216,21 @@ object InstalledAppsRepository {
         // 4. Contains Match
         val containsMatch = apps.firstOrNull { it.appName.lowercase().contains(cleanQuery) }
         if (containsMatch != null) return containsMatch.packageName
+
+        // 5. Fallback for valid package name with launch intent
+        if (cleanQuery.contains(".")) {
+            if (context != null) {
+                try {
+                    if (context.packageManager.getLaunchIntentForPackage(cleanQuery) != null) {
+                        return cleanQuery
+                    }
+                } catch (e: Exception) {
+                    // Ignore
+                }
+            } else {
+                return cleanQuery
+            }
+        }
 
         // 5. Levenshtein Distance similarity score
         var bestMatch: InstalledApp? = null
