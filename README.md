@@ -1,61 +1,190 @@
-# Max AI Assistant
+# MAX AI Assistant ⚡🤖
 
-Max AI Assistant is a powerful, cross-device AI orchestration assistant that seamlessly bridges your **Android mobile device** with a **Windows desktop agent**. Powered by Google Gemini, Max allows you to control, monitor, and automate tasks on both your phone and your computer through voice, text, and automated routines.
+[![Kotlin](https://img.shields.io/badge/Kotlin-2.x-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org/)
+[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev/)
+[![Android](https://img.shields.io/badge/Android-API%2036%20(16)-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![Gemini Live](https://img.shields.io/badge/Gemini%20Live-WebSocket%20API-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg?style=for-the-badge)](LICENSE)
 
----
-
-## 📱 Project Components
-
-### 1. Android Application (`/app`)
-A native Android app built with **Kotlin** and **Jetpack Compose** that serves as the primary interface for the user.
-* **Gemini Live Integration**: Implements a real-time WebSocket client connection for low-latency voice, audio, and vision processing.
-* **Device Automation**: Executes local system actions like adjusting brightness, volume, DND settings, and managing Wi-Fi or Bluetooth.
-* **Advanced Integrations**: Incorporates Shizuku shell service integration for elevated permission actions and system automation.
-* **Built-in Utilities**: Includes structured tools for alarms, reminders, calendar syncing, period tracking, and saving memories.
-
-### 2. Windows Agent (`/windows-agent` & `/max-windows-agent`)
-A lightweight **Python** background agent running on your PC that executes tasks requested by the Android client or assistant engine.
-* **Control Tools**: Terminal execution, process management, file operations, system info retrieval, and power commands (sleep, lock, shutdown).
-* **Media & Productivity**: Screen capture capabilities, clipboard syncing, application launching, and system volume controls.
-* **Web Dashboard**: Features a premium HTML/CSS/JS dashboard serving real-time logs, active device pairing, terminal sessions, and service settings.
-* **Secure Transport**: Features a secure cert-based communication system using WebSockets for encrypted local networking.
+**MAX** is a state-of-the-art, cross-device autonomous AI agent and voice assistant. It seamlessly orchestrates your **Android smartphone** and **Windows desktop**, executing complex device automations, multi-step agentic workflows, real-time multimodal voice/vision conversations, and hands-free communications.
 
 ---
 
-## ⚡ Key Features
+## 🌟 Key Highlights & Architecture
 
-* **Cross-Device Coordination**: Request actions on your phone that seamlessly control or query your PC (e.g., *"Open VS Code on my PC"* or *"Check my PC's CPU usage"*).
-* **Gemini-Powered Engine**: Direct tool call routing where Gemini decides whether to execute actions locally on the phone or forward them to the Windows Agent.
-* **Voice & Vision Feedback**: Supports real-time audio streams, voice wave visualization, and screen reasoners to "see" your current workspace.
+```mermaid
+graph TD
+    User([🗣️ User Voice / Touch Input]) --> Bridge[Flutter UI & MaxNativeBridge]
+    Bridge --> Assistant[AssistantEngine & Voice Pipeline]
+    
+    Assistant <-->|Bi-directional Audio / Vision Frame| Gemini[Google Gemini Live WebSocket]
+    Assistant <-->|Visual UI Actions| OpenRouter[OpenRouter / Ox-Alpha UI Agent]
+    
+    Gemini --> ToolDispatcher[ToolDispatcher & Intent Guards]
+    ToolDispatcher --> ActionDispatcher[ActionDispatcher & ExecutionEngine]
+    
+    subgraph Android Subsystems [📱 Android Local Execution]
+        ActionDispatcher --> Accessibility[JarvisAccessibilityService<br/>UI & WhatsApp Automation]
+        ActionDispatcher --> UniversalInput[Universal Input Layer<br/>Accessibility / IME / Shizuku]
+        ActionDispatcher --> CallAssistant[Incoming Call Assistant<br/>Telecom & Voice Answering]
+        ActionDispatcher --> MemoryVault[Memory Vault<br/>Room v14 + AES + Vector Search]
+        ActionDispatcher --> SystemTools[45+ Hardware & System Tools<br/>Flashlight, DND, Reminders, Routines]
+    end
+    
+    subgraph Windows Agent [💻 Windows Desktop Companion]
+        ActionDispatcher -.->|Encrypted WebSocket / NSD| WinAgent[Windows Python Agent]
+        WinAgent --> UIA[Windows UI Automation & CDP]
+        WinAgent --> SysControl[Terminal, Process & System Suite]
+    end
+```
 
 ---
 
-## 🚀 Setup & Installation
+## 📱 Subsystems & Capabilities
 
-### Android App
-1. Open the `/app` folder in **Android Studio**.
-2. Create a `.env` file in the root directory and add your Gemini API Key:
-   ```env
-   GEMINI_API_KEY=your_api_key_here
+### 1. 🎙️ Gemini Live Real-Time Voice & Vision Engine
+- **Ultra-Low Latency WebSocket Pipeline**: Direct bi-directional PCM audio streaming to `gemini-3.1-flash-live-preview` with real-time barge-in and conversational interruption.
+- **Multimodal Screen Reasoning**: Captures high-frequency RAM screenshots (via Shizuku exec-out / Accessibility) and injects JPEG video frames into Gemini Live for real-time visual reasoning.
+- **Dynamic Waveform Visualization**: Hardware-accelerated audio visualizer with reactive state badges (`OFFLINE`, `CONNECTING`, `ONLINE`, `LISTENING`, `THINKING`, `SPEAKING`).
+
+### 2. 🤖 Autonomous UI Automation & Intent Routing
+- **Dual-Model UI Agent Engine**: Dynamic UI automation powered by OpenRouter (`stealth/ox-alpha` primary) with Gemini fallback, featuring closed-loop `UiVerificationLoop` and element grounding.
+- **Bulletproof Intent Routing Guards**: Anchored regex and authorization gates that protect against LLM intent collisions (e.g. dictating *"call back later"* in a WhatsApp message will never trigger a legacy `CALL_PHONE` action).
+- **Universal Input & Keyboard Controller (Phase 8)**: 3-tier typing fallback (Accessibility `ACTION_SET_TEXT` / `ACTION_IME_ENTER` $\rightarrow$ Grounded Semantic Controls $\rightarrow$ Shizuku / ADB Shell).
+
+### 3. 💬 WhatsApp & Social Automation
+- **Autonomous Messaging**: Deep-link and Accessibility-based contact resolution with top toolbar header verification and preview snippet collision rejection.
+- **Incoming Call Assistant**: Layered caller resolution (`PhoneLookup`, call logs, accessibility UI scraping), voice announcement, hands-free voice answering/rejection, and follow-up SMS/WhatsApp auto-replies.
+- **Notification Bridge**: Listens and parses notifications with AI-powered smart replies.
+
+### 4. 🧠 Encrypted Memory Vault (Vector + Keyword Search)
+- **Room Database v14**: Fully offline, AES-256 encrypted memory vault with category filtering, pinning, and tag search.
+- **Hybrid Semantic Search**: 768-dimensional embeddings (`text-embedding-004`) combined with cosine similarity + BM25 keyword matching for contextual memory recall.
+
+### 5. 💻 Windows Desktop Agent (`/windows-agent`)
+- **System & App Automation**: UIA control, terminal execution, file system management, process supervision, and power controls.
+- **Browser Automation & CDP**: Chrome DevTools Protocol integration for automated web scraping and web tasks.
+- **Developer & Productivity Suite**: Code sandbox, git integration, document processing, kanban manager, and real-time dashboard.
+
+---
+
+## 🗂️ Project Structure
+
+```
+gemini-live/
+├── app/                              # Android Native Subsystem (Kotlin)
+│   ├── src/main/java/com/example/
+│   │   ├── automation/               # ExecutionEngine, ActionDispatcher, UI Agents
+│   │   │   ├── agent/                # OpenRouter / Gemini UI Agent providers
+│   │   │   ├── engine/               # TaskPlanner, ActionAuthorizer, InputController
+│   │   │   └── accessibility/        # JarvisAccessibilityService & WhatsApp resolvers
+│   │   ├── network/                  # GeminiWebSocketClient & ToolDispatcher (45+ tools)
+│   │   ├── voice/                    # AssistantEngine, AudioRecorder, PlaybackManager
+│   │   ├── telephony/                # IncomingCallFlowState, CallManager & Receiver
+│   │   ├── memory/                   # PermanentMemoryDao, Vector Search & Embeddings
+│   │   └── ui/                       # MaxFlutterActivity & MaxNativeBridge
+│   └── src/test/java/com/example/    # Comprehensive unit tests & routing guards
+├── max_flutter/                      # 100% Flutter UI Subsystem (Dart)
+│   ├── lib/
+│   │   ├── features/                 # Home, Onboarding, Routines, Permissions, Memory, Settings
+│   │   ├── shared/                   # MaxScaffold, MaxDrawer, MaxQuickActions, Theme tokens
+│   │   └── core/                     # MaxNativeBridge platform channels
+├── windows-agent/                    # Windows Desktop Agent (Python)
+│   ├── core/                         # Event loop, Protocol envelopes, Device routers
+│   ├── tools/                        # UIA, Terminal, App control, Browser CDP, Code sandbox
+│   └── tests/                        # Comprehensive desktop test suites
+├── docs/max/                         # Detailed subsystem architecture docs
+├── MAX_ARCHITECTURE.md               # Technical architecture & pipeline diagrams
+├── MAX_PROJECT_MAP.md                # Component & navigation index
+└── MAX_PROJECT_STATE.md              # Living project status & feature matrix
+```
+
+---
+
+## 🚀 Getting Started
+
+### Prerequisites
+- **Android**: Android Studio Ladybug / Meerkat (Gradle 8.x, JDK 17+, Android SDK 36)
+- **Target Hardware**: Android device with API 31+ (Root + Shizuku recommended for full autonomous power)
+- **Desktop**: Python 3.11+ (Windows 10/11)
+- **API Keys**: Google Gemini API Key and/or OpenRouter API Key
+
+---
+
+### 📱 Android Application Setup
+
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/yash2122s/Max-ai-assistant.git
+   cd Max-ai-assistant
    ```
-3. Sync Gradle and build the application onto an emulator or physical device.
 
-### Windows Agent
-1. Navigate to the agent directory:
+2. **Configure API Keys**:
+   Create a `.env` file in the root directory:
+   ```env
+   GEMINI_API_KEY=your_gemini_api_key_here
+   OPENROUTER_API_KEY=your_openrouter_api_key_here
+   ```
+
+3. **Build & Install**:
+   ```bash
+   ./gradlew installDebug
+   ```
+
+4. **Grant Permissions**:
+   Open MAX on your device and navigate to the **Permissions Manager** (`/permissions` in drawer) to activate the 11 system capabilities (Microphone, Accessibility, Notifications, Overlay, etc.).
+
+---
+
+### 💻 Windows Agent Setup
+
+1. **Navigate to the agent directory**:
    ```bash
    cd windows-agent
    ```
-2. Install the Python dependencies:
+
+2. **Install Dependencies**:
    ```bash
+   python -m venv venv
+   .\venv\Scripts\activate
    pip install -r requirements.txt
    ```
-3. Run the agent startup script:
+
+3. **Start the Agent**:
    ```bash
-   startup.bat
+   python run.py
+   # Or run startup script:
+   .\startup.bat
    ```
-4. Access the web dashboard locally at `https://localhost:8000` (or the configured port) to pair with your Android device.
+
+4. **Pair with Android**:
+   The Android app discovers the desktop agent automatically via Network Service Discovery (NSD) over local Wi-Fi.
 
 ---
 
-## 🤝 How It Works (Protocol)
-The Android client and Windows agent communicate over a custom local WebSocket protocol. When Gemini classifies an intent that targets the computer (like looking up a file or taking a screenshot), the Android orchestrator routes the packet to the Windows agent connection, which processes it and responds with the execution results.
+## 🧪 Testing & Verification
+
+Run the comprehensive unit test suite to verify routing integrity and dispatch boundaries:
+
+```bash
+# Android Unit Tests
+./gradlew testDebugUnitTest --tests "com.example.automation.IntentRoutingGuardUnitTest"
+
+# Windows Agent Tests
+cd windows-agent
+pytest tests/
+```
+
+---
+
+## 🔒 Security & Privacy Invariants
+
+- **Encrypted Local Storage**: Zero plaintext secrets or sensitive memories stored on disk.
+- **Explicit Dispatch Boundaries**: Critical physical actions (e.g. initiating outbound phone calls) require verified intent matching and strict authorization gates.
+- **Local Network Isolation**: Communication between Android and PC operates strictly over encrypted local WebSockets without intermediary cloud servers.
+
+---
+
+## 📄 License
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
