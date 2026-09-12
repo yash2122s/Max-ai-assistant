@@ -4,9 +4,9 @@
 
 ---
 
-## Current Project Status: ACTIVE PRODUCTION (100% Flutter UI • OpenRouter/Ox-Alpha UI Agent)
+## Current Project Status: ACTIVE PRODUCTION (100% Native Jetpack Compose UI • OpenRouter/Ox-Alpha UI Agent)
 
-**Build**: Gradle 8.x / AGP 8.x / Kotlin 2.x / Flutter 3.x / compileSdk 36 (API 36.1)  
+**Build**: Gradle 8.x / AGP 8.x / Kotlin 2.x / compileSdk 36 (API 36.1)  
 **Target Device**: Redmi K20 Pro — Android 16 (API 36) — Root + Shizuku  
 **App ID**: `com.aistudio.geminilive.abcde`  
 **Package**: `com.example`  
@@ -23,24 +23,22 @@
 | **WhatsApp Contact Resolution & Top Header Verification** | Isolated search result contact name matching in `WhatsAppContactResolver.kt`. Rejects message preview snippets (`msg_snippet`, `conversations_row_message`), ignores group chat collisions, traverses up to clickable row container, and strictly verifies top toolbar chat header before typing or sending messages. |
 | **White Light Theme & Haptic Feedback Upgrade** | Complete White Light Theme transformation with clean tokens (`MaxBgDark = #F8FAFC`, `MaxSurface = #FFFFFF`, `MaxSurfaceVariant = #F1F5F9`, `MaxTextPrimary = #0F172A`, `MaxBorder = #E2E8F0`, `MaxPrimary = #0066FF`). Upgraded edge lighting with 7.5dp stroke + 18dp outer glow and multi-tier tactile sensations in `MaxHapticFeedback.kt`. |
 | **Phase 8 — Universal Input & Keyboard Control Layer** | Full multi-tier keyboard & IME control layer (`KeyboardController`, `InputTargetResolver`, `InputVerifier`, `type_text`, `press_enter`, `press_key`, `clear_text`) with 3-tier capability router (Accessibility `ACTION_SET_TEXT` / `ACTION_IME_ENTER` → Grounded Semantic / IME Controls → Shizuku / ADB Shell fallback). Resolves "I can't type" false capability reporting. |
-| **Production Stability Hardening Master Pass** | Unified runtime state authority between Kotlin core and Flutter UI. Single authoritative `assistantState` (`OFF`, `CONNECTING`, `ONLINE`, `LISTENING`, `THINKING`, `SPEAKING`, `ERROR`) with platform channel payload deduplication (zero redundant bridge events). Target-specific animation lifecycles for `MaxVoiceVisualizer`, `MaxStatusBadge`, and `HomeScreen` (zero CPU/battery waste when dormant or offline). Debounced single-push navigation across all routes. |
+| **Production Stability Hardening Master Pass** | Single authoritative `assistantState` (`OFF`, `CONNECTING`, `ONLINE`, `LISTENING`, `THINKING`, `SPEAKING`, `ERROR`). Target-specific animation lifecycles for voice visualizer and `HomeScreen` (zero CPU/battery waste when dormant or offline). |
 | **Global MAX ON/OFF Mode (Developer Mode)** | Central `MaxRuntimeManager` controlling global operating state (`MAX ACTIVE` vs `MAX OFF`). When OFF, safely stops Gemini Live session, microphone recording, UI agent loops, Telegram bot, and dynamic capsule overlay while preserving essential system alarms (`AlarmManager`, `ReminderDao`, task scheduler). Persisted across process restarts and boot. |
-| **Real-Time Assistant State Pipeline** | Event-driven status pipeline pushing exact Kotlin runtime events (`AssistantEventBus`, `AudioPlaybackManager.onPlaybackStateChanged`, `SessionStateMachine`) to Flutter via `MaxNativeBridge.onChatStateChanged`. True real-time status transitions: `OFF`, `OFFLINE`, `CONNECTING`, `ONLINE`, `LISTENING`, `THINKING`, `SPEAKING`, `ERROR`. |
-| **Left-Edge Navigation Drawer Fix** | Optimized `MaxScaffold` gesture configuration (`drawerEdgeDragWidth: 100.0`, `drawerDragStartBehavior: DragStartBehavior.down`, `drawerEnableOpenDragGesture: true`). Smooth, reliable swipe from left edge without conflicting with child scrollables or carousels. |
-| **100% Flutter UI & Compose Removal** | Flutter is the ONLY user-facing UI. Jetpack Compose UI screens deleted. `MainActivity.kt` converted to lightweight intent forwarder to `MaxFlutterActivity`. |
+| **Real-Time Assistant State Pipeline** | Event-driven status pipeline pushing exact Kotlin runtime events (`AssistantEventBus`, `AudioPlaybackManager.onPlaybackStateChanged`, `SessionStateMachine`) directly to UI StateFlows. True real-time status transitions: `OFF`, `OFFLINE`, `CONNECTING`, `ONLINE`, `LISTENING`, `THINKING`, `SPEAKING`, `ERROR`. |
+| **100% Native Jetpack Compose UI** | Jetpack Compose is the ONLY UI framework. `MainActivity.kt` hosts `MaxApp` shell with `MaxNavGraph`, `HomeScreen`, `OnboardingScreen`, `MemoryScreen`, `PermissionsScreen`, `SettingsScreen`, `RoutinesScreen`, `RemindersScreen`, `PeriodScreen`, and `CapabilitiesScreen`. |
 | **UI Automation Agent Layer** | Dynamic provider-independent UI agent (`com.example.automation.agent`) featuring `UiVerificationLoop`, `UiActionExecutor`, `UiAgentRouter`, `OpenRouterUiAgentProvider` (primary with `stealth/ox-alpha` default), and `GeminiUiAgentProvider` (fallback). Automatically aborts when MAX is OFF. |
 | **Fast First-Frame Startup** | Removed blocking initializations from application launch. Installed apps scanning and non-critical background services run asynchronously on `Dispatchers.IO`. |
-| **UI Agent Flutter Config** | Dual intelligence configuration in Onboarding Step 2 (`AiConfigScreen`) and `SettingsScreen` supporting OpenRouter API Key, dynamic model selector, and real-time connection testing. |
+| **UI Agent Config** | Dual intelligence configuration in Onboarding and Settings supporting OpenRouter API Key, dynamic model selector, and real-time connection testing. |
 | **Home Navigation Intent Normalization** | Resolved Telugu + English home navigation variants in `NaturalCommandNormalizer.kt`, `OfflineCommandEngine.kt`, `ToolDispatcher.kt`, and `ActionAuthorizer.kt` (`"హోమ్ స్క్రీన్‌కి వెళ్ళు"`, `"హోమ్ స్క్రీన్కి వెళ్ళు"`, `"హోమ్ ఓపెన్ చేయి"`, `"Go to home screen"`, etc.). |
 | **Screenshot Capture & Disk Persistence** | Screen capture saves directly to `/sdcard/Pictures/Screenshots/MAX_Screenshot_<timestamp>.jpg` and indexes in `MediaScannerConnection`. Verified live on Redmi K20 Pro. |
 | **Memory Vault Full Persistence** | Memory Vault and Save Memory Quick Action fully persisted via Room `PermanentMemoryDao` with AES encryption, tag search, category filtering, and pin/delete controls. |
 | **Comprehensive Permissions Manager (11/11)** | Exposes and controls all 11 system capabilities: Microphone, Accessibility, Notifications, Contacts, Phone, SMS, Location (GPS), Camera, Overlay, Battery optimization, and Notification Listener. Verified `11 / 11 Active` on device. |
 | **Camera Quick Action** | Opens Android camera viewfinder via `MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA` with manufacturer package fallbacks. |
-| **Drawer Left-Edge Swipe & Back Button Behavior** | Configured `drawerEdgeDragWidth: 60.0` and `drawerEnableOpenDragGesture: true` in `MaxScaffold`. Android Back button closes the drawer without closing or backgrounding the app. |
-| **Flutter Permission Manager** | Implemented dedicated Permissions Manager screen in Flutter (`max_flutter/lib/features/onboarding/permissions_screen.dart` via `/permissions` route) accessible directly from navigation drawer. Features `MaxAppBar` with back navigation, active capabilities count, real-time status refresh, individual toggles/grant actions for all 11 capabilities, plus direct link to Android App Info settings via `MaxNativeBridge`. |
-| **Flutter Routine Automation** | Implemented dedicated Routines & Automation screen in Flutter (`max_flutter/lib/features/routines/routines_screen.dart` via `/routines` route) wired in `MaxDrawer` (fixing prior routing bug). Features system preset routines (Morning Wake-Up, Bedtime Sleep Mode, Focus/Work Mode, Gaming Turbo Mode) with formatted step badges, live sequential execution feedback, and custom macro routine creator modal (DND, volume, brightness, bluetooth steps) dispatching directly to Kotlin `RoutineTool`. |
-| **Horizontal Quick Actions Carousel** | Implemented horizontally scrollable Quick Actions carousel (`max_flutter/lib/shared/widgets/max_quick_actions.dart`) on Home Screen (`max_empty_state.dart`). Features 10 real hardware and backend tool triggers: Torch ON/OFF (`QuickActions.toggleFlashlight`), WhatsApp deep-link, Screenshot capture (`ExecutionEngine.TAKE_SCREENSHOT`), Send SMS dialog (`SEND_SMS`), Create Contact dialog (`CREATE_CONTACT`), Set Reminder modal (`addReminder`), Save Memory modal (`saveMemory`), GPS Location query (`GET_LOCATION`), and Camera launcher (`OPEN_CAMERA`). |
-| **Drawer Navigation & Back Button Handling** | Clean drawer edge swipe, menu icon trigger, categorized destinations, and Android back button handling (dismisses drawer first before backgrounding app). |
+| **Navigation Drawer & Gestures** | Full Material 3 `ModalNavigationDrawer` with smooth swipe, categorized destinations, and Android back button handling. |
+| **Permissions Manager Screen** | Dedicated Permissions Manager screen in Jetpack Compose (`PermissionsScreen.kt` via `MaxDestinations.PERMISSIONS`). Features active capabilities count, real-time status refresh, individual toggles/grant actions for all 11 capabilities, plus direct link to Android App Info settings. |
+| **Routine Automation Screen** | Dedicated Routines & Automation screen in Jetpack Compose (`RoutinesScreen.kt` via `MaxDestinations.ROUTINES`). Features system preset routines (Morning Wake-Up, Bedtime Sleep Mode, Focus/Work Mode, Gaming Turbo Mode) and custom macro routine creator modal dispatching directly to Kotlin `RoutineTool`. |
+| **Horizontal Quick Actions Carousel** | Horizontally scrollable Quick Actions carousel on Home Screen. Features 10 real hardware and backend tool triggers: Torch ON/OFF (`QuickActions.toggleFlashlight`), WhatsApp deep-link, Screenshot capture (`ExecutionEngine.TAKE_SCREENSHOT`), Send SMS dialog (`SEND_SMS`), Create Contact dialog (`CREATE_CONTACT`), Set Reminder modal (`addReminder`), Save Memory modal (`saveMemory`), GPS Location query (`GET_LOCATION`), and Camera launcher (`OPEN_CAMERA`). |
 | **Gemini Live Voice** | WebSocket to `gemini-3.1-flash-live-preview`. Audio in/out working. |
 | **AssistantEngine** | Full session lifecycle, barge-in, audio stutter fix, WS keep-alive |
 | **Tool Calling (45 tools)** | All tools registered in MyApplication; ToolDispatcher wired to GeminiWebSocketClient |
@@ -60,9 +58,9 @@
 | **Routines** | RoutineTool (create/run/delete/list) |
 | **Screen Capture** | Tiered: Shizuku exec-out → Accessibility takeScreenshot(). RAM only, no disk write. |
 | **Vision Queries** | isVisionQuery() detection; JPEG sent to Gemini Live as video frame |
-| **Onboarding** | 3-stage Flutter UI: Welcome → Permissions → AI Config (Streamlined Gemini AI Studio API Key input; provider/model selectors removed from UI, internal model configuration preserved; Test Connection validation enables Complete Setup); persisted in SettingsManager |
+| **Onboarding** | 3-stage Compose UI: Welcome → Permissions → AI Config; persisted in SettingsManager |
 | **Settings** | SettingsManager with EncryptedSharedPreferences; all settings exposed in SettingsScreen |
-| **Theme** | MAX Premium Dark (Electric Blue + Vivid Purple); Flutter & Compose design systems aligned |
+| **Theme** | MAX Premium Dark (Electric Blue + Vivid Purple) Jetpack Compose design system |
 | **Dynamic Capsule Overlay** | MaxCapsuleOverlayService + DynamicCapsuleView; auto-starts if SYSTEM_ALERT_WINDOW granted |
 | **Windows Companion** | CompanionConnectionService (NSD discovery); WindowsAgentClient; WorkerMode suspend/resume |
 | **Multi-step GoalPlanner** | GeminiPlanningProvider injected; LLM-based plan generation; WorldStateManager |
@@ -83,7 +81,7 @@
 |---------|-----|
 | **Telegram Bot** | Only 5 commands allowed (hardcoded ALLOWED_ACTIONS). No NLP / Gemini forwarding. Cannot send arbitrary messages back. Not a full AI remote control. |
 | **Incoming Call Auto-Answer** | Receiver + Manager working, but full "answer/reject by voice" agentic loop needs user testing. |
-| **Windows Agent** | CompanionConnectionService + WindowsAgentClient exist; WorkerMode suspend/resume implemented. Integration depends on hermes-agent-main companion running on PC. |
+| **Windows Agent** | CompanionConnectionService + WindowsAgentClient exist; WorkerMode suspend/resume implemented. Integration pairs with Windows companion agent running on PC. |
 | **GoalPlanner Multi-step** | Engine present; GeminiPlanningProvider injected. Depends on agentic mode being enabled in settings AND daily budget. Not tested exhaustively. |
 | **Auto-Reply AI Fallback** | isAiFallbackEnabled exists in settings. AI fallback reply generation path needs end-to-end verification. |
 | **Voice Memory Categories** | MemoryCategory enum exists but UI filtering may not be complete. |

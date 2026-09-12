@@ -1,7 +1,7 @@
 # MAX AI Assistant ⚡🤖
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.x-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org/)
-[![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev/)
+[![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Android](https://img.shields.io/badge/Android-API%2036%20(16)-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Gemini Live](https://img.shields.io/badge/Gemini%20Live-WebSocket%20API-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
@@ -15,8 +15,8 @@
 
 ```mermaid
 graph TD
-    User([🗣️ User Voice / Touch Input]) --> Bridge[Flutter UI & MaxNativeBridge]
-    Bridge --> Assistant[AssistantEngine & Voice Pipeline]
+    User([🗣️ User Voice / Touch Input]) --> Shell[100% Jetpack Compose UI & MaxNavGraph]
+    Shell --> Assistant[AssistantEngine & Voice Pipeline]
     
     Assistant <-->|Bi-directional Audio / Vision Frame| Gemini[Google Gemini Live WebSocket]
     Assistant <-->|Visual UI Actions| OpenRouter[OpenRouter / Ox-Alpha UI Agent]
@@ -73,7 +73,7 @@ graph TD
 
 ```
 gemini-live/
-├── app/                              # Android Native Subsystem (Kotlin)
+├── app/                              # Android Native Subsystem (Kotlin & Jetpack Compose)
 │   ├── src/main/java/com/example/
 │   │   ├── automation/               # ExecutionEngine, ActionDispatcher, UI Agents
 │   │   │   ├── agent/                # OpenRouter / Gemini UI Agent providers
@@ -83,13 +83,8 @@ gemini-live/
 │   │   ├── voice/                    # AssistantEngine, AudioRecorder, PlaybackManager
 │   │   ├── telephony/                # IncomingCallFlowState, CallManager & Receiver
 │   │   ├── memory/                   # PermanentMemoryDao, Vector Search & Embeddings
-│   │   └── ui/                       # MaxFlutterActivity & MaxNativeBridge
+│   │   └── ui/                       # 100% Jetpack Compose UI (MaxApp, HomeScreen, Onboarding, Memory, Settings)
 │   └── src/test/java/com/example/    # Comprehensive unit tests & routing guards
-├── max_flutter/                      # 100% Flutter UI Subsystem (Dart)
-│   ├── lib/
-│   │   ├── features/                 # Home, Onboarding, Routines, Permissions, Memory, Settings
-│   │   ├── shared/                   # MaxScaffold, MaxDrawer, MaxQuickActions, Theme tokens
-│   │   └── core/                     # MaxNativeBridge platform channels
 ├── windows-agent/                    # Windows Desktop Agent (Python)
 │   ├── core/                         # Event loop, Protocol envelopes, Device routers
 │   ├── tools/                        # UIA, Terminal, App control, Browser CDP, Code sandbox

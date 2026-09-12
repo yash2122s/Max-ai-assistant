@@ -188,7 +188,7 @@ class UniversalMemoryImportUnitTest {
         val markdown = """
             # Development Context
             - IDE: Antigravity IDE on Windows.
-            - Language: Kotlin for Android core, Dart for Flutter UI.
+            - Language: Kotlin for Android core, Jetpack Compose for UI.
         """.trimIndent()
 
         // 1. Initial Preview
@@ -237,7 +237,7 @@ class UniversalMemoryImportUnitTest {
         // Update content under same specific topic title and category
         val updatedText = """
             # Work Preferences
-            - Primary Editor: Antigravity IDE with Flutter extension.
+            - Primary Editor: Android Studio with Kotlin plugin.
         """.trimIndent()
 
         val preview2 = importer.preview(updatedText)
@@ -260,17 +260,17 @@ class UniversalMemoryImportUnitTest {
         repo.addMemory(
             PermanentMemory(
                 title = "Favorite Framework",
-                content = "Flutter with Impeller",
+                content = "Jetpack Compose with Material 3",
                 category = "Programming",
                 type = MemoryType.PREFERENCE,
-                tags = "flutter,graphics"
+                tags = "compose,ui"
             )
         )
 
         val content = syncService.exportToMarkdown()
         assertTrue(content.contains("# MAX Memory"))
         assertTrue(content.contains("Favorite Framework"))
-        assertTrue(content.contains("Flutter with Impeller"))
+        assertTrue(content.contains("Jetpack Compose with Material 3"))
 
         val file = syncService.maxMemoryFile
         assertTrue(file.exists())

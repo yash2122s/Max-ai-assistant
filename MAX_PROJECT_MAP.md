@@ -170,34 +170,28 @@ MAX
 │   ├── WindowsToolExecutor      app/src/main/java/com/example/network/agent/WindowsToolExecutor.kt
 │   └── CommandIdempotencyCache  app/src/main/java/com/example/network/agent/CommandIdempotencyCache.kt
 │
-├── UI / Compose
+├── UI / Jetpack Compose
 │   ├── MainActivity             app/src/main/java/com/example/MainActivity.kt
-│   ├── ChatViewModel            app/src/main/java/com/example/viewmodel/ChatViewModel.kt
-│   ├── Screens/                 app/src/main/java/com/example/ui/screens/
-│   ├── Onboarding/              app/src/main/java/com/example/ui/screens/onboarding/
+│   ├── MaxApp Shell             app/src/main/java/com/example/ui/MaxApp.kt
+│   ├── MaxNavGraph              app/src/main/java/com/example/ui/navigation/MaxNavGraph.kt
+│   ├── Home ViewModel           app/src/main/java/com/example/ui/home/HomeViewModel.kt
+│   ├── Chat ViewModel           app/src/main/java/com/example/viewmodel/ChatViewModel.kt
+│   ├── HomeScreen               app/src/main/java/com/example/ui/home/HomeScreen.kt
+│   ├── OnboardingScreen         app/src/main/java/com/example/ui/onboarding/OnboardingScreen.kt
+│   ├── PermissionsScreen        app/src/main/java/com/example/ui/permissions/PermissionsScreen.kt
+│   ├── SettingsScreen           app/src/main/java/com/example/ui/settings/SettingsScreen.kt
+│   ├── MemoryScreen             app/src/main/java/com/example/ui/memory/MemoryScreen.kt
+│   ├── RoutinesScreen           app/src/main/java/com/example/ui/routines/RoutinesScreen.kt
+│   ├── RemindersScreen          app/src/main/java/com/example/ui/reminders/RemindersScreen.kt
+│   ├── PeriodScreen             app/src/main/java/com/example/ui/period/PeriodScreen.kt
+│   ├── CapabilitiesScreen       app/src/main/java/com/example/ui/capabilities/CapabilitiesScreen.kt
 │   ├── Components/              app/src/main/java/com/example/ui/components/
 │   ├── Overlay/                 app/src/main/java/com/example/ui/overlay/
 │   └── Theme/                   app/src/main/java/com/example/ui/theme/
 │
-├── Flutter UI Subsystem (max_flutter/)
-│   ├── Main / Router            max_flutter/lib/main.dart
-│   ├── Native Bridge (Dart)     max_flutter/lib/core/bridge/max_native_bridge.dart
-│   ├── Chat Controller          max_flutter/lib/core/bridge/chat_controller.dart
-│   ├── Theme Tokens             max_flutter/lib/core/theme/
-│   ├── Welcome Screen           max_flutter/lib/features/onboarding/welcome_screen.dart
-│   ├── Permissions Screen       max_flutter/lib/features/onboarding/permissions_screen.dart
-│   ├── AI Config Screen         max_flutter/lib/features/onboarding/ai_config_screen.dart
-│   ├── Home / Chat Screen       max_flutter/lib/features/home/home_screen.dart
-│   ├── Settings Screen          max_flutter/lib/features/settings/settings_screen.dart
-│   └── Memory Vault Screen      max_flutter/lib/features/memory/memory_screen.dart
-│
-├── Bridge / Host Integration
-│   ├── MaxFlutterActivity       app/src/main/java/com/example/flutter/MaxFlutterActivity.kt
-│   └── MaxNativeBridge (Kotlin) app/src/main/java/com/example/flutter/MaxNativeBridge.kt
-│
 └── Entry Points
     ├── MyApplication            app/src/main/java/com/example/MyApplication.kt
-    ├── MaxFlutterActivity       app/src/main/java/com/example/flutter/MaxFlutterActivity.kt
+    ├── MainActivity             app/src/main/java/com/example/MainActivity.kt
     └── AndroidManifest.xml      app/src/main/AndroidManifest.xml
 ```
 
@@ -207,10 +201,12 @@ MAX
 
 | Feature | Primary File |
 |---------|-------------|
-| Flutter Entry & Routing | `max_flutter/lib/main.dart` |
-| Flutter Native Bridge | `max_flutter/lib/core/bridge/max_native_bridge.dart` + `app/.../flutter/MaxNativeBridge.kt` |
-| Flutter Onboarding Flow | `max_flutter/lib/features/onboarding/` |
-| Flutter Home / Chat UI | `max_flutter/lib/features/home/home_screen.dart` |
+| Compose Shell & NavGraph | `ui/MaxApp.kt` & `ui/navigation/MaxNavGraph.kt` |
+| Home & Chat Screen | `ui/home/HomeScreen.kt` & `ui/home/HomeViewModel.kt` |
+| Onboarding Flow | `ui/onboarding/OnboardingScreen.kt` |
+| Permissions Manager | `ui/permissions/PermissionsScreen.kt` |
+| Settings Screen | `ui/settings/SettingsScreen.kt` |
+| Memory Wallet | `ui/memory/MemoryScreen.kt` |
 | Gemini Live connection | `network/GeminiWebSocketClient.kt` |
 | System instruction / persona | `network/PromptBuilder.kt` |
 | Tool call routing | `network/ToolDispatcher.kt` |
@@ -218,7 +214,7 @@ MAX
 | Tool registration | `MyApplication.kt` |
 | WhatsApp send | `automation/WhatsAppController.kt` |
 | WhatsApp accessibility | `service/JarvisAccessibilityService.kt` |
-| Incoming calls | `receiver/IncomingCallReceiver.kt` + `automation/IncomingCallManager.kt` |
+| Incoming calls | `receiver/IncomingCallReceiver.kt` + `telephony/IncomingCallFlowState.kt` |
 | Telegram bot | `service/TelegramBotService.kt` |
 | Memory save | `automation/tools/SaveMemoryTool.kt` + `memory/data/MemoryRepository.kt` |
 | Memory vectors | `memory/data/GeminiEmbeddingClient.kt` |
@@ -227,10 +223,10 @@ MAX
 | Room database | `data/local/AppDatabase.kt` (v14) |
 | Screen capture | `voice/vision/ScreenCaptureProvider.kt` |
 | Reminders | `automation/tools/ReminderTool.kt` + `receiver/ReminderReceiver.kt` |
-| Period tracker | `automation/tools/PeriodTrackerTool.kt` + `ui/screens/PeriodTrackerScreen.kt` |
+| Period tracker | `automation/tools/PeriodTrackerTool.kt` + `ui/period/PeriodScreen.kt` |
 | Windows companion | `network/agent/CompanionConnectionService.kt` |
 | Overlay capsule | `service/MaxCapsuleOverlayService.kt` + `ui/overlay/DynamicCapsuleView.kt` |
 | Multi-step planning | `automation/engine/GoalPlanner.kt` |
 | Auto-reply | `automation/AutoReplyController.kt` |
-| Theme colors | `max_flutter/lib/core/theme/max_colors.dart` & `ui/theme/Color.kt` |
+| Theme colors | `ui/theme/Color.kt` & `ui/theme/Theme.kt` |
 | Security/Unlock | `security/MaxLockAutomationEngine.kt` |
