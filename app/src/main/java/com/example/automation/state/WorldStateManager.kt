@@ -26,7 +26,78 @@ data class ActionStep(
     val fallbackAction: String? = null,
     val outputKey: String? = null,
     val status: String = "PENDING"
-)
+) {
+    fun toUiStep(): com.example.automation.models.UiStep {
+        val normAction = actionType.uppercase().trim()
+        val target = targetText ?: resourceId ?: contentDescription ?: params["target"] ?: params["text"]
+        return when (normAction) {
+            "OPEN_APP", "LAUNCH_APP", "OPEN_SETTINGS", "SETTINGS" -> {
+                val appName = if (normAction in listOf("OPEN_SETTINGS", "SETTINGS")) "Settings" else (target ?: params["app_name"] ?: params["app"] ?: "Unknown")
+                val pkg = params["package"] ?: params["packageName"]
+                com.example.automation.models.UiStep.OpenApp(appName = appName, packageName = pkg)
+            }
+            "CLICK_ELEMENT", "CLICK_TEXT", "CLICK_INDEX", "CLICK_UI", "FIND_ELEMENT", "TAP" -> {
+                val idx = params["index"]?.toIntOrNull()
+                com.example.automation.models.UiStep.Tap(
+                    target = targetText ?: params["target"],
+                    resourceId = resourceId ?: params["resourceId"],
+                    contentDescription = contentDescription ?: params["desc"] ?: params["description"],
+                    index = idx
+                )
+            }
+            "TYPE_TEXT" -> {
+                val textToType = params["text"] ?: targetText ?: ""
+                val targetField = params["target"] ?: resourceId ?: contentDescription
+                val clear = params["clear"]?.toBoolean() ?: params["replace"]?.toBoolean() ?: false
+                com.example.automation.models.UiStep.TypeText(
+                    text = textToType,
+                    target = targetField,
+                    resourceId = resourceId,
+                    clearExisting = clear
+                )
+            }
+            "CLEAR_TEXT" -> {
+                com.example.automation.models.UiStep.ClearText(target = targetText ?: params["target"], resourceId = resourceId)
+            }
+            "PRESS_KEY", "KEYBOARD_ACTION", "KEY_PRESS" -> {
+                val key = targetText ?: params["key"] ?: params["keyCode"] ?: params["key_name"] ?: "ENTER"
+                if (key.equals("ENTER", ignoreCase = true) || key.equals("SEARCH", ignoreCase = true) || key.equals("DONE", ignoreCase = true) || key.equals("GO", ignoreCase = true)) {
+                    com.example.automation.models.UiStep.PressEnter
+                } else if (key.equals("BACK", ignoreCase = true) || key.equals("ESCAPE", ignoreCase = true) || key.equals("ESC", ignoreCase = true)) {
+                    com.example.automation.models.UiStep.PressBack
+                } else {
+                    com.example.automation.models.UiStep.PressKey(key = key, target = params["target"])
+                }
+            }
+            "PRESS_ENTER", "IME_ENTER", "ENTER_KEY", "PERFORM_ENTER" -> com.example.automation.models.UiStep.PressEnter
+            "BACK", "PRESS_BACK" -> com.example.automation.models.UiStep.PressBack
+            "SCROLL", "SCROLL_SCREEN", "SCROLL_DOWN" -> com.example.automation.models.UiStep.Scroll(direction = params["direction"] ?: "DOWN")
+            "SCROLL_UP" -> com.example.automation.models.UiStep.Scroll(direction = "UP")
+            "SWIPE" -> com.example.automation.models.UiStep.Swipe(
+                startX = params["startX"]?.toIntOrNull() ?: 500,
+                startY = params["startY"]?.toIntOrNull() ?: 1000,
+                endX = params["endX"]?.toIntOrNull() ?: 500,
+                endY = params["endY"]?.toIntOrNull() ?: 200,
+                durationMs = params["durationMs"]?.toLongOrNull() ?: 300L
+            )
+            "WAIT_FOR_UI" -> com.example.automation.models.UiStep.WaitForUi(
+                targetText = targetText,
+                resourceId = resourceId,
+                packageName = params["package"],
+                timeoutMs = params["timeoutMs"]?.toLongOrNull() ?: 3000L
+            )
+            "FLASHLIGHT_ON" -> com.example.automation.models.UiStep.ToggleSystemSetting("flashlight", true)
+            "FLASHLIGHT_OFF" -> com.example.automation.models.UiStep.ToggleSystemSetting("flashlight", false)
+            "SET_BLUETOOTH" -> com.example.automation.models.UiStep.ToggleSystemSetting("bluetooth", params["enabled"]?.toBoolean() ?: true)
+            "TOGGLE_WIFI" -> com.example.automation.models.UiStep.ToggleSystemSetting("wifi", params["enabled"]?.toBoolean() ?: true)
+            "SET_DND" -> com.example.automation.models.UiStep.ToggleSystemSetting("dnd", params["enabled"]?.toBoolean() ?: true)
+            else -> {
+                com.example.automation.models.UiStep.Tap(target = target, resourceId = resourceId, contentDescription = contentDescription)
+            }
+        }
+    }
+}
+
 
 
 data class WorldState(

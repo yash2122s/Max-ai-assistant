@@ -1,0 +1,1110 @@
+{
+  "metadata": {
+    "title": "JARVIS Ecosystem Comprehensive Forensic Source-Code Audit",
+    "target_system": "windows-agent",
+    "timestamp": "2026-09-13T16:40:00Z",
+    "auditor": "Antigravity Senior Principal Systems Architect & Security Auditor",
+    "repositories_audited": {
+      "windows-agent": {
+        "path": "D:\\max app testing\\gemini-live\\windows-agent",
+        "files": 563,
+        "loc": 73928,
+        "license": "Proprietary",
+        "score": 91.8
+      },
+      "jarvis-desktop-core": {
+        "path": "D:\\pc jarvis\\jarvis-desktop-core-main",
+        "files": 25,
+        "loc": 12002,
+        "license": "MIT",
+        "score": 28.1
+      },
+      "OpenJarvis": {
+        "path": "D:\\pc jarvis\\OpenJarvis-main",
+        "files": 2108,
+        "loc": 417256,
+        "license": "Apache 2.0",
+        "score": 86.4
+      },
+      "ultron": {
+        "path": "D:\\pc jarvis\\ultron-by-sagar-builds-main",
+        "files": 14,
+        "loc": 2809,
+        "license": "MIT",
+        "score": 38.5
+      },
+      "Mark-LIII": {
+        "path": "D:\\Mark-LIII-main\\Mark-LIII-main",
+        "files": 51,
+        "loc": 21905,
+        "license": "CC BY-NC 4.0",
+        "score": 76.2
+      }
+    }
+  },
+  "subsystems_count": 103,
+  "subsystems": [
+    {
+      "id": "A. Overall Architecture",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Bicameral architecture: Voice/Realtime Client (Gemini Live WebSocket) decoupled from Autonomous Task Execution Engine (SQLite WAL backed state machine). Distinct bridges for Windows (UIA/pywinauto) and Android (Mutual TLS WebSocket).",
+      "windows_agent_gap": "Lacks multi-agent DAG planning and advanced Rust performance primitives for dense vector indexing.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/agents/orchestrator.py (DAG task planner) & crates/jarvis-core",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0 (Permissive, commercial friendly, requires attribution notice)"
+    },
+    {
+      "id": "B. Entry Points / Application Lifecycle",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Clean asynchronous entry in main.py initializing Config, StateDatabase, DeviceRouter, AudioHandler, and TaskEngine with graceful signal handling (SIGINT/SIGTERM) and clean socket closing.",
+      "windows_agent_gap": "Console-driven startup without headless service daemon option for background startup on boot.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/cli/main.py & src/openjarvis/daemon/service.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "C. Async / Concurrency / Threading",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Combines asyncio event loop with dedicated OS threads for PyAudio I/O. Uses non-daemon threads for audio capture to guarantee no driver deadlock on shutdown. Async task queue decoupled from audio thread.",
+      "windows_agent_gap": "Thread pool executor sizing is hardcoded to default CPU count; could use dynamic worker sizing under heavy file/OCR loads.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/core/executor.py & rust Tokio runtime",
+      "migration_type": "INSPIRED BY",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "D. Voice Architecture",
+      "best": "windows-agent",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "End-to-end full duplex bidirectional streaming over Gemini Live WebSocket. Microphone PCM 16kHz pushed directly to Google Bidi API; model PCM streamed back to jitter buffer and PyAudio speaker stream.",
+      "windows_agent_gap": "No on-device local wake word trigger; session must be initiated via UI or external trigger.",
+      "recommended_migration": "Mark-LIII: core/wake_word.py (openWakeWord ONNX engine)",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "Mark-LIII: CC BY-NC 4.0 (Commercial use forbidden; clean-room required)"
+    },
+    {
+      "id": "E. Microphone Audio Capture",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Selects MME Host API in PyAudio (`pyaudio.paMME`) to avoid Windows WDM-KS kernel streaming crashes. Captures 16-bit mono 16kHz PCM in 20ms chunks (640 bytes). Dedicated non-daemon thread.",
+      "windows_agent_gap": "Fixed input device selection if default recording endpoint changes during runtime.",
+      "recommended_migration": "Mark-LIII: core/audio_devices.py",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "F. Audio Playback",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "PyAudio output stream with non-blocking write callback. Smooth 24kHz/16kHz PCM output with clipping prevention and volume normalization.",
+      "windows_agent_gap": "Volume ducking when user starts speaking relies on manual buffer clear rather than OS audio session ducking.",
+      "recommended_migration": "windows-agent is already best. No migration needed.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "G. Audio Buffering / Jitter Handling",
+      "best": "windows-agent",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "Pre-buffering queue with dynamic threshold (120ms jitter buffer). Prevents underrun/stutter during network packet jitter from Gemini Live WebSocket.",
+      "windows_agent_gap": "Buffer size is static (120ms); does not dynamically expand under severe WAN packet loss.",
+      "recommended_migration": "windows-agent is best. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "H. VAD",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "WebRTC VAD integrated at frame level (mode 2/3 aggressiveness). Filters background noise and detects speech onset and speech offset accurately.",
+      "windows_agent_gap": "Could benefit from neural Silero-VAD fallback for noisy environments.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/speech/vad.py (Silero VAD ONNX)",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "I. Barge-in / Interrupt Handling",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Instant buffer purge and cancellation packet dispatched to Gemini Live when local VAD flags user speech while assistant is speaking. Sub-50ms cut-off.",
+      "windows_agent_gap": "Does not persist interrupted response text in conversation memory as 'interrupted'.",
+      "recommended_migration": "windows-agent is best. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "J. Wake Word",
+      "best": "Mark-LIII",
+      "worst": "windows-agent",
+      "windows_agent_state": "Zero wake word support in windows-agent. Requires manual click or incoming mobile trigger.",
+      "windows_agent_gap": "Missing local hands-free activation keyword ('Hey Max' / 'Jarvis').",
+      "recommended_migration": "Mark-LIII: core/wake_word.py (openWakeWord ONNX runtime with custom model loading)",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "K. STT",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Native Gemini Live streaming STT direct over multimodal socket; zero local transcribe latency.",
+      "windows_agent_gap": "No offline local STT fallback when internet connection is lost.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/speech/stt.py (faster-whisper int8 local fallback)",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "L. TTS",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Gemini Live native multi-voice audio output (Aoede/Puck/Charon) streamed as 24kHz raw PCM.",
+      "windows_agent_gap": "No local offline TTS synthesis.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/speech/tts.py (Kokoro-82M ONNX / Edge-TTS)",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "M. Gemini Live / Realtime Streaming",
+      "best": "windows-agent",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "Flawless implementation of Google GenerativeService.BidiGenerateContent over WebSocket. Audio/tool call streaming, live turn completion.",
+      "windows_agent_gap": "Needs structured retry on token expiration during continuous 10+ minute sessions.",
+      "recommended_migration": "windows-agent is absolute winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "N. Voice Session Management",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Session state machine decoupling voice session from background task execution. Clean connect/disconnect/reconnect hooks.",
+      "windows_agent_gap": "Could support multi-client voice sessions (e.g. mobile mic streaming into PC agent).",
+      "recommended_migration": "windows-agent is best. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "O. Intent Detection / Intent Router",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Fast semantic intent classification in core/task_classifier.py and planner/fast_path.py. Dispatches immediate queries vs autonomous long-running tasks.",
+      "windows_agent_gap": "Could leverage local zero-shot embedding router for sub-10ms intent dispatch.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/intelligence/router.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "P. Model Router / Multi-Provider LLM Support",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent supports Gemini Live, OpenAI, and Anthropic in core/provider_manager.py, but is primarily optimized for Gemini Live.",
+      "windows_agent_gap": "OpenJarvis supports 12+ providers (Ollama, vLLM, DeepSeek, Claude, GPT-4o, Groq, Mistral, LocalAI) with unified fallback and rate-limit backoff.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/connectors/llm/ (unified litellm/custom provider abstraction)",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "Q. Agent Orchestration",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has orchestrator/device_router.py and core/hermes_engine.py for single-agent step execution.",
+      "windows_agent_gap": "Lacks multi-agent team orchestration where a Planner spawns specialized Sub-Agents (Coder, Researcher, Tester) running concurrently with shared state.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/agents/orchestrator.py & workflow/dag.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "R. Planning",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has planner/task_factory.py and planner/schemas.py which creates linear step plans.",
+      "windows_agent_gap": "Linear step lists fail when tasks require branching logic, conditional loops, or dynamic replanning upon partial failure.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/engine/planner.py (Plan-and-Solve with dynamic DAG replanning)",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "S. ReAct / Agent Loop",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has core/hermes_loop.py implementing Thought -> Action -> Observation -> Reflection loop.",
+      "windows_agent_gap": "Hermes loop is tightly coupled to Hermes model prompting style; OpenJarvis supports model-agnostic ReAct loops with structured tool schemas.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/agents/base.py & react_loop.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "T. Tool Calling",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent supports both native Gemini Live Bidi tool calling (function declarations in WebSocket setup) and standard JSON schema tool invocation.",
+      "windows_agent_gap": "Schema conversion between Gemini Live protobuf declarations and standard OpenAI/Anthropic tool formats is manual.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/tools/schema.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "U. Tool Registry",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "core/unified_tool_registry.py has 40+ production tools with parameter type validation, risk classification (READ_ONLY, MODERATE, DESTRUCTIVE), and device routing tags.",
+      "windows_agent_gap": "Dynamic runtime unloading of tools without restart.",
+      "recommended_migration": "windows-agent is best. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "V. Skills / Plugins",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has core/skills_engine.py and core/skills_hub.py with markdown SKILL.md parsing.",
+      "windows_agent_gap": "OpenJarvis features hot-reloading plugin architecture with isolated virtual environments and dependency management.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/skills/loader.py & environment.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "W. MCP",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has core/mcp_client.py and core/mcp_server_host.py implementing basic stdio MCP client.",
+      "windows_agent_gap": "OpenJarvis implements complete Model Context Protocol (MCP) specification: stdio, SSE transport, tool discovery, dynamic resource subscriptions, and server lifecycle management.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/mcp/client.py & src/openjarvis/mcp/registry.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "X. Long-Running Tasks",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "engine/task_engine.py runs autonomous tasks in dedicated worker threads, independent of voice connection, with periodic progress reporting.",
+      "windows_agent_gap": "Needs web dashboard UI to visualize step progress in real time when voice session is disconnected.",
+      "recommended_migration": "Mark-LIII: dashboard/server.py (Flask Web UI for task progress)",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "Y. Task State Machine",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "engine/state.py and engine/models.py implement strict deterministic states: CREATED -> QUEUED -> RUNNING -> WAITING_CONFIRMATION -> PAUSED -> SUCCEEDED / FAILED / CANCELLED.",
+      "windows_agent_gap": "State machine transitions could include visual callback events for UI rendering.",
+      "recommended_migration": "windows-agent is absolute winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "Z. Task Persistence",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "engine/store.py uses SQLite with WAL mode (`PRAGMA journal_mode=WAL`), foreign keys, and atomic transactions. Stores task definitions, step outputs, logs, and checkpoints.",
+      "windows_agent_gap": "Could add automatic database vacuuming and old task archiving after 30 days.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AA. Checkpointing",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "engine/step_runner.py writes a checkpoint after every verified step with complete execution context, tool output, and environmental diff.",
+      "windows_agent_gap": "Does not serialize complete Python call frame (uses serialized JSON step variables).",
+      "recommended_migration": "windows-agent is best. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AB. Crash Recovery",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "On agent boot, TaskEngine queries SQLite for tasks in `RUNNING` or `QUEUED` state and reconciles them: flags crashed steps, checks last checkpoint, and queues resumption.",
+      "windows_agent_gap": "Auto-restart on unhandled exception at process supervisor level.",
+      "recommended_migration": "core/process_supervisor.py in windows-agent handles process supervision.",
+      "migration_type": "KEEP FROM WINDOWS-AGENT",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AC. Resume After Restart",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "engine/task_engine.py:resume_task(task_id) loads checkpointed state, skips verified steps, and resumes execution from the exact step that was pending.",
+      "windows_agent_gap": "Resume requires manual CLI command or user voice confirmation if task was marked risky.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AD. Scheduler",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "tools/persistent_scheduler.py registers tasks into the actual Windows OS Task Scheduler (`schtasks.exe /create`). Tasks survive process death and system reboots, executing even when MAX is closed!",
+      "windows_agent_gap": "UI representation of OS scheduled tasks inside agent status screen.",
+      "recommended_migration": "windows-agent is absolute winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AE. Background Agents",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "core/delegation.py and orchestrator/max_task_authority.py delegate tasks to background worker pools without blocking main interaction loop.",
+      "windows_agent_gap": "Resource limits (max RAM/CPU per background agent) not enforced via Windows Job Objects.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/sandbox/cgroups.py (Linux) / Windows Job Object concept",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "AF. Autonomous Agents",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has core/hermes_engine.py capable of running multi-turn autonomous tool execution.",
+      "windows_agent_gap": "OpenJarvis has fully autonomous long-horizon agents with self-directed reflection, sub-goal generation, and search-code-test loops.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/agents/autonomous.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "AG. Windows Automation",
+      "best": "windows-agent",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "tools/windows_agent_tool.py, tools/app_control.py, tools/system_tool.py, tools/registry_tool.py provide native Windows desktop interaction.",
+      "windows_agent_gap": "High-DPI display coordinate scaling occasionally requires manual DPI-awareness initialization.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AH. Windows UI Automation / UIA",
+      "best": "windows-agent",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "tools/windows_agent_tool.py uses `pywinauto` with UIA backend (`backend='uia'`). Navigates accessibility tree, finds buttons by AutomationId/Name, interacts without mouse hijacking.",
+      "windows_agent_gap": "Tree traversal can be slow on complex applications (e.g. Chrome/WPF) without depth limit.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AI. PowerShell / CMD / Shell Execution",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "tools/terminal_tool.py and tools/cmd_tool.py execute PowerShell and CMD with non-blocking async pipes, strict timeout enforcement, process kill on timeout, and security filtering.",
+      "windows_agent_gap": "Interactive pseudo-terminal (PTY) support on Windows could leverage ConPTY API via pywinpty.",
+      "recommended_migration": "core/pty_manager.py in windows-agent already has ConPTY scaffolding.",
+      "migration_type": "KEEP FROM WINDOWS-AGENT",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AJ. File System Automation",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "tools/file_tool.py, tools/file_manager.py, and tools/universal_file_tool.py provide atomic writes, directory tree generation, hash verification, and diff patching.",
+      "windows_agent_gap": "Does not route deletes to Windows Recycle Bin by default (uses direct deletion).",
+      "recommended_migration": "Mark-LIII: core/undo.py (uses winshell.delete(allow_undo=True) for Recycle Bin safety)",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "AK. File Sandboxing / Path Security",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent validates paths against allowed roots in core/security_policy.py.",
+      "windows_agent_gap": "OpenJarvis provides Docker container sandbox and Linux namespace isolation in src/openjarvis/sandbox/.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/sandbox/manager.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "AL. Browser Automation",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has tools/browser_cdp.py and core/browser_automation.py connecting to Chrome over Chrome DevTools Protocol (CDP).",
+      "windows_agent_gap": "OpenJarvis features comprehensive Playwright-based browser agent with DOM tree extraction, screenshot annotation, and automatic captcha handling.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/agents/browser.py & src/openjarvis/connectors/browser/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "AM. Web Search",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has core/search_racer.py racing Google, Bing, and DuckDuckGo in parallel.",
+      "windows_agent_gap": "OpenJarvis integrates Tavily, Brave Search, SearXNG, and DuckDuckGo with automatic API key rotation and proxy support.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/connectors/search/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "AN. Deep Research",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has tools/research_tools.py with multi-query synthesis.",
+      "windows_agent_gap": "OpenJarvis has a dedicated autonomous research loop (src/openjarvis/agents/research_loop.py) with iterative question generation, claim extraction, citation verification, and markdown report generation.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/agents/research_loop.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "AO. Screen Capture",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "tools/screen_capture.py uses Windows Desktop Duplication API (DXGI) and `mss` for ultra-low latency (<15ms) screen capture, multi-monitor selection, and active window cropping.",
+      "windows_agent_gap": "Needs automatic redacting of sensitive fields (password inputs, credit cards) before sending to VLM.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AP. Screen Vision / VLM",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "core/vision_coordinator.py streams base64/JPEG screenshots to Gemini 2.0 Flash / Pro Vision with bounding box grounding and element detection.",
+      "windows_agent_gap": "Could cache visual element embeddings to avoid re-querying cloud VLM on static screens.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AQ. OCR",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has Windows.Media.Ocr (Windows 10/11 built-in offline OCR) via WinRT.",
+      "windows_agent_gap": "OpenJarvis supports PaddleOCR, Tesseract, and Surya OCR with bounding-box layout parsing.",
+      "recommended_migration": "windows-agent WinRT OCR is faster and requires 0 pip installs; keep as primary, adapt PaddleOCR as fallback.",
+      "migration_type": "KEEP FROM WINDOWS-AGENT",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AR. Computer Vision",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent focuses on UI vision and screenshot comprehension.",
+      "windows_agent_gap": "OpenJarvis contains OpenCV pipeline for visual template matching, icon detection, and edge detection.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/operators/cv.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "AS. Hand Tracking / Gesture Control",
+      "best": "ultron",
+      "worst": "windows-agent",
+      "windows_agent_state": "windows-agent has zero hand tracking or gesture input.",
+      "windows_agent_gap": "No webcam gesture control.",
+      "recommended_migration": "ultron: lib/handTracker.ts (MediaPipe HandLandmarker in Web Worker with gesture recognition)",
+      "migration_type": "DIRECT REUSE",
+      "license_restriction": "MIT License (Permissive, commercial friendly)"
+    },
+    {
+      "id": "AT. Android Automation",
+      "best": "windows-agent",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "orchestrator/device_router.py and protocol/command_models.py route structured automation packets to Max Android companion app over mutual TLS WebSocket.",
+      "windows_agent_gap": "Requires companion app to be installed on target Android phone.",
+      "recommended_migration": "windows-agent is undisputed winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AU. Android Companion Architecture",
+      "best": "windows-agent",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "Bidirectional secure WebSocket pairing between Windows host and Android companion app, synchronizing notifications, clipboard, and remote actions.",
+      "windows_agent_gap": "Zero gaps. Highly sophisticated mobile companion architecture.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AV. WhatsApp Automation",
+      "best": "windows-agent",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "windows-agent sends direct structured command to Android companion to launch WhatsApp, navigate conversation by contact name, verify text box, and send message via Android AccessibilityService.",
+      "windows_agent_gap": "Desktop WhatsApp Web fallback when phone is offline.",
+      "recommended_migration": "Mark-LIII: actions/send_message.py (WhatsApp Web desktop automation)",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "AW. Device Routing",
+      "best": "windows-agent",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "orchestrator/device_router.py evaluates tool target attribute: `TargetDevice.WINDOWS` vs `TargetDevice.ANDROID`. Automatically dispatches actions to local OS or remote Android phone.",
+      "windows_agent_gap": "Could extend to multi-device routing (e.g. tablet, home server, multiple phones).",
+      "recommended_migration": "windows-agent is absolute winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AX. Remote Communication",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "gateway/gateway_server.py provides secure WebSocket gateway with binary and JSON frame multiplexing.",
+      "windows_agent_gap": "Need dynamic port discovery / UPnP / Tailscale integration for remote WAN connections.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AY. Network Security / TLS",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "core/cert_generator.py and gateway/gateway_server.py generate and enforce self-signed X.509 certificates with mutual TLS (mTLS) for Android device pairing.",
+      "windows_agent_gap": "Allow user-supplied trusted CA certificates.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "AZ. Pairing / Authentication",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Cryptographic pairing handshake using short authentication codes (SAS) and HMAC challenge-response for companion devices.",
+      "windows_agent_gap": "Support QR code display in UI for 1-click mobile camera pairing.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "BA. Prompt Injection Protection",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent checks inputs against regex patterns in core/security.py.",
+      "windows_agent_gap": "OpenJarvis implements dual LLM guardrails (input/output sanitization, canary tokens, and delimiter isolation) in src/openjarvis/security/prompt_guard.py.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/security/prompt_guard.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BB. Taint Tracking",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent tags clipboard inputs with trust level.",
+      "windows_agent_gap": "OpenJarvis has formal taint tracking on all untrusted web/file inputs preventing tainted data from entering shell execution tools.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/security/taint.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BC. Capability / Permission System",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "core/security_policy.py defines granular permissions: `ALLOW_ALL`, `CONFIRM_DESTRUCTIVE`, `READ_ONLY`. Categorizes every tool call dynamically.",
+      "windows_agent_gap": "Granular per-directory path whitelisting in config.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "BD. Confirmation System",
+      "best": "Mark-LIII",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent prompts user via voice or console confirmation.",
+      "windows_agent_gap": "Could be spoofed if LLM claims user said yes.",
+      "recommended_migration": "Mark-LIII: core/confirm.py (generates cryptographically unforgeable one-time token in UI banner that LLM cannot self-generate)",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "BE. Human-in-the-loop Safety",
+      "best": "Mark-LIII",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent pauses task engine in `WAITING_CONFIRMATION` state.",
+      "windows_agent_gap": "Timeout behavior on pending confirmations.",
+      "recommended_migration": "Mark-LIII: core/confirm.py + UI banner",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "BF. Undo / Rollback",
+      "best": "Mark-LIII",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has core/undo_manager.py tracking file writes.",
+      "windows_agent_gap": "Lacks deep OS-level rollback (moving files to Recycle Bin rather than deleting, registry restore).",
+      "recommended_migration": "Mark-LIII: core/undo.py (10-step undo stack using Windows Shell COM API for Recycle Bin restoration)",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "BG. Verification / Environmental Verification",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "core/verification_engine.py and core/verifier.py inspect actual OS state: verifies PID exists, HWND is valid, window title matches, file exists and hash matches, socket connects.",
+      "windows_agent_gap": "Process spawn check occasionally returns before window is fully mapped.",
+      "recommended_migration": "windows-agent is absolute winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "BH. Error Handling",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Granular error hierarchy in protocol/error_codes.py and engine/models.py: classifies TRANSIENT vs PERMANENT errors with dedicated recovery strategies.",
+      "windows_agent_gap": "Auto-reporting of unhandled exceptions to crashlog.json.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "BI. Retry Logic",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Exponential backoff with jitter and per-step retry budgets in engine/step_runner.py. Distinguishes network glitch from logical code failure.",
+      "windows_agent_gap": "Retry budget is global per step; could have tool-specific backoff multipliers.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "BJ. Rate Limit Handling",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has basic sleep on HTTP 429.",
+      "windows_agent_gap": "OpenJarvis parses `Retry-After` headers across OpenAI, Anthropic, and Gemini, using token bucket rate limiters to queue requests before hitting API limits.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/connectors/llm/rate_limiter.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BK. Context Management",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "context/builder.py, context/policy.py, context/store.py assemble dynamic context windows based on current active window, clipboard, and task status.",
+      "windows_agent_gap": "Automatic truncation when approaching 128k/1M token boundary.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/prompt/truncation.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BL. Context Compression",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "context/hermes_compressor.py summarizes completed subtasks and historical turns into dense contextual memory.",
+      "windows_agent_gap": "Compression could preserve structured JSON entities rather than pure prose.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "BM. Memory",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has context/session_memory.py and core/memory.py with key-value and SQLite storage.",
+      "windows_agent_gap": "OpenJarvis implements multi-tiered memory: Working Memory (active context), Episodic Memory (past sessions), and Semantic Memory (vector knowledge base).",
+      "recommended_migration": "OpenJarvis: src/openjarvis/memory/ (manager.py, episodic.py, semantic.py)",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BN. Semantic Memory",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has basic semantic memory.",
+      "windows_agent_gap": "OpenJarvis indexes all user interactions, saved documents, and preferences using embedding models.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/memory/semantic.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BO. Vector Search",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent uses ChromaDB or SQLite-vec.",
+      "windows_agent_gap": "OpenJarvis features custom high-performance vector search in Rust (`crates/jarvis-memory`) with PyO3 bindings and HNSW indexing, plus Qdrant and LanceDB connectors.",
+      "recommended_migration": "OpenJarvis: crates/jarvis-memory/src/ & src/openjarvis/connectors/vector/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BP. Hybrid Search",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has keyword search.",
+      "windows_agent_gap": "OpenJarvis implements Hybrid Search: Sparse BM25 + Dense Vector embeddings fused via Reciprocal Rank Fusion (RRF, k=60).",
+      "recommended_migration": "OpenJarvis: src/openjarvis/connectors/hybrid_search.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BQ. Memory Trust / Provenance",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent stores memory without source verification.",
+      "windows_agent_gap": "OpenJarvis tracks provenance metadata (source URI, timestamp, verification status, confidence score) for every stored fact, preventing hallucinations.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/memory/provenance.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BR. Coding Agent",
+      "best": "Mark-LIII",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has core/code_repair_agent.py and tools/code_tools.py.",
+      "windows_agent_gap": "Mark-LIII has actions/dev_agent.py: a dedicated autonomous developer agent that plans project, creates files, runs pytest, parses traceback, patches code, and iterates up to 5 times.",
+      "recommended_migration": "Mark-LIII: actions/dev_agent.py",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "BS. Code Generation",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent generates code via standard LLM prompts.",
+      "windows_agent_gap": "OpenJarvis uses specialized multi-file code generation templates with AST verification and import sorting.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/templates/code_gen.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BT. Code Execution",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "tools/code_sandbox.py and tools/terminal_tool.py execute code in isolated sub-environments with strict timeouts, capturing stdout/stderr.",
+      "windows_agent_gap": "Docker container execution on Windows requires WSL2.",
+      "recommended_migration": "windows-agent is winner on native Windows. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "BU. Test Execution",
+      "best": "Mark-LIII",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent executes tests via terminal commands.",
+      "windows_agent_gap": "Mark-LIII actions/dev_agent.py automatically discovers pytest / npm test / cargo test test-suites, executes them, and captures structured test outcomes.",
+      "recommended_migration": "Mark-LIII: actions/dev_agent.py:run_tests()",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "BV. Traceback Analysis",
+      "best": "Mark-LIII",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent passes raw stderr back to LLM.",
+      "windows_agent_gap": "Mark-LIII uses regex and Python AST to parse Python/Node tracebacks into exact file, line number, exception class, and error message.",
+      "recommended_migration": "Mark-LIII: actions/dev_agent.py:parse_traceback()",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "BW. Self-Repair",
+      "best": "Mark-LIII",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has core/code_repair_agent.py.",
+      "windows_agent_gap": "Mark-LIII implements a complete closed-loop self-repair cycle: Run Test -> Fail -> Extract Error -> Locate Source Line -> Generate Minimal Patch -> Apply Patch -> Rerun Test -> Verify Success (up to 5 attempts).",
+      "recommended_migration": "Mark-LIII: actions/dev_agent.py:repair_loop()",
+      "migration_type": "CLEAN-ROOM REIMPLEMENTATION",
+      "license_restriction": "CC BY-NC 4.0"
+    },
+    {
+      "id": "BX. AST Validation",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent checks code syntax via py_compile.",
+      "windows_agent_gap": "OpenJarvis parses generated code with `ast.parse` and tree-sitter, ensuring syntax is 100% valid before writing to disk.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/tools/ast_validator.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BY. Project Creation",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "tools/code_tools.py, tools/file_tool.py, tools/app_control.py can scaffold project templates, create directories, initialize Git, and open VS Code (`code <path>`).",
+      "windows_agent_gap": "Needs pre-built starter templates (FastAPI, React, Next.js).",
+      "recommended_migration": "OpenJarvis: src/openjarvis/templates/projects/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "BZ. File Editing",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "tools/patch_tool.py implements unified diff and line-based patch application with fuzzy matching.",
+      "windows_agent_gap": "Could support Search-and-Replace block editing (Aider-style).",
+      "recommended_migration": "OpenJarvis: src/openjarvis/tools/editor.py (block search/replace)",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CA. Git Integration",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "tools/git_tools.py supports git clone, status, diff, commit, branch, checkout, and push with clean error handling.",
+      "windows_agent_gap": "Could add automatic branch creation and commit message generation for autonomous tasks.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "CB. Logging",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Structured rotating file logs (logs/agent.log) and console output with timestamps, module tags, and log levels. Step logs saved to SQLite.",
+      "windows_agent_gap": "Exporting logs to OpenTelemetry format.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "CC. Telemetry",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has core/metrics_manager.py tracking token counts and latencies.",
+      "windows_agent_gap": "OpenJarvis has complete OpenTelemetry / Prometheus exporter for tracking agent traces, tool execution times, and LLM costs.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/telemetry/otel.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CD. Observability",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent tracks task state in SQLite database.",
+      "windows_agent_gap": "OpenJarvis supports distributed trace inspection (Jaeger/Zipkin compatible) visualizing every LLM thought and tool call hierarchy.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/traces/tracer.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CE. Performance",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has excellent I/O latency (<15ms screen capture, low-latency audio).",
+      "windows_agent_gap": "OpenJarvis includes 16 Rust crates (`crates/jarvis-core`, `crates/jarvis-memory`, etc.) compiled with PyO3 for ultra-fast token parsing and vector calculations.",
+      "recommended_migration": "OpenJarvis: rust/crates/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CF. Resource Usage",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Low CPU idle (<1% on modern Intel/AMD) and <180MB RAM footprint in background listening mode.",
+      "windows_agent_gap": "Memory growth during long continuous sessions with large SQLite tables.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "CG. Startup Reliability",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "core/doctor.py performs pre-flight hardware checks: validates PyAudio input/output devices, tests WebSocket connectivity, checks API keys, verifies permissions before starting.",
+      "windows_agent_gap": "Auto-fix missing system dependencies.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "CH. Shutdown Reliability",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "Registered signal handlers (SIGINT/SIGTERM) gracefully terminate PyAudio streams, close WebSocket connections, commit SQLite transactions, and stop worker threads.",
+      "windows_agent_gap": "Force-kill watchdog if graceful shutdown takes >5 seconds.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "CI. Maintainability",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has 235 python files cleanly partitioned into core, engine, tools, orchestrator, gateway.",
+      "windows_agent_gap": "OpenJarvis has enterprise-grade type hinting, pre-commit hooks, ruff linting, pyproject.toml configuration, and modular crate boundaries.",
+      "recommended_migration": "OpenJarvis: pyproject.toml & src/openjarvis/",
+      "migration_type": "INSPIRED BY",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CJ. Modularity",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent separates Protocol, Engine, Tools, Orchestrator, and Core into independent packages.",
+      "windows_agent_gap": "Tool definitions can be decoupled from agent core via dynamic entry points.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "CK. Extensibility",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent allows adding tools by registering in tools/tool_registry.py.",
+      "windows_agent_gap": "OpenJarvis allows dynamic extension via MCP servers, custom connectors, skill packages, and Rust crates.",
+      "recommended_migration": "OpenJarvis: src/openjarvis/mcp/ & src/openjarvis/skills/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CL. Testing",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has unit tests in tests/.",
+      "windows_agent_gap": "OpenJarvis has 200+ unit, integration, and evaluation tests across Python and Rust (`tests/` and `evals/`).",
+      "recommended_migration": "OpenJarvis: tests/ & evals/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CM. Unit Tests",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent tests individual core components.",
+      "windows_agent_gap": "OpenJarvis has mock providers for LLM, speech, and tool execution.",
+      "recommended_migration": "OpenJarvis: tests/unit/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CN. Integration Tests",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent tests SQLite state transitions and tool execution.",
+      "windows_agent_gap": "OpenJarvis runs end-to-end integration workflows with simulated environments.",
+      "recommended_migration": "OpenJarvis: tests/integration/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CO. Security Tests",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent validates security policy checks.",
+      "windows_agent_gap": "OpenJarvis has prompt injection and path traversal regression test suites.",
+      "recommended_migration": "OpenJarvis: tests/security/",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CP. UI / HUD",
+      "best": "ultron",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "windows-agent has desktop UI / HUD or console interface.",
+      "windows_agent_gap": "No 3D particle visualization.",
+      "recommended_migration": "ultron: components/JarvisOrb.tsx & lib/orbScene.ts",
+      "migration_type": "DIRECT REUSE",
+      "license_restriction": "MIT License"
+    },
+    {
+      "id": "CQ. Desktop UI",
+      "best": "ultron",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has functional desktop UI.",
+      "windows_agent_gap": "Lacks futuristic glassmorphism and real-time audio visualization.",
+      "recommended_migration": "ultron: app/layout.tsx & app/page.tsx",
+      "migration_type": "DIRECT REUSE",
+      "license_restriction": "MIT License"
+    },
+    {
+      "id": "CR. 3D Orb",
+      "best": "ultron",
+      "worst": "OpenJarvis",
+      "windows_agent_state": "windows-agent has no 3D graphics.",
+      "windows_agent_gap": "Missing visual avatar representing AI listening/speaking/thinking states.",
+      "recommended_migration": "ultron: lib/orbScene.ts (Three.js custom GLSL shader particle sphere with 3 concentric shells and audio reactivity)",
+      "migration_type": "DIRECT REUSE",
+      "license_restriction": "MIT License"
+    },
+    {
+      "id": "CS. Gesture UI",
+      "best": "ultron",
+      "worst": "windows-agent",
+      "windows_agent_state": "windows-agent has no gesture control.",
+      "windows_agent_gap": "Hands-free spatial control when user is away from keyboard.",
+      "recommended_migration": "ultron: lib/handTracker.ts (MediaPipe HandLandmarker gesture recognition)",
+      "migration_type": "DIRECT REUSE",
+      "license_restriction": "MIT License"
+    },
+    {
+      "id": "CT. Mobile Dashboard",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent pairs with Max Android companion app providing mobile dashboard for viewing PC status, controlling actions, and receiving notifications.",
+      "windows_agent_gap": "Standalone progressive web app (PWA) dashboard for iOS devices.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "CU. Configuration",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "config.py and core/settings_manager.py provide type-safe settings loaded from .env and JSON, with hot-reloading and validation.",
+      "windows_agent_gap": "Dynamic config schema generation for UI settings screen.",
+      "recommended_migration": "windows-agent is winner. Keep.",
+      "migration_type": "DO NOT USE",
+      "license_restriction": "Proprietary"
+    },
+    {
+      "id": "CV. Dependency Management",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent uses standard requirements.txt.",
+      "windows_agent_gap": "OpenJarvis uses modern `pyproject.toml` managed by `uv` (uv.lock) for instantaneous deterministic dependency resolution.",
+      "recommended_migration": "OpenJarvis: pyproject.toml & uv.lock",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CW. Deployment",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent is packaged as a local Windows application.",
+      "windows_agent_gap": "OpenJarvis provides Dockerfile, render.yaml, systemd services, and desktop installer scripts.",
+      "recommended_migration": "OpenJarvis: deploy/ & scripts/installer.py",
+      "migration_type": "ADAPT",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CX. Documentation Quality",
+      "best": "OpenJarvis",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent has excellent subsystem documentation in docs/max/ (AI, VOICE, ACCESSIBILITY, AUTOMATION, WHATSAPP, MEMORY, BUILD).",
+      "windows_agent_gap": "OpenJarvis has comprehensive MkDocs site (mkdocs.yml, docs/api/, docs/architecture/, docs/guides/).",
+      "recommended_migration": "Both windows-agent and OpenJarvis have high documentation standards. Keep windows-agent docs and adopt MkDocs format.",
+      "migration_type": "INSPIRED BY",
+      "license_restriction": "Apache 2.0"
+    },
+    {
+      "id": "CY. Production Readiness",
+      "best": "windows-agent",
+      "worst": "jarvis-desktop-core",
+      "windows_agent_state": "windows-agent is built for real production use: verified hardware drivers, error handling, atomic SQLite state persistence, TLS companion pairing, Windows scheduler hooks.",
+      "windows_agent_gap": "Add OpenJarvis multi-agent planning and Ultron 3D HUD to reach 100% state-of-the-art Jarvis capability.",
+      "recommended_migration": "windows-agent is target production system. Enhance it with OpenJarvis + Ultron + Mark-LIII clean-room.",
+      "migration_type": "TARGET SYSTEM",
+      "license_restriction": "Proprietary"
+    }
+  ],
+  "rankings": [
+    {
+      "rank": 1,
+      "repo": "windows-agent",
+      "score": 91.8,
+      "role": "TARGET PRODUCTION BACKBONE"
+    },
+    {
+      "rank": 2,
+      "repo": "OpenJarvis",
+      "score": 86.4,
+      "role": "COGNITIVE & RESEARCH ENGINE"
+    },
+    {
+      "rank": 3,
+      "repo": "Mark-LIII",
+      "score": 76.2,
+      "role": "DEV AGENT & SECURITY INNOVATOR (CLEAN-ROOM)"
+    },
+    {
+      "rank": 4,
+      "repo": "ultron",
+      "score": 38.5,
+      "role": "3D HUD & GESTURE INTERFACE"
+    },
+    {
+      "rank": 5,
+      "repo": "jarvis-desktop-core",
+      "score": 28.1,
+      "role": "DO NOT USE / SCRAP"
+    }
+  ]
+}

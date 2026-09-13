@@ -134,6 +134,7 @@ class MyApplication : Application() {
         VerificationRegistry.register(searchContactVerifier)
         VerificationRegistry.register(com.example.automation.verification.ClickUiVerifier())
         VerificationRegistry.register(com.example.automation.verification.PressEnterVerifier())
+        VerificationRegistry.register(com.example.automation.verification.KeyboardActionVerifier())
 
         ToolRegistry.register(openAppTool)
         ToolRegistry.register(flashlightTool)

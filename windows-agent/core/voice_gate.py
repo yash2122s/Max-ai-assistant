@@ -1,7 +1,7 @@
 """
 MAX AI — Voice Input State Machine & Audio Gating
 Enforces local wake-word activation via Vosk, followed by continuous full-duplex
-Gemini Live conversation mode with acoustic feedback suppression and idle standby timeout.
+Realtime Voice conversation mode with acoustic feedback suppression and idle standby timeout.
 """
 
 import os
@@ -14,7 +14,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, Callable, List, Tuple
 
-logger = logging.getLogger("MAXWindowsAgent.VoiceGate")
+logger = logging.getLogger("MAX.VoiceGate")
 
 
 def safe_print(*args, **kwargs):
@@ -34,6 +34,7 @@ def safe_print(*args, **kwargs):
 class VoiceState(str, Enum):
     IDLE = "idle"
     WAKE_WORD_LISTENING = "wake_word_listening"
+    WAKE_DETECTED = "wake_detected"
     LIVE_CONVERSATION = "live_conversation"
     COMMAND_LISTENING = "live_conversation"  # Backward-compatible alias
     PROCESSING = "processing"
@@ -41,17 +42,21 @@ class VoiceState(str, Enum):
     COOLDOWN = "cooldown"
 
 
+VOICE_INACTIVITY_TIMEOUT: float = 180.0
+
+
 class VoiceInputGate:
     """
-    Manages the voice input lifecycle for Continuous Gemini Live Duplex Conversation:
-    - In WAKE_WORD_LISTENING: Runs local Vosk wake-word detection ("Hey MAX"). Rejects background audio.
-    - When "Hey MAX" is detected: Transitions to LIVE_CONVERSATION.
-    - In LIVE_CONVERSATION: Streams microphone audio continuously to Gemini Live.
-      Gemini Live natively handles natural turn-taking, VAD, tools, and responses.
-      No wake-word is needed between consecutive turns.
+    Manages the voice input lifecycle for Continuous Realtime Voice Duplex Conversation:
+    - In WAKE_WORD_LISTENING: Runs local Vosk wake-word detection ("Hey MAX", "Hello Max", "Max", "Jarvis"). Rejects background audio.
+    - When wake phrase is detected: Transitions WAKE_WORD_LISTENING -> WAKE_DETECTED -> LIVE_CONVERSATION.
+    - In LIVE_CONVERSATION: Streams microphone audio continuously to Realtime Voice.
+      Realtime Voice natively handles natural turn-taking, VAD, tools, and responses.
+      Wake-word detection is strictly ignored / disabled during LIVE_CONVERSATION.
     - When MAX is speaking: Transitions to ASSISTANT_SPEAKING (feedback suppression), then COOLDOWN (0.3s),
-      and immediately returns to LIVE_CONVERSATION for the next user query.
-    - Transitions back to WAKE_WORD_LISTENING only on extended idle timeout (default 60s) or explicit sleep command.
+      and returns to LIVE_CONVERSATION.
+    - If user remains silent for VOICE_INACTIVITY_TIMEOUT (180s):
+      Transitions LIVE_CONVERSATION -> WAKE_WORD_LISTENING.
     """
 
     # Normalized wake phrases / phonetic variants
@@ -73,6 +78,12 @@ class VoiceInputGate:
         "macs",
         "match",
         "mex",
+        "hey jarvis",
+        "ok jarvis",
+        "okay jarvis",
+        "hi jarvis",
+        "hello jarvis",
+        "jarvis",
     )
 
     SLEEP_PHRASES = (
@@ -89,7 +100,7 @@ class VoiceInputGate:
     def __init__(
         self,
         energy_threshold: float = 300.0,
-        idle_timeout_sec: float = 60.0,
+        idle_timeout_sec: float = 180.0,
         cooldown_sec: float = 0.3,
         silence_timeout_sec: Optional[float] = None,
         command_timeout_sec: Optional[float] = None,
@@ -99,13 +110,17 @@ class VoiceInputGate:
     ):
         self.state = VoiceState.WAKE_WORD_LISTENING
         self.energy_threshold = energy_threshold
-        self.idle_timeout_sec = float(os.getenv("VOICE_IDLE_TIMEOUT", str(idle_timeout_sec)))
+        if "idle_timeout_sec" in kwargs or idle_timeout_sec != 180.0:
+            self.idle_timeout_sec = float(kwargs.get("idle_timeout_sec", idle_timeout_sec))
+        else:
+            env_timeout = os.getenv("VOICE_INACTIVITY_TIMEOUT", os.getenv("VOICE_IDLE_TIMEOUT"))
+            self.idle_timeout_sec = float(env_timeout) if env_timeout is not None else float(idle_timeout_sec)
         self.cooldown_sec = cooldown_sec
         self.on_state_change = on_state_change
 
-
         self._last_interaction_time = 0.0
         self._cooldown_start_time = 0.0
+        self._last_user_activity_log_time = 0.0
 
         # Pending command text or pre-buffered audio to inject into Gemini
         self.pending_text_command: Optional[str] = None
@@ -154,7 +169,9 @@ class VoiceInputGate:
         logger.info(f"🎙️ Voice State: {old_state.value} -> {new_state.value}")
 
         if new_state in (VoiceState.LIVE_CONVERSATION, VoiceState.COMMAND_LISTENING):
-            self._last_interaction_time = time.time()
+            if old_state != VoiceState.COOLDOWN or self._last_interaction_time == 0.0:
+                self._last_interaction_time = time.time()
+            logger.info("[VoiceGate] Session active — wake-word detection disabled")
         elif new_state == VoiceState.COOLDOWN:
             self._cooldown_start_time = time.time()
         elif new_state == VoiceState.WAKE_WORD_LISTENING:
@@ -164,6 +181,23 @@ class VoiceInputGate:
                     self._vosk_rec.Reset()
                 except Exception:
                     pass
+        elif new_state == VoiceState.WAKE_DETECTED:
+            self._last_interaction_time = time.time()
+
+        # Publish voice state to EventBus for the desktop overlay
+        try:
+            from server.event_bus import event_bus
+            from protocol.event_types import EventType
+            event_bus.publish(EventType.VOICE_STATE, {
+                "state": new_state.value,
+                "previous_state": old_state.value,
+                "session_active": new_state in (
+                    VoiceState.LIVE_CONVERSATION, VoiceState.COMMAND_LISTENING,
+                    VoiceState.ASSISTANT_SPEAKING, VoiceState.PROCESSING,
+                ),
+            })
+        except Exception:
+            pass  # EventBus may not be initialized during early startup
 
         if self.on_state_change:
             try:
@@ -184,32 +218,51 @@ class VoiceInputGate:
         except Exception:
             return 0.0
 
-    def notify_interaction(self):
-        """Resets the idle timer when user or assistant activity occurs."""
+    def notify_user_activity(self):
+        """Resets the inactivity timer when the user speaks or sends conversational input."""
         self._last_interaction_time = time.time()
+        self._last_user_activity_log_time = self._last_interaction_time
+        logger.info("[VoiceGate] User activity — inactivity timer reset")
+
+    def notify_interaction(self):
+        """Backward-compatible alias for user activity notification."""
+        self.notify_user_activity()
 
     def on_assistant_speaking_started(self):
         """Notified when MAX begins TTS/audio output."""
-        self.notify_interaction()
         self.transition_to(VoiceState.ASSISTANT_SPEAKING)
 
     def on_assistant_speaking_finished(self):
-        """Notified when MAX completes audio output — enters brief cooldown then resumes live conversation."""
-        self.notify_interaction()
+        """Notified when MAX completes audio output — enters brief cooldown then returns to live conversation."""
         self.transition_to(VoiceState.COOLDOWN)
+
+    def check_cooldown(self) -> bool:
+        """Checks if cooldown period has elapsed and returns state to LIVE_CONVERSATION."""
+        if self.state == VoiceState.COOLDOWN:
+            if (time.time() - self._cooldown_start_time) > self.cooldown_sec:
+                logger.info("[VoiceGate] Assistant finished — remaining in LIVE_CONVERSATION")
+                self.transition_to(VoiceState.LIVE_CONVERSATION)
+                return True
+        return False
 
     def trigger_wake_word(self, inline_command: str = ""):
         """Triggers live conversation mode when wake word is detected."""
-        if self.state in (VoiceState.WAKE_WORD_LISTENING, VoiceState.IDLE, VoiceState.COOLDOWN):
-            logger.info(f"🔥 Wake word confirmed: 'MAX' (inline command: '{inline_command}')")
-            safe_print(f"\n🔥 Wake Word Detected: 'MAX'")
-            if inline_command:
-                self.pending_text_command = inline_command
-                safe_print(f"🗣️  Inline Command Extracted: \"{inline_command}\"")
-            else:
-                self.pending_text_command = "Hey MAX"
-            safe_print(f"✨ MAX Live Conversation: ACTIVE (Continuous Duplex Mode)")
-            self.transition_to(VoiceState.LIVE_CONVERSATION)
+        if self.state not in (VoiceState.WAKE_WORD_LISTENING, VoiceState.IDLE):
+            logger.debug(f"[VoiceGate] Wake word ignored in state: {self.state.value}")
+            return
+
+        logger.info("[VoiceGate] Wake word detected — activating LIVE_CONVERSATION")
+        safe_print("\n🔥 Wake Word Detected: WAKE_DETECTED")
+        # 1. Transition to WAKE_DETECTED
+        self.transition_to(VoiceState.WAKE_DETECTED)
+        if inline_command:
+            self.pending_text_command = inline_command
+            safe_print(f"🗣️  Inline Command Extracted: \"{inline_command}\"")
+        else:
+            self.pending_text_command = "Hey MAX"
+        # 2. Transition to LIVE_CONVERSATION
+        safe_print("✨ MAX Live Conversation: ACTIVE (Continuous Duplex Mode)")
+        self.transition_to(VoiceState.LIVE_CONVERSATION)
 
 
     def go_to_sleep(self):
@@ -263,12 +316,24 @@ class VoiceInputGate:
             f"finals={self.vosk_finals_count}"
         )
 
+    def check_inactivity_timeout(self, current_time: Optional[float] = None) -> bool:
+        """Checks if inactivity timeout reached and transitions to WAKE_WORD_LISTENING."""
+        if self.state not in (VoiceState.LIVE_CONVERSATION, VoiceState.COMMAND_LISTENING):
+            return False
+        now = current_time if current_time is not None else time.time()
+        if self._last_interaction_time > 0 and (now - self._last_interaction_time) > self.idle_timeout_sec:
+            logger.info("[VoiceGate] Inactivity timeout reached — returning to WAKE_WORD_LISTENING")
+            safe_print(f"\n💤 Inactivity timeout reached ({int(self.idle_timeout_sec)}s). Returning to wake-word listening.")
+            self.transition_to(VoiceState.WAKE_WORD_LISTENING)
+            return True
+        return False
+
     def process_audio_chunk(self, audio_bytes: bytes) -> bool:
         """
         Processes an incoming 16kHz PCM audio chunk.
 
         Returns:
-            True if this audio chunk should be streamed to Gemini Live.
+            True if this audio chunk should be streamed to Realtime Voice.
             False if this chunk should be filtered out / kept local.
         """
         now = time.time()
@@ -276,6 +341,22 @@ class VoiceInputGate:
         rms = self.calculate_rms(audio_bytes)
         self._last_rms = rms
         is_speech = rms > self.energy_threshold
+
+        # Publish throttled audio level to EventBus (~10 Hz max)
+        if not hasattr(self, '_last_audio_level_publish'):
+            self._last_audio_level_publish = 0.0
+        if (now - self._last_audio_level_publish) >= 0.1:
+            self._last_audio_level_publish = now
+            try:
+                from server.event_bus import event_bus
+                from protocol.event_types import EventType
+                event_bus.publish(EventType.VOICE_AUDIO_LEVEL, {
+                    "rms": round(rms, 2),
+                    "is_speech": is_speech,
+                    "state": self.state.value,
+                })
+            except Exception:
+                pass
 
         # Periodic telemetry at INFO level
         if self.voice_debug:
@@ -285,14 +366,13 @@ class VoiceInputGate:
         if self.state == VoiceState.ASSISTANT_SPEAKING:
             return False
 
-        # 2. COOLDOWN: Short 0.3s grace period after MAX stops speaking, then resume LIVE_CONVERSATION
+        # 2. COOLDOWN: Short grace period after MAX stops speaking, then return to LIVE_CONVERSATION
         if self.state == VoiceState.COOLDOWN:
-            if (now - self._cooldown_start_time) > self.cooldown_sec:
-                self.transition_to(VoiceState.LIVE_CONVERSATION)
+            self.check_cooldown()
             return False
 
         # 3. WAKE_WORD_LISTENING: Local wake-word evaluation via Vosk
-        if self.state == VoiceState.WAKE_WORD_LISTENING:
+        if self.state in (VoiceState.WAKE_WORD_LISTENING, VoiceState.IDLE):
             if self._vosk_rec:
                 self.vosk_chunks_fed += 1
                 # Feed chunk to local Vosk KaldiRecognizer
@@ -331,25 +411,25 @@ class VoiceInputGate:
             if len(self._audio_pre_buffer) > 4:
                 self._audio_pre_buffer.pop(0)
 
-            # Do NOT stream background audio to Gemini before wake word
+            # Do NOT stream background audio before wake word
             return False
 
-        # 4. LIVE_CONVERSATION: Continuous full-duplex streaming to Gemini Live
+        # 4. LIVE_CONVERSATION: Continuous full-duplex streaming to Realtime Voice
         if self.state in (VoiceState.LIVE_CONVERSATION, VoiceState.COMMAND_LISTENING):
-            # Check for extended idle timeout (e.g. 60s of complete silence)
-            if self._last_interaction_time > 0 and (now - self._last_interaction_time) > self.idle_timeout_sec:
-                logger.info(f"⏱️ Live conversation idle timeout ({self.idle_timeout_sec}s). Returning to wake-word standby.")
-                safe_print(f"\n💤 Conversation idle ({int(self.idle_timeout_sec)}s). Returning to 'Hey MAX' standby.")
-                self.transition_to(VoiceState.WAKE_WORD_LISTENING)
+            # Check for extended inactivity timeout (180s of silence)
+            if self.check_inactivity_timeout(now):
                 return False
 
             if is_speech:
                 self._last_interaction_time = now
+                if (now - self._last_user_activity_log_time) >= 1.0:
+                    logger.info("[VoiceGate] User activity — inactivity timer reset")
+                    self._last_user_activity_log_time = now
 
-            # Stream raw PCM audio continuously to Gemini Live
+            # Stream raw PCM audio continuously to Realtime Voice
             return True
 
-        # 5. PROCESSING: Waiting for Gemini / Tool response
+        # 5. PROCESSING: Waiting for Realtime Voice / Tool response
         if self.state == VoiceState.PROCESSING:
             return False
 

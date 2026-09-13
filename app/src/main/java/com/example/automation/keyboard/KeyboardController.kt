@@ -330,7 +330,16 @@ object KeyboardController {
         targetField: String? = null
     ): ToolResult {
         val normKey = keyNameOrCode.trim().uppercase(Locale.ROOT)
-        val keyCode = KEY_MAP[normKey] ?: normKey.toIntOrNull() ?: KeyEvent.KEYCODE_ENTER
+        val keyCode = KEY_MAP[normKey] ?: normKey.toIntOrNull()
+        if (keyCode == null) {
+            Log.w(TAG, "Unsupported or unknown key: '$keyNameOrCode'")
+            return ToolResult(
+                success = false,
+                toolName = "press_key",
+                errorCode = "UNSUPPORTED_KEY",
+                message = "Unsupported key: '$keyNameOrCode'. Key must be a recognized key name or integer keyCode."
+            )
+        }
 
         Log.d(TAG, "pressKey() called: key=\"$keyNameOrCode\" (resolved keyCode=$keyCode)")
 

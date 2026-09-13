@@ -1,4 +1,4 @@
 """
-JARVIS Core Package
-Audio handling, Gemini Live API session, and tool execution engine.
+MAX Windows Agent Core Package
+Audio handling, Realtime Voice API session, and tool execution engine.
 """

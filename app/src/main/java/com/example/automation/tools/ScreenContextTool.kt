@@ -45,6 +45,12 @@ class ScreenContextTool : Tool {
                 )
             }
 
+            val extractedOutputData = mapOf<String, Any?>(
+                "text" to payload.visibleText,
+                "packageName" to (payload.packageName ?: ""),
+                "elements" to payload.clickableElements
+            )
+
             // If neither accessibility nor screenshot could be obtained, report failure
             if (!payload.hasAccessibility && payload.screenshotJpeg == null) {
                 Log.w(TAG, "Screen context capture failed: Both accessibility and screenshot unavailable")
@@ -52,7 +58,8 @@ class ScreenContextTool : Tool {
                     success = false,
                     toolName = name,
                     errorCode = "SCREEN_CAPTURE_UNAVAILABLE",
-                    message = "Unable to access screen content. Please ensure Accessibility permissions are granted and screen is active."
+                    message = "Unable to access screen content. Please ensure Accessibility permissions are granted and screen is active.",
+                    outputData = extractedOutputData
                 )
             }
 
@@ -88,11 +95,13 @@ class ScreenContextTool : Tool {
                 }
             }
 
+
             ToolResult(
                 success = true,
                 toolName = name,
                 message = messageSummary,
                 metadata = meta,
+                outputData = extractedOutputData,
                 verificationRequired = false
             )
         } catch (e: Exception) {

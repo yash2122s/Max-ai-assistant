@@ -9,7 +9,7 @@ data class AgentTask(
     val id: String = UUID.randomUUID().toString(),
     val originalIntent: String,
     val goal: String,
-    val steps: List<TaskStep>,
+    var steps: List<TaskStep>,
     var currentStepIndex: Int = 0,
     var status: TaskStatus = TaskStatus.PLANNING,
     val context: TaskContext = TaskContext(originalIntent = originalIntent)

@@ -80,7 +80,7 @@ Follow the strict Agentskills.io skill-authoring standards:
    - name: lowercase-hyphenated, <= 64 chars, no spaces (e.g. 'deploy-fastapi-service').
    - description: ONE sentence, EXACTLY <= 60 characters, ending with a period. State the capability concisely without buzzwords (e.g. 'Deploy FastAPI services to local Windows port.').
    - version: 0.1.0
-   - author: Hermes
+   - author: MAX Agent
    - platforms: [windows] or [android] or omit if portable.
 2. Required Section Hierarchy:
    - # <Human Title>
@@ -118,7 +118,7 @@ Follow the strict Agentskills.io skill-authoring standards:
         traj_block = f"<EXECUTION_TRAJECTORY>\n{traj_summary}\n</EXECUTION_TRAJECTORY>\n" if traj_summary else ""
         context_block = f"<CONTEXT_NOTES>\n{context_notes}\n</CONTEXT_NOTES>\n" if context_notes else ""
 
-        prompt = f"""You are Hermes, the primary autonomous AI skill curator.
+        prompt = f"""You are MAX Agent, the primary autonomous AI skill curator.
 Your task is to author a complete, production-grade SKILL.md document from the following task experience.
 
 <TASK_INSTRUCTION>
@@ -317,7 +317,7 @@ class LearningLoopManager:
         self.state_db.record_skill_provenance(
             skill_name=target_name,
             source_goal=source_goal or "Synthesized via /learn",
-            creator_agent="hermes_learning_loop",
+            creator_agent="max_learning_loop",
             version=metadata.get("version", "0.1.0"),
             trajectory=trajectory
         )

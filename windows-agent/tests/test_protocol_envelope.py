@@ -93,7 +93,7 @@ class TestTaskProtocolEnvelope:
 
     def test_child_creation_depth_limit_enforced(self):
         root = TaskEnvelope(goal="Root task", depth=0, max_depth=2)
-        child1 = root.create_child(worker="hermes", task_type="reasoning", goal="Subplan")
+        child1 = root.create_child(worker="max_agent", task_type="reasoning", goal="Subplan")
         assert child1.depth == 1
 
         child2 = child1.create_child(worker="antigravity", task_type="code_change", goal="Execute")

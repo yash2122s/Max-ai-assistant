@@ -7,9 +7,13 @@ enum class TaskSource {
     UNKNOWN
 }
 
-data class TaskContext(
+data class TaskSourceContext(
     val source: TaskSource,
     val taskId: String?,
     val scheduled: Boolean,
     val createdAt: Long
 )
+
+@Deprecated("Renamed to TaskSourceContext to eliminate namespace conflict with state.TaskContext", ReplaceWith("TaskSourceContext"))
+typealias TaskContext = TaskSourceContext
+

@@ -198,7 +198,7 @@ class SecurityGuard:
     @staticmethod
     def scan_threat_patterns(command: str) -> Tuple[bool, Optional[str]]:
         """
-        Scans a command string against Hermes threat patterns (reverse shells, exfiltration).
+        Scans a command string against security threat patterns (reverse shells, exfiltration).
         Returns (is_threat, description).
         """
         if not command or not command.strip():

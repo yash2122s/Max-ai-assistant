@@ -22,7 +22,11 @@ class OpenAppAction : BaseAction<JSONObject>() {
             ?: throw Exception("App '$appName' was not found on this device")
 
         val launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
-            ?: throw Exception("App '$appName' ($pkg) has no launcher intent")
+            ?: context.packageManager.getLeanbackLaunchIntentForPackage(pkg)
+            ?: Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                `package` = pkg
+            }
 
         launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
         context.startActivity(launchIntent)

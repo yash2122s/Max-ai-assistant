@@ -13,12 +13,12 @@ from typing import Dict, Any, List
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.unified_tool_registry import unified_tool_registry
-from core.hermes_controller import hermes_controller
+from core.max_orchestrator import max_orchestrator
 
 
 def audit_capabilities():
     print("=" * 80)
-    print("           MAX AI + HERMES: PHASE 24 CAPABILITY AUDIT")
+    print("           MAX AI: PHASE 24 CAPABILITY AUDIT")
     print("=" * 80)
 
     declarations = unified_tool_registry._declarations
@@ -100,8 +100,8 @@ def audit_capabilities():
         total_categorized += len(tools)
         print(f"  {d_name:<35} : {len(tools):>3} tools")
         for t in tools:
-            is_fast = hermes_controller.is_fast_path(t, {})
-            auth = "FAST_PATH" if is_fast else "HERMES_REQUIRED"
+            is_fast = max_orchestrator.is_fast_path(t, {})
+            auth = "FAST_PATH" if is_fast else "MAX_AGENT_REQUIRED"
             print(f"     |-- {t:<35} [{auth}]")
 
     print("-" * 80)

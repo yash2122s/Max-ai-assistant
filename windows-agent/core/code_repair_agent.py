@@ -262,7 +262,7 @@ class CodeRepairAgent:
                 logger.error(f"Failed to rollback {canonical_path}: {e}")
         return False
 
-    def run_targeted_test(self, test_command: str, timeout_sec: float = 15.0) -> Dict[str, Any]:
+    def run_targeted_test(self, test_command: str, timeout_sec: float = 15.0, cwd: Optional[str] = None) -> Dict[str, Any]:
         """
         Executes a targeted test command safely.
         """
@@ -279,10 +279,44 @@ class CodeRepairAgent:
                 "message": f"Only pytest/unittest test commands are permitted. Got: '{clean_cmd}'"
             }
 
+        import shlex
+        import sys
+
+        try:
+            argv = shlex.split(clean_cmd, posix=False)
+        except Exception as se:
+            return {"status": "error", "message": f"Malformed test command: {se}"}
+
+        if not argv:
+            return {"status": "error", "message": "Empty test argv"}
+
+        # Validate executable is Python/pytest runner
+        first_token = argv[0].lower()
+        if first_token in ("py", "python", "python3"):
+            argv[0] = sys.executable
+        elif first_token.endswith("pytest") or first_token.endswith("pytest.exe"):
+            argv = [sys.executable, "-m", "pytest"] + argv[1:]
+        elif first_token not in (sys.executable.lower(), "pytest"):
+            argv = [sys.executable, "-m", "pytest"] + argv
+
+        # Validate working directory against sandbox
+        target_cwd = cwd or (self.sandbox.allowed_roots[0] if self.sandbox.allowed_roots else os.getcwd())
+        is_safe, canonical_cwd = self.sandbox.is_safe_path(target_cwd)
+        if not is_safe or not os.path.exists(canonical_cwd):
+            canonical_cwd = self.sandbox.allowed_roots[0] if self.sandbox.allowed_roots else os.getcwd()
+
+        # Restrict environment
+        safe_env = os.environ.copy()
+        safe_env["PYTHONDONTWRITEBYTECODE"] = "1"
+        safe_env["PYTHONUNBUFFERED"] = "1"
+        safe_env.pop("PYTHONSTARTUP", None)
+
         try:
             proc = subprocess.run(
-                clean_cmd,
-                shell=True,
+                argv,
+                shell=False,
+                cwd=cwd,
+                env=safe_env,
                 capture_output=True,
                 text=True,
                 timeout=timeout_sec
@@ -295,11 +329,13 @@ class CodeRepairAgent:
                 "stdout": proc.stdout,
                 "stderr": proc.stderr
             }
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as te:
             return {
                 "status": "error",
                 "error_code": "TEST_TIMEOUT",
                 "passed": False,
+                "stdout": te.stdout or "",
+                "stderr": te.stderr or "",
                 "message": f"Test command timed out after {timeout_sec}s"
             }
         except Exception as e:
@@ -308,6 +344,31 @@ class CodeRepairAgent:
                 "passed": False,
                 "message": str(e)
             }
+
+    def run_test_suite(self, target_path: str, timeout_sec: float = 60.0) -> Dict[str, Any]:
+        """
+        Executes a full test suite on a file or directory using pytest/unittest.
+        Returns parsed test outcomes, total count, passed, failed, and traceback if any.
+        """
+        cmd = f"py -m pytest {target_path} -v"
+        res = self.run_targeted_test(cmd, timeout_sec=timeout_sec)
+        stdout = res.get("stdout", "")
+        stderr = res.get("stderr", "")
+
+        # Extract summary counts
+        passed = res.get("passed", False)
+        import re
+        summary_match = re.search(r'(=+)\s+([\d\w\s,]+)\s+in\s+([\d\.]+s)\s+(=+)', stdout)
+        summary_text = summary_match.group(2) if summary_match else ("Passed" if passed else "Failed")
+
+        return {
+            "status": "success" if passed else "failed",
+            "passed": passed,
+            "target": target_path,
+            "summary": summary_text,
+            "stdout": stdout,
+            "stderr": stderr
+        }
 
     async def execute_repair_loop(
         self,

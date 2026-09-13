@@ -81,4 +81,28 @@ class GoalPlannerUnitTest {
         assertTrue(result.isCancelled)
         assertFalse(GoalPlanner.isGoalActive())
     }
+
+    @Test
+    fun testValidatePlanWithPressKeySucceeds() {
+        val steps = listOf(
+            ActionStep(stepId = "step_1", actionType = "OPEN_APP", targetText = "Chrome"),
+            ActionStep(stepId = "step_2", actionType = "TYPE_TEXT", targetText = "Search or type URL", params = mapOf("text" to "YouTube")),
+            ActionStep(stepId = "step_3", actionType = "PRESS_KEY", targetText = "ENTER")
+        )
+
+        val validationError = GoalPlanner.validatePlan(steps)
+        org.junit.Assert.assertNull("Validation should succeed for plan containing PRESS_KEY", validationError)
+    }
+
+    @Test
+    fun testActionStepToUiStepConversion() {
+        val step = ActionStep(stepId = "step_3", actionType = "PRESS_KEY", targetText = "ENTER")
+        val uiStep = step.toUiStep()
+        assertTrue(uiStep is com.example.automation.models.UiStep.PressEnter)
+
+        val tapStep = ActionStep(stepId = "step_4", actionType = "CLICK_ELEMENT", targetText = "first result")
+        val uiTap = tapStep.toUiStep()
+        assertTrue(uiTap is com.example.automation.models.UiStep.Tap)
+        assertEquals("first result", (uiTap as com.example.automation.models.UiStep.Tap).target)
+    }
 }

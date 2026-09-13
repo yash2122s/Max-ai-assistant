@@ -12,12 +12,12 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-logger = logging.getLogger("MAXWindowsAgent.CodeTools")
+logger = logging.getLogger("MAX.CodeTools")
 
 
 class CodeTools:
     """
-    Developer capabilities for Hermes autonomous coding and repository inspection.
+    Developer capabilities for MAX autonomous coding and repository inspection.
     """
 
     @staticmethod

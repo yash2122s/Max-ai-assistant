@@ -294,6 +294,14 @@ object PromptBuilder {
             2. Prefer exact visible text for targetText.
             3. Only emit actionType values listed above as supported.
             4. Preserve every logical user step in sequence (e.g. for "enter 25, press +, enter 10": step 1: enter 25, step 2: press +, step 3: enter 10).
+            5. Action Argument Boundary Rule: For every action, provide ONLY the argument belonging to that specific action.
+               Do NOT include subsequent instructions or future actions inside targetText, params['text'], params['query'], target, value, message, or packageName.
+               - For "search YouTube, open the first result and play the video":
+                 Emit TYPE_TEXT with targetText="YouTube", followed by PRESS_ENTER, followed by TAP with targetText="first result", followed by TAP with targetText="Play".
+                 NEVER emit TYPE_TEXT with targetText="YouTube, open the first result and play the video".
+               - For "search Palakollu to Bhimavaram, open directions":
+                 Emit TYPE_TEXT with targetText="Palakollu to Bhimavaram", followed by PRESS_ENTER, followed by TAP with targetText="Directions".
+                 NEVER emit TYPE_TEXT with targetText="Palakollu to Bhimavaram, open directions".
         """.trimIndent()
     }
 

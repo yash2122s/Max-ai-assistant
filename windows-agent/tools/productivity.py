@@ -19,63 +19,96 @@ user32 = ctypes.windll.user32
 from config import ALLOWED_COMMANDS
 from tools.clipboard_tool import clipboard_helper
 from core.verifier import action_verifier
+from core.undo_manager import undo_manager
+from tools.persistent_scheduler import persistent_scheduler
 
 logger = logging.getLogger("MAXWindowsAgent.Productivity")
 
-# ─── Active Reminders (in-memory) ───────────────────────────────────────────
-_active_reminders = []
 
-
-def set_reminder(message: str, minutes: int, **kwargs) -> dict:
+def set_reminder(message: str, minutes: int = 1, **kwargs) -> dict:
     """
-    Set a reminder that will trigger after a specified number of minutes.
-    Uses a background thread to wait, then shows a Windows notification.
+    Set a persistent reminder that will trigger after a specified number of minutes.
+    Recorded in SQLite and scheduled with Windows Task Scheduler (survives app restarts and reboot).
     
     Args:
         message: The reminder message.
-        minutes: Number of minutes from now.
+        minutes: Number of minutes from now (default: 1).
     """
     try:
         min_val = max(1, int(minutes or kwargs.get("time_minutes", 1)))
         msg_val = str(message or kwargs.get("text", "Reminder"))
-        trigger_time = datetime.datetime.now() + datetime.timedelta(minutes=min_val)
+        title = kwargs.get("title", "MAX Reminder")
         
-        def _remind():
-            time.sleep(min_val * 60)
-            try:
-                ps_cmd = f"""
-                [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-                $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
-                $text = $template.GetElementsByTagName('text')
-                $text[0].AppendChild($template.CreateTextNode('MAX Reminder')) | Out-Null
-                $text[1].AppendChild($template.CreateTextNode('{msg_val}')) | Out-Null
-                $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('MAX')
-                $notifier.Show([Windows.UI.Notifications.ToastNotification]::new($template))
-                """
-                subprocess.run(
-                    ["powershell", "-Command", ps_cmd],
-                    capture_output=True, timeout=10,
-                )
-            except Exception:
-                subprocess.Popen(
-                    ["powershell", "-Command", f'[System.Windows.MessageBox]::Show("{msg_val}", "MAX Reminder")'],
-                )
-        
-        thread = threading.Thread(target=_remind, daemon=True)
-        thread.start()
-        
-        reminder_info = {
-            "message": msg_val,
-            "trigger_at": trigger_time.strftime("%I:%M %p"),
-            "minutes": min_val,
-        }
-        _active_reminders.append(reminder_info)
-        
+        return persistent_scheduler.set_reminder(
+            message=msg_val,
+            minutes=min_val,
+            title=title,
+        )
+    except Exception as e:
+        logger.error(f"Error setting persistent reminder: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+def list_scheduled_reminders(active_only: bool = True, **kwargs) -> dict:
+    """
+    List scheduled and active reminders from the persistent database.
+    """
+    try:
+        return persistent_scheduler.list_reminders(active_only=active_only)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def cancel_scheduled_reminder(reminder_id: str, **kwargs) -> dict:
+    """
+    Cancel a scheduled reminder by its ID.
+    
+    Args:
+        reminder_id: The ID of the reminder to cancel (e.g. 'rem_12345').
+    """
+    try:
+        rid = reminder_id or kwargs.get("id", "")
+        return persistent_scheduler.cancel_reminder(reminder_id=rid)
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def undo_last_action(**kwargs) -> dict:
+    """
+    Undo the most recent reversible action (e.g. volume change, brightness change, file write, file move).
+    Rolls back state safely after verifying preconditions.
+    """
+    try:
+        return undo_manager.undo()
+    except Exception as e:
+        logger.error(f"Error during undo_last_action: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+def list_undo_history(limit: int = 10, **kwargs) -> dict:
+    """
+    Inspect the recent undo history stack without executing any rollbacks.
+    
+    Args:
+        limit: Number of recent actions to return (default: 10).
+    """
+    try:
+        history = undo_manager.get_history(limit=limit)
         return {
             "status": "success",
-            "message": f"Reminder set for {min_val} minute(s) from now ({trigger_time.strftime('%I:%M %p')})",
-            "reminder": msg_val,
+            "count": len(history),
+            "undo_stack": history,
+            "can_undo": len(history) > 0,
         }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+def clear_undo_history(**kwargs) -> dict:
+    """Clear all recorded undo actions from memory."""
+    try:
+        undo_manager.clear()
+        return {"status": "success", "message": "Undo history cleared."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -592,10 +625,68 @@ TOOL_DECLARATIONS = [
             "required": ["contact_name"],
         },
     },
+    {
+        "name": "undo_last_action",
+        "description": "Undo the most recent reversible action (e.g., volume change, brightness change, file write, file move, folder creation). Restores previous state safely.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "list_undo_history",
+        "description": "List recently recorded undoable actions without modifying or rolling back state.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Number of recent actions to inspect (default: 10).",
+                }
+            },
+        },
+    },
+    {
+        "name": "list_scheduled_reminders",
+        "description": "List all active and scheduled persistent reminders stored in the database.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "active_only": {
+                    "type": "boolean",
+                    "description": "If true, only returns pending/scheduled reminders. If false, returns all.",
+                }
+            },
+        },
+    },
+    {
+        "name": "cancel_scheduled_reminder",
+        "description": "Cancel a persistent reminder from Windows Task Scheduler and database by its ID.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reminder_id": {
+                    "type": "string",
+                    "description": "The ID of the reminder to cancel (e.g. 'rem_123456789abc').",
+                }
+            },
+            "required": ["reminder_id"],
+        },
+    },
 ]
 
 TOOL_FUNCTIONS = {
     "set_reminder": set_reminder,
+    "list_scheduled_reminders": list_scheduled_reminders,
+    "list_reminders": list_scheduled_reminders,
+    "cancel_scheduled_reminder": cancel_scheduled_reminder,
+    "cancel_reminder": cancel_scheduled_reminder,
+    "undo_last_action": undo_last_action,
+    "undo": undo_last_action,
+    "rollback_last_action": undo_last_action,
+    "list_undo_history": list_undo_history,
+    "undo_history": list_undo_history,
+    "clear_undo_history": clear_undo_history,
     "clipboard_copy": clipboard_copy,
     "copy_to_clipboard": clipboard_copy,
     "set_clipboard": clipboard_copy,
@@ -611,3 +702,4 @@ TOOL_FUNCTIONS = {
     "send_whatsapp_message": send_whatsapp_message,
     "search_whatsapp_contact": search_whatsapp_contact,
 }
+

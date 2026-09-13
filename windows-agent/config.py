@@ -49,6 +49,7 @@ OUTPUT_CHANNELS = 1
 OUTPUT_FORMAT_WIDTH = 2  # 16-bit = 2 bytes
 
 # ─── MAX Personality ─────────────────────────────────────────────────────────
+USER_NAME = os.getenv("MAX_USER_NAME") or os.getenv("USER_NAME", "User")
 JARVIS_NAME = os.getenv("JARVIS_NAME", "MAX")
 JARVIS_VOICE = os.getenv("JARVIS_VOICE", "Aoede")  # Default female voice preset (Aoede / Kore)
 
@@ -70,7 +71,7 @@ GREETING & WAKE BEHAVIOR:
 
 
 ECOSYSTEM & COMPANION KNOWLEDGE:
-- You are powered by Hermes as your primary autonomous reasoning, planning, and execution authority.
+- You are powered by MAX Agent Engine as your primary autonomous reasoning, planning, and execution authority.
 - You are running on Windows and connected to the MAX Android Phone App & Companion Ecosystem.
 - You have paired Android phones connected via WebSocket/mDNS/HTTP.
 - You can automate Windows tasks, execute commands, control media/power, send WhatsApp messages, take screenshots, remember facts, and interact with paired Android devices.
@@ -163,28 +164,52 @@ AUTOMATION_BROWSER_PROFILE_DIR = os.path.join(STORAGE_DIR, "browser_automation_p
 for d in (SCREENSHOT_DIR, STORAGE_DIR, SKILLS_DIR, CHECKPOINTS_DIR, WORKTREES_DIR, AUTOMATION_BROWSER_PROFILE_DIR):
     os.makedirs(d, exist_ok=True)
 
-# ─── Hermes Unified Agent Feature Flags (Phase 18) ───────────────────────────
-ENABLE_HERMES = os.getenv("ENABLE_HERMES", "true").lower() == "true"
-ENABLE_HERMES_VOICE = False  # Invariant: MAX Gemini Live + Vosk is exclusive voice engine
-ENABLE_HERMES_PTY = os.getenv("ENABLE_HERMES_PTY", "true").lower() == "true"
-ENABLE_HERMES_REASONING = os.getenv("ENABLE_HERMES_REASONING", "true").lower() == "true"
-ENABLE_HERMES_CONTEXT = os.getenv("ENABLE_HERMES_CONTEXT", "true").lower() == "true"
-ENABLE_HERMES_PROVIDERS = os.getenv("ENABLE_HERMES_PROVIDERS", "true").lower() == "true"
-ENABLE_HERMES_PATCHING = os.getenv("ENABLE_HERMES_PATCHING", "true").lower() == "true"
-ENABLE_HERMES_SKILLS = os.getenv("ENABLE_HERMES_SKILLS", "true").lower() == "true"
-ENABLE_HERMES_CRON = os.getenv("ENABLE_HERMES_CRON", "true").lower() == "true"
-ENABLE_HERMES_SCHEDULER = os.getenv("ENABLE_HERMES_SCHEDULER", "true").lower() == "true"
-ENABLE_HERMES_MCP = os.getenv("ENABLE_HERMES_MCP", "true").lower() == "true"
-ENABLE_HERMES_SUBAGENTS = os.getenv("ENABLE_HERMES_SUBAGENTS", "true").lower() == "true"
-ENABLE_HERMES_PTC = os.getenv("ENABLE_HERMES_PTC", "true").lower() == "true"
-ENABLE_HERMES_MEMORY = os.getenv("ENABLE_HERMES_MEMORY", "true").lower() == "true"
-ENABLE_HERMES_BROWSER = os.getenv("ENABLE_HERMES_BROWSER", "true").lower() == "true"
-ENABLE_HERMES_GATEWAY = os.getenv("ENABLE_HERMES_GATEWAY", "true").lower() == "true"
-ENABLE_HERMES_MEDIA = os.getenv("ENABLE_HERMES_MEDIA", "true").lower() == "true"
-ENABLE_HERMES_KANBAN = os.getenv("ENABLE_HERMES_KANBAN", "true").lower() == "true"
-ENABLE_HERMES_DOCTOR = os.getenv("ENABLE_HERMES_DOCTOR", "true").lower() == "true"
-ENABLE_HERMES_SKILLS_HUB = os.getenv("ENABLE_HERMES_SKILLS_HUB", "true").lower() == "true"
-ENABLE_HERMES_MCP_SERVER = os.getenv("ENABLE_HERMES_MCP_SERVER", "true").lower() == "true"
+# ─── MAX Unified Agent Feature Flags ─────────────────────────────────────────
+ENABLE_REALTIME_VOICE = os.getenv("ENABLE_REALTIME_VOICE", "true").lower() == "true"
+ENABLE_MAX_AGENT = os.getenv("ENABLE_MAX_AGENT", os.getenv("ENABLE_HERMES", "true")).lower() == "true"
+ENABLE_MAX_AGENT_VOICE = False  # Invariant: MAX Realtime Voice + Vosk is exclusive voice engine
+ENABLE_MAX_PTY = os.getenv("ENABLE_MAX_PTY", os.getenv("ENABLE_HERMES_PTY", "true")).lower() == "true"
+ENABLE_MAX_REASONING = os.getenv("ENABLE_MAX_REASONING", os.getenv("ENABLE_HERMES_REASONING", "true")).lower() == "true"
+ENABLE_MAX_CONTEXT = os.getenv("ENABLE_MAX_CONTEXT", os.getenv("ENABLE_HERMES_CONTEXT", "true")).lower() == "true"
+ENABLE_MAX_PROVIDERS = os.getenv("ENABLE_MAX_PROVIDERS", os.getenv("ENABLE_HERMES_PROVIDERS", "true")).lower() == "true"
+ENABLE_MAX_PATCHING = os.getenv("ENABLE_MAX_PATCHING", os.getenv("ENABLE_HERMES_PATCHING", "true")).lower() == "true"
+ENABLE_MAX_SKILLS = os.getenv("ENABLE_MAX_SKILLS", os.getenv("ENABLE_HERMES_SKILLS", "true")).lower() == "true"
+ENABLE_MAX_CRON = os.getenv("ENABLE_MAX_CRON", os.getenv("ENABLE_HERMES_CRON", "true")).lower() == "true"
+ENABLE_MAX_SCHEDULER = os.getenv("ENABLE_MAX_SCHEDULER", os.getenv("ENABLE_HERMES_SCHEDULER", "true")).lower() == "true"
+ENABLE_MAX_MCP = os.getenv("ENABLE_MAX_MCP", os.getenv("ENABLE_HERMES_MCP", "true")).lower() == "true"
+ENABLE_MAX_SUBAGENTS = os.getenv("ENABLE_MAX_SUBAGENTS", os.getenv("ENABLE_HERMES_SUBAGENTS", "true")).lower() == "true"
+ENABLE_MAX_PTC = os.getenv("ENABLE_MAX_PTC", os.getenv("ENABLE_HERMES_PTC", "true")).lower() == "true"
+ENABLE_MAX_MEMORY = os.getenv("ENABLE_MAX_MEMORY", os.getenv("ENABLE_HERMES_MEMORY", "true")).lower() == "true"
+ENABLE_MAX_BROWSER = os.getenv("ENABLE_MAX_BROWSER", os.getenv("ENABLE_HERMES_BROWSER", "true")).lower() == "true"
+ENABLE_MAX_GATEWAY = os.getenv("ENABLE_MAX_GATEWAY", os.getenv("ENABLE_HERMES_GATEWAY", "true")).lower() == "true"
+ENABLE_MAX_MEDIA = os.getenv("ENABLE_MAX_MEDIA", os.getenv("ENABLE_HERMES_MEDIA", "true")).lower() == "true"
+ENABLE_MAX_KANBAN = os.getenv("ENABLE_MAX_KANBAN", os.getenv("ENABLE_HERMES_KANBAN", "true")).lower() == "true"
+ENABLE_MAX_DOCTOR = os.getenv("ENABLE_MAX_DOCTOR", os.getenv("ENABLE_HERMES_DOCTOR", "true")).lower() == "true"
+ENABLE_MAX_SKILLS_HUB = os.getenv("ENABLE_MAX_SKILLS_HUB", os.getenv("ENABLE_HERMES_SKILLS_HUB", "true")).lower() == "true"
+ENABLE_MAX_MCP_SERVER = os.getenv("ENABLE_MAX_MCP_SERVER", os.getenv("ENABLE_HERMES_MCP_SERVER", "true")).lower() == "true"
+
+# Backward compatibility aliases
+ENABLE_HERMES = ENABLE_MAX_AGENT
+ENABLE_HERMES_VOICE = ENABLE_MAX_AGENT_VOICE
+ENABLE_HERMES_PTY = ENABLE_MAX_PTY
+ENABLE_HERMES_REASONING = ENABLE_MAX_REASONING
+ENABLE_HERMES_CONTEXT = ENABLE_MAX_CONTEXT
+ENABLE_HERMES_PROVIDERS = ENABLE_MAX_PROVIDERS
+ENABLE_HERMES_PATCHING = ENABLE_MAX_PATCHING
+ENABLE_HERMES_SKILLS = ENABLE_MAX_SKILLS
+ENABLE_HERMES_CRON = ENABLE_MAX_CRON
+ENABLE_HERMES_SCHEDULER = ENABLE_MAX_SCHEDULER
+ENABLE_HERMES_MCP = ENABLE_MAX_MCP
+ENABLE_HERMES_SUBAGENTS = ENABLE_MAX_SUBAGENTS
+ENABLE_HERMES_PTC = ENABLE_MAX_PTC
+ENABLE_HERMES_MEMORY = ENABLE_MAX_MEMORY
+ENABLE_HERMES_BROWSER = ENABLE_MAX_BROWSER
+ENABLE_HERMES_GATEWAY = ENABLE_MAX_GATEWAY
+ENABLE_HERMES_MEDIA = ENABLE_MAX_MEDIA
+ENABLE_HERMES_KANBAN = ENABLE_MAX_KANBAN
+ENABLE_HERMES_DOCTOR = ENABLE_MAX_DOCTOR
+ENABLE_HERMES_SKILLS_HUB = ENABLE_MAX_SKILLS_HUB
+ENABLE_HERMES_MCP_SERVER = ENABLE_MAX_MCP_SERVER
 
 # ─── Master Multi-Agent Orchestration & Concurrency Policy ───────────────────
 MAX_TASK_MAX_DEPTH = int(os.getenv("MAX_TASK_MAX_DEPTH", "3"))

@@ -7,7 +7,7 @@ import android.util.Log
 import com.example.automation.engine.ExecutionEngine
 import com.example.automation.engine.ExecutionResult
 import com.example.automation.engine.GoalPlanner
-import com.example.automation.engine.TaskContext
+import com.example.automation.engine.TaskSourceContext
 import com.example.automation.engine.TaskSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,7 +59,7 @@ class TaskReceiver : BroadcastReceiver() {
                         repository.updateTaskStatus(runningTask)
 
                         val argsObj = JSONObject(task.arguments.json)
-                        val taskCtx = TaskContext(
+                        val taskCtx = TaskSourceContext(
                             source = TaskSource.SCHEDULER,
                             taskId = task.id,
                             scheduled = true,

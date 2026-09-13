@@ -579,7 +579,7 @@ def take_screenshot(region: str = None, **kwargs) -> dict:
         return {"status": "error", "message": str(e)}
 
 
-# ─── UI Automation & Computer Use Tools (Hermes Computer Agent) ───────────
+# ─── UI Automation & Computer Use Tools (MAX Computer Agent) ───────────
 
 def observe_desktop_state(window_title: str = None) -> dict:
     """
@@ -936,7 +936,7 @@ def split_screen(left_app: str, right_app: str, **kwargs) -> dict:
         return {"status": "error", "message": f"Split screen failed: {e}"}
 
 
-# ─── Tool Declarations (for Gemini / Hermes function calling) ───────────────
+# ─── Tool Declarations (for Realtime Voice / MAX Agent function calling) ───────
 
 TOOL_DECLARATIONS = [
     {

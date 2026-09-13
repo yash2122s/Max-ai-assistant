@@ -8,7 +8,10 @@ Implements 3-tier progressive disclosure:
 
 import os
 import re
-import yaml
+try:
+    import yaml
+except ImportError:
+    yaml = None
 import json
 import logging
 from pathlib import Path
@@ -32,7 +35,15 @@ def parse_skill_frontmatter(content: str) -> Tuple[Dict[str, Any], str]:
         return {}, content
 
     try:
-        metadata = yaml.safe_load(parts[1]) or {}
+        if yaml is not None:
+            metadata = yaml.safe_load(parts[1]) or {}
+        else:
+            # Fallback key-value parser for frontmatter
+            metadata = {}
+            for line in parts[1].splitlines():
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    metadata[k.strip()] = v.strip().strip("\"'")
         body = parts[2].strip()
         return metadata, body
     except Exception as e:
@@ -298,10 +309,15 @@ platforms: [windows, linux, macos]
                 "name": clean_name,
                 "description": clean_desc,
                 "version": "0.1.0",
-                "author": "Hermes",
+                "author": "MAX Agent",
                 "platforms": ["windows"]
             }
-            full_content = f"---\n{yaml.dump(frontmatter)}---\n\n{content.strip()}\n"
+            if yaml:
+                fm_str = yaml.dump(frontmatter)
+            else:
+                fm_lines = [f"{k}: {v}" if not isinstance(v, list) else f"{k}: {json.dumps(v)}" for k, v in frontmatter.items()]
+                fm_str = "\n".join(fm_lines) + "\n"
+            full_content = f"---\n{fm_str}---\n\n{content.strip()}\n"
             with open(skill_file, "w", encoding="utf-8") as f:
                 f.write(full_content)
 

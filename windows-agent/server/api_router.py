@@ -179,7 +179,7 @@ async def handle_request(method: str, path: str, headers: dict, body: bytes, wri
 
             await writer.drain()
 
-        elif path in ("/health", "/api/v1/health"):
+        elif path in ("/health", "/healthz", "/api/v1/health"):
             if method != "GET":
                 write_error(405, ErrorCode.METHOD_NOT_ALLOWED.value, "Only GET is allowed")
                 await writer.drain()
@@ -266,37 +266,45 @@ async def handle_request(method: str, path: str, headers: dict, body: bytes, wri
                     "timestamp": time.time()
                 })
 
-                # 2. Process chat message via tool executor / Gemini
-                from core.tool_executor import ToolRegistry
-                registry = ToolRegistry()
-                
-                # Check for direct tool matches or process via AI
-                response_text = ""
-                tool_results = []
-                
-                # Try simple tool dispatch or Gemini API
-                from config import GEMINI_API_KEY, GEMINI_MODEL, SYSTEM_PROMPT
-                if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
-                    try:
-                        from google import genai
-                        from google.genai import types
-                        client = genai.Client(api_key=GEMINI_API_KEY)
+                # 2. Process chat message via IntentRouter and MAX autonomous loop
+                from core.intent_router import intent_router, IntentCategory
+                route_decision = intent_router.classify(user_msg)
+                logger.info(
+                    f"[MAX_ROUTE] input=\"{user_msg}\" intent={route_decision.intent.value} "
+                    f"tool={route_decision.tool or 'NONE'} reason=\"{route_decision.reason}\""
+                )
 
-                        # Generate response with tools available
-                        prompt = f"{SYSTEM_PROMPT}\nUser asks: {user_msg}\nRespond concisely as MAX."
-                        response = client.models.generate_content(
-                            model="gemini-2.5-flash",
-                            contents=user_msg,
-                            config=types.GenerateContentConfig(
-                                system_instruction=SYSTEM_PROMPT,
-                                temperature=0.7
+                from config import GEMINI_API_KEY
+                if route_decision.intent == IntentCategory.CALCULATION and route_decision.direct_answer:
+                    response_text = route_decision.direct_answer
+                elif route_decision.intent in (IntentCategory.GENERAL_KNOWLEDGE, IntentCategory.CONVERSATION):
+                    if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
+                        try:
+                            from core.provider_manager import provider_manager
+                            from config import SYSTEM_PROMPT
+                            resp = provider_manager.chat_completion(
+                                messages=[
+                                    {"role": "system", "content": SYSTEM_PROMPT},
+                                    {"role": "user", "content": user_msg}
+                                ]
                             )
-                        )
-                        response_text = response.text if response and response.text else "Task poorthi chesanu bangaram."
-                    except Exception as ai_err:
-                        response_text = f"Request process chesanu bangaram: {user_msg}"
+                            response_text = resp.get("content", "") or f"Processed: {user_msg}"
+                        except Exception as ai_err:
+                            logger.warning(f"Direct AI generation notice: {ai_err}")
+                            response_text = f"MAX: {user_msg}"
+                    else:
+                        response_text = f"MAX Standalone: Received '{user_msg}'."
                 else:
-                    response_text = f"MAX Standalone: Received '{user_msg}'. Add GEMINI_API_KEY to enable full AI responses."
+                    if GEMINI_API_KEY and GEMINI_API_KEY != "your_api_key_here":
+                        try:
+                            from core.agent_execution_loop import agent_execution_loop
+                            h_res = await agent_execution_loop.execute_goal_loop(user_msg)
+                            response_text = h_res.get("final_answer") or "Task completed successfully."
+                        except Exception as h_err:
+                            logger.warning(f"MAX execution loop fallback in chat: {h_err}")
+                            response_text = f"Processed request: {user_msg}"
+                    else:
+                        response_text = f"MAX Standalone: Received '{user_msg}'."
 
                 # Publish MAX Response Event
                 event_bus.publish(EventType.CHAT_MESSAGE, {
@@ -394,8 +402,23 @@ async def handle_request(method: str, path: str, headers: dict, body: bytes, wri
                     "args": args
                 })
 
-                # Execute action
-                res = await tool_obj.execute(action_name, args)
+                # Execute action with optional send_progress callback
+                async def _send_progress(msg: str):
+                    try:
+                        event_bus.publish(EventType.TOOL_PROGRESS, {
+                            "tool": tool_name,
+                            "action": action_name,
+                            "message": msg
+                        })
+                    except Exception:
+                        pass
+
+                import inspect
+                sig = inspect.signature(tool_obj.execute)
+                if len(sig.parameters) >= 3 or "send_progress" in sig.parameters:
+                    res = await tool_obj.execute(action_name, args, _send_progress)
+                else:
+                    res = await tool_obj.execute(action_name, args)
                 
                 event_bus.publish(EventType.TOOL_COMPLETED, {
                     "tool": tool_name,

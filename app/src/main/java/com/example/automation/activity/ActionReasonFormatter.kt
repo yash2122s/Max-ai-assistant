@@ -6,7 +6,7 @@ object ActionReasonFormatter {
         return when (actionType.uppercase()) {
             "GET_SCREEN_CONTEXT", "OBSERVING" -> "Capturing current screen"
             "OPEN_APP" -> if (target.isNotBlank()) "Open $target" else "Open App"
-            "CLICK_ELEMENT", "CLICK_TEXT" -> if (target.isNotBlank()) "Tap \"$target\"" else "Tap Element"
+            "CLICK_ELEMENT", "CLICK_TEXT", "TAP" -> if (target.isNotBlank()) "Tap \"$target\"" else "Tap Element"
             "TYPE_TEXT" -> if (target.isNotBlank()) "Type \"$target\"" else "Type Text"
             "SCROLL_SCREEN" -> "Scroll $target"
             "SYSTEM_ACTION" -> "System $target"
@@ -29,7 +29,7 @@ object ActionReasonFormatter {
         return when (actionType.uppercase()) {
             "GET_SCREEN_CONTEXT", "OBSERVING" -> "Checking the current screen so MAX can determine what is currently visible."
             "OPEN_APP" -> if (target.isNotBlank()) "Opening $target because the next task step requires interacting with $target." else "Opening the requested application to proceed with the task."
-            "CLICK_ELEMENT", "CLICK_TEXT" -> if (target.isNotBlank()) "Selecting \"$target\" to proceed with the requested action." else "Tapping element to proceed with the requested action."
+            "CLICK_ELEMENT", "CLICK_TEXT", "TAP" -> if (target.isNotBlank()) "Selecting \"$target\" to proceed with the requested action." else "Tapping element to proceed with the requested action."
             "TYPE_TEXT" -> if (target.isNotBlank()) "Entering \"$target\" into the active input field." else "Entering the requested message."
             "SCROLL_SCREEN" -> "Scrolling screen $target to find visible items."
             "SYSTEM_ACTION" -> "Navigating $target as required by the task flow."

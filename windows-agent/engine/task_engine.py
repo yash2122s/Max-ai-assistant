@@ -8,7 +8,7 @@ import time
 import uuid
 import asyncio
 import logging
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
 from server.event_bus import event_bus
 from protocol.event_types import EventType
@@ -16,6 +16,7 @@ from .models import Task, Step, TaskState, StepState
 from .state import StateValidator, TaskStateError
 from .store import task_store, TaskStore
 from .step_runner import StepRunner
+from .dag_planner import DAGWorkflowGraph
 
 logger = logging.getLogger("MAXWindowsAgent.TaskEngine")
 
@@ -26,6 +27,7 @@ MAX_RETRIES_PER_STEP = 3
 MAX_TASK_DURATION = 1800.0  # 30 minutes in seconds
 MAX_TOOL_CALLS_PER_TASK = 50
 MAX_REPLAN_DEPTH = 1
+MAX_PARALLEL_STEPS_PER_STAGE = 4
 
 
 class TaskEngine:
@@ -58,6 +60,31 @@ class TaskEngine:
             return None
         return self.store.get_task(self._active_task_id)
 
+    @staticmethod
+    def _is_safe_for_parallel(step: Step) -> bool:
+        """
+        Determines whether a step is safe to execute concurrently in a parallel stage.
+        Steps are safe for parallel execution if:
+        1. Risk level is SAFE, READ_ONLY, or LOW.
+        2. Action is not in dangerous or interactive UI/confirmation gate actions.
+        3. Step does not perform exclusive hardware acquisition or desktop-wide mutations.
+        """
+        risk = (step.risk_level or "SAFE").upper()
+        if risk not in ("SAFE", "READ_ONLY", "LOW"):
+            return False
+
+        action = (step.action or "").lower()
+        exclusive_actions = {
+            "require_confirmation", "confirm_pending", "cancel_pending",
+            "shutdown", "restart", "lock_screen", "go_to_sleep",
+            "organize_desktop", "clean_desktop", "delete_file",
+            "send_whatsapp", "make_call"
+        }
+        if action in exclusive_actions:
+            return False
+
+        return True
+
     def create_task(
         self,
         goal: str,
@@ -78,6 +105,20 @@ class TaskEngine:
             raise ValueError(f"Task exceeds maximum step limit of {MAX_STEPS} steps (got {len(steps)}).")
 
         task_id = f"task_{uuid.uuid4().hex[:8]}"
+
+        # If steps declare depends_on, compile topological sequence via DAGWorkflowGraph
+        has_deps = any("depends_on" in step.arguments for step in steps)
+        if has_deps:
+            try:
+                dag = DAGWorkflowGraph.from_steps(steps, name=goal.strip())
+                valid, err = dag.validate()
+                if not valid:
+                    raise ValueError(f"Invalid Task DAG: {err}")
+                steps = dag.compile_to_sequential_steps(steps)
+            except ValueError:
+                raise
+            except Exception as e:
+                logger.warning(f"DAG compilation fallback: {e}")
 
         # Initialize steps
         for i, step in enumerate(steps, start=1):
@@ -155,10 +196,28 @@ class TaskEngine:
             def is_cancelled() -> bool:
                 return self._cancellation_flags.get(task.task_id, False)
 
-            # Sequential Step Execution Loop
+            # Dependency-aware Staged Execution
+            has_deps = any("depends_on" in s.arguments for s in task.steps)
+            dag: Optional[DAGWorkflowGraph] = None
+            if has_deps:
+                try:
+                    dag = DAGWorkflowGraph.from_steps(task.steps, name=task.goal)
+                    valid, msg = dag.validate()
+                    if not valid:
+                        raise ValueError(f"Invalid DAG dependency structure: {msg}")
+                    stages = dag.execution_stages()
+                except Exception as e:
+                    logger.warning(f"Failed to build execution stages from DAG, falling back to sequential: {e}")
+                    stages = [[s.step_id] for s in task.steps]
+            else:
+                stages = [[s.step_id] for s in task.steps]
+
+            step_map: Dict[str, Step] = {s.step_id: s for s in task.steps}
+            stage_semaphore = asyncio.Semaphore(MAX_PARALLEL_STEPS_PER_STAGE)
             all_succeeded = True
-            for step in task.steps:
-                # 1. Task Cancellation Check
+
+            for stage_idx, stage_node_ids in enumerate(stages):
+                # 1. Cancellation Check
                 if is_cancelled():
                     task.status = TaskState.CANCELLED
                     task.error = {"code": "TASK_CANCELLED", "message": "Task cancelled by user."}
@@ -172,24 +231,96 @@ class TaskEngine:
                     all_succeeded = False
                     break
 
-                task.current_step = step.sequence
+                stage_steps = [step_map[nid] for nid in stage_node_ids if nid in step_map]
+                if not stage_steps:
+                    continue
+
+                task.current_step = min(s.sequence for s in stage_steps)
                 self.store.save_task(task)
 
-                # 3. Execute Step via StepRunner
-                step_success, executed_step = await StepRunner.execute_step(task, step, is_cancelled)
+                # Determine if stage steps can run concurrently
+                can_run_parallel = len(stage_steps) > 1 and all(self._is_safe_for_parallel(s) for s in stage_steps)
 
-                if not step_success:
-                    all_succeeded = False
-                    if executed_step.status == StepState.CANCELLED:
-                        task.status = TaskState.CANCELLED
-                        task.error = {"code": "TASK_CANCELLED", "message": "Task cancelled during step execution."}
-                    else:
-                        task.status = TaskState.FAILED
-                        task.error = executed_step.error or {
-                            "code": "STEP_FAILED",
-                            "message": f"Step {step.sequence} ({step.action}) failed."
-                        }
-                    break
+                if can_run_parallel:
+                    logger.info(
+                        f"Task '{task.task_id}': Executing stage {stage_idx + 1}/{len(stages)} "
+                        f"in parallel ({len(stage_steps)} steps): {[s.step_id for s in stage_steps]}"
+                    )
+
+                    async def _run_single(s: Step) -> Tuple[bool, Step]:
+                        async with stage_semaphore:
+                            return await StepRunner.execute_step(task, s, is_cancelled)
+
+                    results = await asyncio.gather(*[_run_single(s) for s in stage_steps])
+
+                    for step_success, executed_step in results:
+                        if not step_success:
+                            all_succeeded = False
+                            if dag:
+                                dag.replan_on_failure(executed_step.step_id, str(executed_step.error))
+                                blocked_ids = {n.step_id for n in dag.nodes if n.status == "BLOCKED"}
+                                for s in task.steps:
+                                    if s.step_id in blocked_ids and s.status == StepState.PENDING:
+                                        s.status = StepState.BLOCKED
+                                        s.error = {"code": "DEPENDENCY_FAILED", "message": f"Prerequisite step '{executed_step.step_id}' failed."}
+                                        self.store.update_step(task.task_id, s)
+
+                            if executed_step.status == StepState.CANCELLED:
+                                task.status = TaskState.CANCELLED
+                                task.error = {"code": "TASK_CANCELLED", "message": "Task cancelled during step execution."}
+                            else:
+                                task.status = TaskState.FAILED
+                                task.error = executed_step.error or {
+                                    "code": "STEP_FAILED",
+                                    "message": f"Step {executed_step.sequence} ({executed_step.action}) failed."
+                                }
+                            break
+
+                    if not all_succeeded:
+                        break
+                else:
+                    for step in stage_steps:
+                        if is_cancelled():
+                            task.status = TaskState.CANCELLED
+                            task.error = {"code": "TASK_CANCELLED", "message": "Task cancelled by user."}
+                            all_succeeded = False
+                            break
+
+                        if (time.time() - start_time) > MAX_TASK_DURATION:
+                            task.status = TaskState.EXPIRED
+                            task.error = {"code": "TASK_EXPIRED", "message": f"Task exceeded maximum duration of {MAX_TASK_DURATION}s."}
+                            all_succeeded = False
+                            break
+
+                        task.current_step = step.sequence
+                        self.store.save_task(task)
+
+                        step_success, executed_step = await StepRunner.execute_step(task, step, is_cancelled)
+
+                        if not step_success:
+                            all_succeeded = False
+                            if dag:
+                                dag.replan_on_failure(executed_step.step_id, str(executed_step.error))
+                                blocked_ids = {n.step_id for n in dag.nodes if n.status == "BLOCKED"}
+                                for s in task.steps:
+                                    if s.step_id in blocked_ids and s.status == StepState.PENDING:
+                                        s.status = StepState.BLOCKED
+                                        s.error = {"code": "DEPENDENCY_FAILED", "message": f"Prerequisite step '{executed_step.step_id}' failed."}
+                                        self.store.update_step(task.task_id, s)
+
+                            if executed_step.status == StepState.CANCELLED:
+                                task.status = TaskState.CANCELLED
+                                task.error = {"code": "TASK_CANCELLED", "message": "Task cancelled during step execution."}
+                            else:
+                                task.status = TaskState.FAILED
+                                task.error = executed_step.error or {
+                                    "code": "STEP_FAILED",
+                                    "message": f"Step {step.sequence} ({step.action}) failed."
+                                }
+                            break
+
+                    if not all_succeeded:
+                        break
 
             # Final Task State Update
             if all_succeeded:

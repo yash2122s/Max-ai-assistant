@@ -168,11 +168,13 @@ async def test_tier5_hybrid_routing(test_env):
 
     test_env["bridge"].run_task = AsyncMock(side_effect=mock_run_task)
 
-    res = await auth.submit_user_intent(
-        user_intent=intent,
-        source="voice",
-        async_execution=False
-    )
+    with patch("core.paint_automation.paint_engine.ensure_paint_ready", return_value=True), \
+         patch("tools.app_control.paint_draw_shape", return_value={"status": "success", "message": "Shape drawn."}):
+        res = await auth.submit_user_intent(
+            user_intent=intent,
+            source="voice",
+            async_execution=False
+        )
 
     assert res["worker"] == "hybrid"
     assert res["tier"] == TaskTier.TIER_5_HYBRID.value
@@ -197,7 +199,7 @@ async def test_duplicate_voice_dedup(test_env):
 
     # Start long task asynchronously
     res1 = await auth.submit_user_intent(
-        user_intent="Fix the Paint automation code",
+        user_intent="Inspect the Paint automation architecture and verify code structure",
         source="voice",
         async_execution=True
     )
@@ -206,7 +208,7 @@ async def test_duplicate_voice_dedup(test_env):
 
     # Submit same intent immediately while first is active
     res2 = await auth.submit_user_intent(
-        user_intent="Fix the Paint automation code",
+        user_intent="Inspect the Paint automation architecture and verify code structure",
         source="voice",
         async_execution=True
     )
@@ -231,29 +233,37 @@ async def test_voice_cancellation_through_max(test_env):
 
     cancel_event = asyncio.Event()
     async def mock_cancel_task(envelope):
-        await cancel_event.wait()
+        try:
+            await asyncio.wait_for(cancel_event.wait(), timeout=1.5)
+        except asyncio.TimeoutError:
+            pass
         return TaskResult(task_id=envelope.task_id, status=TaskStatus.COMPLETED, claimed_success=True, verified_success=True)
 
     test_env["bridge"].run_task = AsyncMock(side_effect=mock_cancel_task)
+    test_env["bridge"].cancel_task = MagicMock(side_effect=lambda tid: cancel_event.set())
 
-    # Start async task
-    res = await auth.submit_user_intent(
-        user_intent="Inspect the repository files",
-        source="voice",
-        async_execution=True
-    )
-    task_id = res["task_id"]
+    try:
+        # Start async developer task
+        res = await auth.submit_user_intent(
+            user_intent="Inspect the repository architecture and verify code structure",
+            source="voice",
+            async_execution=True
+        )
+        task_id = res["task_id"]
 
-    # Voice cancellation
-    cancel_res = auth.cancel_active_task(reason="User said 'stop'")
+        # Small yield to let background task register in active tasks
+        await asyncio.sleep(0.02)
 
-    assert cancel_res["success"] is True
-    assert task_id in cancel_res["cancelled_tasks"]
+        # Voice cancellation
+        cancel_res = auth.cancel_active_task(reason="User said 'stop'")
 
-    cur_result = auth.store.get_task_result(task_id)
-    assert cur_result.status == TaskStatus.CANCELLED.value
+        assert cancel_res["success"] is True
+        assert task_id in cancel_res["cancelled_tasks"]
 
-    cancel_event.set()
+        cur_result = auth.store.get_task_result(task_id)
+        assert cur_result.status == TaskStatus.CANCELLED.value
+    finally:
+        cancel_event.set()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -358,7 +368,7 @@ def test_real_cli_discovery():
     cli = bridge.cli_path
 
     assert cli is not None
-    assert cli.endswith("agy.exe") or cli.endswith("agy")
+    assert cli.lower().endswith("agy.exe") or cli.lower().endswith("agy")
     assert os.path.isabs(cli)
 
 

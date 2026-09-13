@@ -297,12 +297,12 @@ object ActionAuthorizer {
                 }
             }
 
-            "PRESS_ENTER" -> {
-                val enterKeywords = listOf("enter", "submit", "done", "search", "కొట్టు", "నొక్కు", "ఎంటర్")
-                if (enterKeywords.any { intent.contains(it) }) {
-                    AuthorizationResult(true, "Press Enter requested by user.")
+            "PRESS_ENTER", "PRESS_KEY", "KEYBOARD_ACTION", "KEY_PRESS" -> {
+                val enterKeywords = listOf("enter", "submit", "done", "search", "కొట్టు", "నొక్కు", "ఎంటర్", "key", "press")
+                if (enterKeywords.any { intent.contains(it) } || looksLikeDirectCommand(userIntent)) {
+                    AuthorizationResult(true, "Keyboard action requested by user.")
                 } else {
-                    AuthorizationResult(false, "Press Enter not requested in '$userIntent'.")
+                    AuthorizationResult(false, "Keyboard action not requested in '$userIntent'.")
                 }
             }
 

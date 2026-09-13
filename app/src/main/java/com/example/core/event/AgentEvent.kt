@@ -60,25 +60,25 @@ sealed class AgentEvent(
         class Started(
             val toolName: String,
             val arguments: org.json.JSONObject,
-            val taskContext: com.example.automation.engine.TaskContext
+            val taskContext: com.example.automation.engine.TaskSourceContext
         ) : ExecutionEvent(source = "ExecutionEngine")
 
         class Progress(
             val toolName: String,
             val info: String,
-            val taskContext: com.example.automation.engine.TaskContext
+            val taskContext: com.example.automation.engine.TaskSourceContext
         ) : ExecutionEvent(source = "ExecutionEngine")
 
         class Completed(
             val toolName: String,
             val result: com.example.automation.engine.ExecutionResult,
-            val taskContext: com.example.automation.engine.TaskContext
+            val taskContext: com.example.automation.engine.TaskSourceContext
         ) : ExecutionEvent(source = "ExecutionEngine")
 
         class Failed(
             val toolName: String,
             val error: String,
-            val taskContext: com.example.automation.engine.TaskContext
+            val taskContext: com.example.automation.engine.TaskSourceContext
         ) : ExecutionEvent(source = "ExecutionEngine")
     }
 }

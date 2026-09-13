@@ -120,13 +120,14 @@ object AgentActivityTracker {
                     val newStage = when (event.status) {
                         "RUNNING" -> AgentStage.EXECUTING
                         "VERIFYING" -> AgentStage.VERIFYING
-                        "COMPLETED" -> AgentStage.EXECUTING
+                        "COMPLETED" -> if (event.stepIndex >= event.totalSteps) AgentStage.COMPLETED else AgentStage.EXECUTING
                         "FAILED" -> AgentStage.FAILED
                         else -> current.stage
                     }
+                    val isStillActive = (newStage != AgentStage.COMPLETED && newStage != AgentStage.FAILED && newStage != AgentStage.CANCELLED)
                     val reason = ActionReasonFormatter.formatReason(event.actionType, event.targetText, goal = current.goal)
                     current.copy(
-                        active = true,
+                        active = isStillActive,
                         stage = newStage,
                         currentStepIndex = event.stepIndex,
                         totalSteps = event.totalSteps,
@@ -254,7 +255,7 @@ object AgentActivityTracker {
             is AutomationEvent.ExecutionCancelled -> {
                 _state.update { current ->
                     current.copy(
-                        stage = AgentStage.FAILED,
+                        stage = AgentStage.CANCELLED,
                         active = false,
                         error = event.reason ?: "Execution cancelled",
                         lastUpdated = System.currentTimeMillis()

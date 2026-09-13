@@ -48,14 +48,32 @@ class WorktreeManager:
         self._worktrees: Dict[str, WorktreeInfo] = {}
 
     def _run_git(self, args: List[str], cwd: str) -> subprocess.CompletedProcess:
-        """Run a git command safely."""
-        return subprocess.run(
-            ["git"] + args,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            check=False
-        )
+        """Run a git command safely with timeout."""
+        try:
+            return subprocess.run(
+                ["git"] + args,
+                cwd=cwd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning(f"Git command timed out: git {' '.join(args)}")
+            return subprocess.CompletedProcess(
+                args=["git"] + args,
+                returncode=124,
+                stdout="",
+                stderr="Git command timed out"
+            )
+        except Exception as e:
+            logger.warning(f"Git execution error: {e}")
+            return subprocess.CompletedProcess(
+                args=["git"] + args,
+                returncode=1,
+                stdout="",
+                stderr=str(e)
+            )
 
     def _is_git_repo(self, path: str) -> bool:
         """Check if path is inside a valid git repository."""
@@ -173,7 +191,7 @@ class WorktreeManager:
             return {"success": False, "error": f"No worktree found for task {task_id}"}
 
         # Check approval authority
-        if not approved_by or approved_by.lower() in ("antigravity", "worker", "agy", "hermes"):
+        if not approved_by or approved_by.lower() in ("antigravity", "worker", "agy", "hermes", "max_agent_worker"):
             return {
                 "success": False,
                 "error": f"Unauthorized merge actor '{approved_by}'. Merges require explicit MAX or user approval."

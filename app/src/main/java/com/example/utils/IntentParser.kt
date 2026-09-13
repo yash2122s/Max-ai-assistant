@@ -79,7 +79,7 @@ object IntentParser {
 
         // 4. Send Message (Feature 10 / 9)
         // Match expressions like: "send message to [contact]: [message]" or "whatsapp [contact] [message]" or "message [contact] [message]"
-        val sendMsgPattern = Pattern.compile("(?i)(?:send\\s+message\\s+to|send\\s+a\\s+message\\s+to|message|whatsapp|text)\\s+([a-zA-Z0-9\\s]+?)(?:\\s+saying|\\s+to|:|\\s+that)?\\s+([a-zA-Z0-9\\s\\.\\,\\?\\!\\']+)$")
+        val sendMsgPattern = Pattern.compile("(?i)(?:send\\s+(?:a\\s+)?(?:whatsapp\\s+)?message\\s+to|send\\s+whatsapp\\s+to|message|whatsapp|text)\\s+([a-zA-Z0-9\\s]+?)(?:\\s+(?:saying|that|as|with\\s+text)|\\s+to|:)\\s+([a-zA-Z0-9\\s\\.\\,\\?\\!\\']+)$")
         val msgMatcher = sendMsgPattern.matcher(text)
         if (msgMatcher.find()) {
             val contact = msgMatcher.group(1)?.trim() ?: ""

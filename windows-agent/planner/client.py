@@ -18,7 +18,7 @@ from .validator import PlanValidator, plan_validator
 
 logger = logging.getLogger("MAXWindowsAgent.GeminiPlanner")
 
-DEFAULT_PLANNING_MODEL = "gemini-3.7-flash"
+DEFAULT_PLANNING_MODEL = "gemini-2.5-flash"
 GEMINI_REST_ENDPOINT_TEMPLATE = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 # Schema definition for Gemini REST API responseSchema parameter

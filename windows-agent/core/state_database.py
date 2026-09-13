@@ -15,12 +15,12 @@ from typing import Dict, Any, List, Optional, Tuple
 from config import STATE_DB_PATH, PROJECT_ROOT
 from core.security import security_guard
 
-logger = logging.getLogger("MAXWindowsAgent.StateDB")
+logger = logging.getLogger("MAX.StateDB")
 
 
 class StateDatabase:
     """
-    Thread-safe SQLite state database for MAX + Hermes Unified Agent.
+    Thread-safe SQLite state database for MAX Unified Agent.
     """
     _instance: Optional['StateDatabase'] = None
     _lock = threading.Lock()
@@ -49,6 +49,15 @@ class StateDatabase:
             conn.execute("PRAGMA foreign_keys=ON;")
             self._local.conn = conn
         return self._local.conn
+
+    def close(self):
+        """Closes thread-local database connection if open."""
+        if hasattr(self._local, "conn") and self._local.conn is not None:
+            try:
+                self._local.conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
 
     def _init_db(self):
         """Initializes tables and FTS5 full-text search indexes."""
@@ -171,6 +180,25 @@ class StateDatabase:
                     trajectory_json TEXT,
                     created_at REAL NOT NULL
                 );
+            """)
+
+            # 8. Persistent Reminders Table (Phase 1 Reliability)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS reminders (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    run_at REAL NOT NULL,
+                    recurrence TEXT,
+                    task_name TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'PENDING',
+                    payload_json TEXT,
+                    created_at REAL NOT NULL,
+                    updated_at REAL NOT NULL
+                );
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reminders_status_run_at ON reminders(status, run_at);
             """)
 
     def _migrate_json_memory_if_needed(self):
@@ -390,7 +418,7 @@ class StateDatabase:
             """, (clean_name, 0 if success else 1, now, 1 if is_agent_created else 0, now, now,
                   0 if success else 1, now, now))
 
-    def record_skill_provenance(self, skill_name: str, source_goal: str, creator_agent: str = "hermes", version: str = "0.1.0", trajectory: Optional[List[Dict[str, Any]]] = None):
+    def record_skill_provenance(self, skill_name: str, source_goal: str, creator_agent: str = "max_agent", version: str = "0.1.0", trajectory: Optional[List[Dict[str, Any]]] = None):
         """Records provenance information for an agent-created skill."""
         clean_name = skill_name.strip().lower()
         traj_json = json.dumps(trajectory, default=str) if trajectory else "{}"
@@ -447,6 +475,106 @@ class StateDatabase:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             logger.debug(f"JSON backup sync notice: {e}")
+
+    # ── Reminder Persistence API (Phase 1 Reliability) ────────────────────────
+
+    def save_reminder(
+        self,
+        reminder_id: str,
+        title: str,
+        message: str,
+        run_at: float,
+        task_name: str,
+        recurrence: Optional[str] = None,
+        status: str = "PENDING",
+        payload_json: Optional[str] = None,
+    ) -> bool:
+        """Saves or updates a reminder record in SQLite."""
+        now = time.time()
+        conn = self._get_connection()
+        try:
+            with conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO reminders (
+                        id, title, message, run_at, recurrence, task_name, status, payload_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM reminders WHERE id = ?), ?), ?)
+                """, (
+                    reminder_id, title, message, run_at, recurrence, task_name, status,
+                    payload_json, reminder_id, now, now
+                ))
+            return True
+        except Exception as e:
+            logger.error(f"Error saving reminder '{reminder_id}' to SQLite: {e}")
+            return False
+
+    def get_reminder(self, reminder_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieves a single reminder by ID."""
+        conn = self._get_connection()
+        cur = conn.execute("SELECT * FROM reminders WHERE id = ?", (reminder_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_active_reminders(self) -> List[Dict[str, Any]]:
+        """Returns all reminders with status 'SCHEDULED' or 'PENDING'."""
+        conn = self._get_connection()
+        cur = conn.execute("""
+            SELECT * FROM reminders
+            WHERE status IN ('SCHEDULED', 'PENDING')
+            ORDER BY run_at ASC
+        """)
+        return [dict(r) for r in cur.fetchall()]
+
+    def list_all_reminders(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Returns all reminders ordered by newest first."""
+        conn = self._get_connection()
+        cur = conn.execute("""
+            SELECT * FROM reminders
+            ORDER BY created_at DESC
+            LIMIT ?
+        """, (limit,))
+        return [dict(r) for r in cur.fetchall()]
+
+    def update_reminder_status(
+        self,
+        reminder_id: str,
+        new_status: str,
+        expected_status: Optional[str] = None,
+    ) -> bool:
+        """
+        Updates the status of a reminder.
+        If expected_status is provided, performs an atomic conditional update.
+        """
+        now = time.time()
+        conn = self._get_connection()
+        try:
+            with conn:
+                if expected_status:
+                    cur = conn.execute("""
+                        UPDATE reminders
+                        SET status = ?, updated_at = ?
+                        WHERE id = ? AND status = ?
+                    """, (new_status, now, reminder_id, expected_status))
+                else:
+                    cur = conn.execute("""
+                        UPDATE reminders
+                        SET status = ?, updated_at = ?
+                        WHERE id = ?
+                    """, (new_status, now, reminder_id))
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error updating reminder '{reminder_id}' status to '{new_status}': {e}")
+            return False
+
+    def delete_reminder_record(self, reminder_id: str) -> bool:
+        """Deletes a reminder row from SQLite."""
+        conn = self._get_connection()
+        try:
+            with conn:
+                cur = conn.execute("DELETE FROM reminders WHERE id = ?", (reminder_id,))
+                return cur.rowcount > 0
+        except Exception as e:
+            logger.error(f"Error deleting reminder '{reminder_id}' record: {e}")
+            return False
 
     # ── Audit Logging API ─────────────────────────────────────────────────────
 

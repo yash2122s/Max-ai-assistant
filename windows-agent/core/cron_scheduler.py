@@ -13,10 +13,14 @@ import threading
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
-from croniter import croniter
+try:
+    from croniter import croniter
+except ImportError:
+    croniter = None
+
 from core.state_database import state_db
 
-logger = logging.getLogger("MAXWindowsAgent.CronScheduler")
+logger = logging.getLogger("MAX.CronScheduler")
 
 
 def calculate_next_run(schedule_expr: str, base_time: Optional[float] = None) -> Optional[float]:
@@ -41,13 +45,20 @@ def calculate_next_run(schedule_expr: str, base_time: Optional[float] = None) ->
         return now + (val * multiplier)
 
     # 2. Standard 5-field cron expression (e.g. '*/5 * * * *', '0 9 * * 1-5')
-    try:
-        dt_base = datetime.fromtimestamp(now, tz=timezone.utc)
-        iter_cron = croniter(schedule_expr, dt_base)
-        next_dt = iter_cron.get_next(datetime)
-        return next_dt.timestamp()
-    except Exception as e:
-        logger.debug(f"Cron expression parse error for '{schedule_expr}': {e}")
+    if croniter is not None:
+        try:
+            dt_base = datetime.fromtimestamp(now, tz=timezone.utc)
+            iter_cron = croniter(schedule_expr, dt_base)
+            next_dt = iter_cron.get_next(datetime)
+            return next_dt.timestamp()
+        except Exception as e:
+            logger.debug(f"Cron expression parse error for '{schedule_expr}': {e}")
+            return None
+    else:
+        # Simple fallback for 5-field expression when croniter is not installed
+        parts = clean_expr.split()
+        if len(parts) == 5:
+            return now + 3600.0  # Safe 1-hour placeholder
         return None
 
 

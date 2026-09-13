@@ -113,7 +113,7 @@ class ProgrammaticToolSandbox:
 
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
-                # 1. Write hermes_tools.py stub
+                # 1. Write max_tools.py and hermes_tools.py stubs
                 stub_code = f"""
 import json
 import socket
@@ -148,6 +148,8 @@ def list_connected_devices(): return _call_tool("list_connected_devices", {{}})
 def remember_fact(key, value): return _call_tool("remember_fact", {{"key": key, "value": value}})
 def recall_fact(query): return _call_tool("recall_fact", {{"query": query}})
 """
+                with open(os.path.join(temp_dir, "max_tools.py"), "w", encoding="utf-8") as f:
+                    f.write(stub_code)
                 with open(os.path.join(temp_dir, "hermes_tools.py"), "w", encoding="utf-8") as f:
                     f.write(stub_code)
 
@@ -162,7 +164,7 @@ def recall_fact(query): return _call_tool("recall_fact", {{"query": query}})
 
                 proc = subprocess.Popen(
                     [sys.executable, script_path],
-                    cwd=PROJECT_ROOT,
+                    cwd=temp_dir,
                     env=env,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
@@ -194,14 +196,14 @@ code_sandbox = ProgrammaticToolSandbox()
 # ─── Tool Wrappers & Declarations ─────────────────────────────────────────────
 
 def execute_code(code: str) -> Dict[str, Any]:
-    """Execute a Python script in a sandbox that can call MAX tools programmatically via `import hermes_tools`."""
+    """Execute a Python script in a sandbox that can call MAX tools programmatically via `import max_tools`."""
     return code_sandbox.execute_code(code=code)
 
 
 SANDBOX_TOOL_DECLARATIONS = [
     {
         "name": "execute_code",
-        "description": "Execute a Python script inside a programmatic tool sandbox. The script can `import hermes_tools` and invoke `web_search()`, `read_file()`, `write_file()`, `apply_patch()`, `execute_device_action()` to chain multiple operations in one fast step.",
+        "description": "Execute a Python script inside a programmatic tool sandbox. The script can `import max_tools` and invoke `web_search()`, `read_file()`, `write_file()`, `apply_patch()`, `execute_device_action()` to chain multiple operations in one fast step.",
         "parameters": {
             "type": "object",
             "properties": {

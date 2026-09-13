@@ -29,7 +29,7 @@ if AGENT_DIR not in sys.path:
 
 from protocol.event_types import EventType
 from server.event_bus import event_bus
-from core.gemini_live import GeminiLiveSession
+from core.realtime_voice import RealtimeVoiceSession
 from core.unified_tool_registry import unified_tool_registry
 from tools.system_tool import system_helper
 from tools.app_control import close_active_window
@@ -40,7 +40,7 @@ class TestPhase0ContextWins(unittest.TestCase):
 
     def setUp(self):
         self.registry = unified_tool_registry
-        self.agent = GeminiLiveSession(tool_registry=self.registry)
+        self.agent = RealtimeVoiceSession(tool_registry=self.registry)
 
     # 1. Memory Block Generation
     def test_01_memory_block_generated(self):

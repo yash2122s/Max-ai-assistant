@@ -9,6 +9,8 @@ import datetime
 import logging
 import psutil
 
+from core.undo_manager import undo_manager
+
 logger = logging.getLogger("MAXWindowsAgent.SystemControl")
 
 # ─── Volume Control (via pycaw) ──────────────────────────────────────────────
@@ -45,8 +47,34 @@ def set_volume(level: int, **kwargs) -> dict:
     try:
         target_level = level if level is not None else kwargs.get("volume", kwargs.get("percent", 50))
         target_level = max(0, min(100, int(target_level)))
+        
+        # Read pre-change state for self-validating undo
+        prev_vol = None
+        try:
+            cur_state = get_volume()
+            if cur_state.get("status") == "success":
+                prev_vol = cur_state.get("volume_percent")
+        except Exception:
+            pass
+
         volume = _get_volume_interface()
         volume.SetMasterVolumeLevelScalar(target_level / 100.0, None)
+
+        if prev_vol is not None and prev_vol != target_level:
+            def _rollback_volume(p=prev_vol, t=target_level):
+                try:
+                    vol = _get_volume_interface()
+                    vol.SetMasterVolumeLevelScalar(p / 100.0, None)
+                    return True, f"Volume restored from {t}% to {p}%."
+                except Exception as ex:
+                    return False, f"Could not restore volume: {ex}"
+
+            undo_manager.push_undo(
+                description=f"Volume changed to {target_level}% (previous: {prev_vol}%)",
+                undo_fn=_rollback_volume,
+                metadata={"type": "volume", "previous": prev_vol, "target": target_level},
+            )
+
         return {
             "status": "success",
             "volume_percent": target_level,
@@ -63,6 +91,21 @@ def mute_unmute() -> dict:
         current_mute = volume.GetMute()
         volume.SetMute(not current_mute, None)
         new_state = "muted" if not current_mute else "unmuted"
+
+        def _rollback_mute(was_muted=current_mute):
+            try:
+                vol = _get_volume_interface()
+                vol.SetMute(was_muted, None)
+                return True, f"Mute state restored to {'muted' if was_muted else 'unmuted'}."
+            except Exception as ex:
+                return False, f"Could not restore mute state: {ex}"
+
+        undo_manager.push_undo(
+            description=f"Toggle mute to {new_state}",
+            undo_fn=_rollback_mute,
+            metadata={"type": "mute", "previous": current_mute},
+        )
+
         return {"status": "success", "mute_state": new_state}
     except Exception as e:
         return {"status": "error", "message": str(e)}
@@ -92,8 +135,34 @@ def set_brightness(level: int, **kwargs) -> dict:
     try:
         target_level = level if level is not None else kwargs.get("brightness", kwargs.get("percent", 50))
         target_level = max(0, min(100, int(target_level)))
+        
+        # Read pre-change state for self-validating undo
+        prev_bri = None
+        try:
+            cur_state = get_brightness()
+            if cur_state.get("status") == "success":
+                prev_bri = cur_state.get("brightness_percent")
+        except Exception:
+            pass
+
         import screen_brightness_control as sbc
         sbc.set_brightness(target_level)
+
+        if prev_bri is not None and prev_bri != target_level:
+            def _rollback_brightness(p=prev_bri, t=target_level):
+                try:
+                    import screen_brightness_control as sbc_inner
+                    sbc_inner.set_brightness(p)
+                    return True, f"Brightness restored from {t}% to {p}%."
+                except Exception as ex:
+                    return False, f"Could not restore brightness: {ex}"
+
+            undo_manager.push_undo(
+                description=f"Brightness changed to {target_level}% (previous: {prev_bri}%)",
+                undo_fn=_rollback_brightness,
+                metadata={"type": "brightness", "previous": prev_bri, "target": target_level},
+            )
+
         return {
             "status": "success",
             "brightness_percent": target_level,

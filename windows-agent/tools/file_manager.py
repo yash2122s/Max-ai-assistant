@@ -6,15 +6,46 @@ Includes dedicated special folder support (Desktop, Downloads, Documents) and Ac
 """
 
 import os
+import sys
 import glob
 import shutil
 import subprocess
 import logging
+from typing import Tuple, Optional, Dict, Any, List
 
 from core.security import security_guard
 from core.verifier import action_verifier
+from core.undo_manager import undo_manager
 
 logger = logging.getLogger("MAXWindowsAgent.FileManager")
+
+# 1 MB threshold for text file undo content snapshots
+UNDO_CONTENT_LIMIT_BYTES = 1_048_576
+
+
+def _restore_from_recycle_bin(original_path: str) -> Tuple[bool, str]:
+    """Attempts to restore a deleted file from the Windows Recycle Bin using Shell.Application."""
+    if sys.platform != "win32":
+        return False, "Recycle Bin restore is only supported on Windows."
+
+    try:
+        import win32com.client
+        shell = win32com.client.Dispatch("Shell.Application")
+        bin_folder = shell.NameSpace(10)  # ssfBITBUCKET
+        orig_p = os.path.abspath(original_path)
+        orig_dir = os.path.dirname(orig_p).lower()
+        orig_name = os.path.basename(orig_p).lower()
+
+        for item in bin_folder.Items():
+            item_parent = str(bin_folder.GetDetailsOf(item, 1)).strip().lower()
+            item_name = str(item.Name).strip().lower()
+            if item_parent == orig_dir and item_name == orig_name:
+                item.InvokeVerb("UNDELETE")
+                return True, f"'{os.path.basename(original_path)}' restored from Recycle Bin."
+
+        return False, f"'{os.path.basename(original_path)}' was not found in the Recycle Bin."
+    except Exception as e:
+        return False, f"Recycle Bin restore failed: {e}"
 
 # Windows Well-Known Special Folders
 USER_HOME = os.path.abspath(os.path.realpath(os.path.expanduser("~")))
@@ -218,6 +249,18 @@ def create_file(path: str = None, content: str = "", **kwargs) -> dict:
         if not security_guard.is_safe_path(target_path):
             return {"status": "error", "message": f"Access denied: Cannot create file '{target_path}' outside sandbox."}
 
+        # Check pre-existing state for self-validating undo
+        file_existed = os.path.exists(target_path) and os.path.isfile(target_path)
+        previous_text = None
+        if file_existed:
+            try:
+                sz = os.path.getsize(target_path)
+                if sz <= UNDO_CONTENT_LIMIT_BYTES:
+                    with open(target_path, "r", encoding="utf-8", errors="ignore") as f_prev:
+                        previous_text = f_prev.read()
+            except Exception:
+                pass
+
         # Create parent directories if they don't exist
         parent_dir = os.path.dirname(target_path)
         if parent_dir and not os.path.exists(parent_dir):
@@ -227,6 +270,42 @@ def create_file(path: str = None, content: str = "", **kwargs) -> dict:
             f.write(text_content)
 
         verified = action_verifier.verify_file_created_sync(target_path, text_content)
+
+        # Register self-validating undo
+        if not file_existed:
+            def _rollback_create_file(p=target_path):
+                if not os.path.exists(p):
+                    return False, f"File '{os.path.basename(p)}' no longer exists."
+                if not os.path.isfile(p):
+                    return False, f"Path '{os.path.basename(p)}' is not a file."
+                try:
+                    os.remove(p)
+                    return True, f"Removed created file '{os.path.basename(p)}'."
+                except Exception as ex:
+                    return False, f"Could not remove file: {ex}"
+
+            undo_manager.push_undo(
+                description=f"Create file '{os.path.basename(target_path)}'",
+                undo_fn=_rollback_create_file,
+                metadata={"type": "create_file", "path": target_path},
+            )
+        elif previous_text is not None:
+            def _rollback_overwrite_file(p=target_path, old=previous_text):
+                if not os.path.exists(p):
+                    return False, f"Target file '{os.path.basename(p)}' is missing."
+                try:
+                    with open(p, "w", encoding="utf-8") as f_restore:
+                        f_restore.write(old)
+                    return True, f"Restored previous content of '{os.path.basename(p)}'."
+                except Exception as ex:
+                    return False, f"Could not restore file: {ex}"
+
+            undo_manager.push_undo(
+                description=f"Overwrite file '{os.path.basename(target_path)}'",
+                undo_fn=_rollback_overwrite_file,
+                metadata={"type": "overwrite_file", "path": target_path},
+            )
+
         return {
             "status": "success",
             "message": f"Created text file: {os.path.basename(target_path)}",
@@ -336,6 +415,25 @@ def create_folder(path: str = None, **kwargs) -> dict:
         
         os.makedirs(target_path, exist_ok=True)
         verified = action_verifier.verify_folder_created_sync(target_path)
+
+        def _rollback_create_folder(p=target_path):
+            if not os.path.exists(p):
+                return False, f"Folder '{os.path.basename(p)}' no longer exists."
+            if not os.path.isdir(p):
+                return False, f"Path '{os.path.basename(p)}' is not a directory."
+            if os.listdir(p):
+                return False, f"Folder '{os.path.basename(p)}' is not empty; refusing to delete."
+            try:
+                os.rmdir(p)
+                return True, f"Removed created folder '{os.path.basename(p)}'."
+            except Exception as ex:
+                return False, f"Could not remove folder: {ex}"
+
+        undo_manager.push_undo(
+            description=f"Create folder '{os.path.basename(target_path)}'",
+            undo_fn=_rollback_create_folder,
+            metadata={"type": "create_folder", "path": target_path},
+        )
         
         return {
             "status": "success",
@@ -365,9 +463,33 @@ def move_file(source: str, destination: str, **kwargs) -> dict:
             
         if not os.path.exists(src):
             return {"status": "error", "message": f"Source not found: {src}"}
+
+        # If destination is directory, build full target path
+        if os.path.isdir(dst):
+            actual_dst = os.path.join(dst, os.path.basename(src))
+        else:
+            actual_dst = dst
         
         shutil.move(src, dst)
-        verified = action_verifier.verify_file_moved_sync(src, dst)
+        verified = action_verifier.verify_file_moved_sync(src, actual_dst)
+
+        def _rollback_move_file(s=src, d=actual_dst):
+            if not os.path.exists(d):
+                return False, f"Target '{os.path.basename(d)}' no longer exists at destination."
+            if os.path.exists(s):
+                return False, f"Original location '{s}' is occupied."
+            try:
+                shutil.move(d, s)
+                return True, f"Moved '{os.path.basename(d)}' back to '{s}'."
+            except Exception as ex:
+                return False, f"Could not move file back: {ex}"
+
+        undo_manager.push_undo(
+            description=f"Move '{os.path.basename(src)}' to '{dst}'",
+            undo_fn=_rollback_move_file,
+            metadata={"type": "move_file", "src": src, "dst": actual_dst},
+        )
+
         return {
             "status": "success",
             "message": f"Moved {os.path.basename(src)} to {dst}",
@@ -426,6 +548,24 @@ def rename_file(source: str, new_name: str, **kwargs) -> dict:
         dst = os.path.join(parent_dir, os.path.basename(new_name))
         shutil.move(src, dst)
         verified = action_verifier.verify_file_moved_sync(src, dst)
+
+        def _rollback_rename(s=src, d=dst):
+            if not os.path.exists(d):
+                return False, f"Renamed file '{os.path.basename(d)}' no longer exists."
+            if os.path.exists(s):
+                return False, f"Original file name '{os.path.basename(s)}' is already taken."
+            try:
+                shutil.move(d, s)
+                return True, f"Renamed '{os.path.basename(d)}' back to '{os.path.basename(s)}'."
+            except Exception as ex:
+                return False, f"Could not rename file back: {ex}"
+
+        undo_manager.push_undo(
+            description=f"Rename '{os.path.basename(src)}' to '{os.path.basename(dst)}'",
+            undo_fn=_rollback_rename,
+            metadata={"type": "rename_file", "src": src, "dst": dst},
+        )
+
         return {
             "status": "success",
             "message": f"Renamed {os.path.basename(src)} to {os.path.basename(dst)}",
@@ -438,7 +578,7 @@ def rename_file(source: str, new_name: str, **kwargs) -> dict:
 
 def delete_file(path: str, **kwargs) -> dict:
     """
-    Delete a file.
+    Delete a file (moves to Recycle Bin if send2trash is installed for safe rollback).
     ⚠️ DANGEROUS: Requires confirmation gate in tool_executor.
     
     Args:
@@ -455,11 +595,135 @@ def delete_file(path: str, **kwargs) -> dict:
         if os.path.isdir(target):
             return {"status": "error", "message": f"Path '{target}' is a directory. Use delete_folder to delete directories."}
         
-        os.remove(target)
+        used_trash = False
+        try:
+            import send2trash
+            send2trash.send2trash(target)
+            used_trash = True
+        except Exception:
+            os.remove(target)
+
         verified = action_verifier.verify_path_deleted_sync(target)
+
+        if used_trash:
+            def _rollback_delete_file(p=target):
+                return _restore_from_recycle_bin(p)
+
+            undo_manager.push_undo(
+                description=f"Delete file '{os.path.basename(target)}'",
+                undo_fn=_rollback_delete_file,
+                metadata={"type": "delete_file", "path": target},
+            )
+
         return {"status": "success", "message": f"Deleted file: {os.path.basename(target)}", "verified": verified}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+def organize_desktop() -> dict:
+    """
+    Organizes files on the Desktop into categorized subfolders:
+    Images, Documents, Media, Code, Archives, Installers.
+    Skips directories, shortcuts (.lnk, .url), and hidden files.
+    """
+    try:
+        desktop_dir = SPECIAL_FOLDERS["desktop"]
+        if not os.path.exists(desktop_dir):
+            return {"status": "error", "message": "Desktop folder not found."}
+
+        ext_map = {
+            "Images": {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".svg", ".ico", ".tiff"},
+            "Documents": {".pdf", ".docx", ".doc", ".txt", ".xlsx", ".xls", ".pptx", ".csv", ".md", ".rtf"},
+            "Media": {".mp3", ".mp4", ".wav", ".mkv", ".avi", ".flac", ".aac", ".mov", ".wmv"},
+            "Code": {".py", ".js", ".ts", ".html", ".css", ".java", ".c", ".cpp", ".json", ".sh", ".ps1"},
+            "Archives": {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2"},
+            "Installers": {".exe", ".msi"},
+        }
+        skip_exts = {".lnk", ".url", ".ini"}
+
+        moved_counts: Dict[str, int] = {}
+        for entry in os.scandir(desktop_dir):
+            if not entry.is_file() or entry.name.startswith("."):
+                continue
+            ext = os.path.splitext(entry.name)[1].lower()
+            if ext in skip_exts:
+                continue
+
+            target_cat = None
+            for category, exts in ext_map.items():
+                if ext in exts:
+                    target_cat = category
+                    break
+
+            if target_cat:
+                cat_folder = os.path.join(desktop_dir, target_cat)
+                os.makedirs(cat_folder, exist_ok=True)
+                dst_path = os.path.join(cat_folder, entry.name)
+                try:
+                    shutil.move(entry.path, dst_path)
+                    moved_counts[target_cat] = moved_counts.get(target_cat, 0) + 1
+                except Exception as me:
+                    logger.warning(f"Could not organize '{entry.name}': {me}")
+
+        summary = ", ".join(f"{count} {cat}" for cat, count in moved_counts.items()) or "Desktop is already clean."
+        return {
+            "status": "success",
+            "message": f"Organized Desktop: {summary}",
+            "organized": moved_counts,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Desktop organization error: {e}"}
+
+
+def get_largest_files(directory: str = "Desktop", count: int = 10, **kwargs) -> dict:
+    """
+    Finds the largest files in a directory (sorted descending by size).
+    
+    Args:
+        directory: Directory to search (defaults to 'Desktop').
+        count: Number of largest files to return (default: 10, max: 50).
+    """
+    try:
+        raw_dir = directory or kwargs.get("folder") or "Desktop"
+        target_dir = _resolve_user_path(raw_dir)
+
+        if not security_guard.is_safe_path(target_dir):
+            return {"status": "error", "message": f"Access denied: Directory '{target_dir}' is outside sandbox."}
+
+        if not os.path.isdir(target_dir):
+            return {"status": "error", "message": f"Directory not found: {target_dir}"}
+
+        max_count = max(1, min(int(count or 10), 50))
+        file_list = []
+
+        for root, dirs, files in os.walk(target_dir):
+            for f in files:
+                full_p = os.path.join(root, f)
+                try:
+                    if security_guard.is_safe_path(full_p):
+                        sz = os.path.getsize(full_p)
+                        file_list.append((sz, full_p))
+                except OSError:
+                    continue
+
+        file_list.sort(key=lambda x: x[0], reverse=True)
+        top_files = []
+        for sz, p in file_list[:max_count]:
+            top_files.append({
+                "path": p,
+                "name": os.path.basename(p),
+                "size_bytes": sz,
+                "size_mb": round(sz / (1024 * 1024), 2),
+            })
+
+        return {
+            "status": "success",
+            "directory": target_dir,
+            "count": len(top_files),
+            "largest_files": top_files,
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Error scanning largest files: {e}"}
 
 
 def delete_folder(path: str, **kwargs) -> dict:
@@ -529,6 +793,51 @@ def get_folder_contents(path: str = None, **kwargs) -> dict:
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+def restore_recycle_bin_item(path: str = None, **kwargs) -> dict:
+    """
+    Restore a deleted file or folder from the Windows Recycle Bin (UNDELETE).
+    
+    Args:
+        path: Path or filename of the deleted item to restore from the Recycle Bin.
+    """
+    try:
+        raw_path = path or kwargs.get("file_path") or kwargs.get("file_name") or kwargs.get("name") or kwargs.get("target")
+        if not raw_path:
+            return {"status": "error", "message": "File path or name to restore is required."}
+
+        target = _resolve_user_path(raw_path)
+        success, msg = _restore_from_recycle_bin(target)
+        if not success:
+            # Also try matching by filename across special folders
+            file_name = os.path.basename(target)
+            for folder_key in ("desktop", "downloads", "documents"):
+                candidate = os.path.join(SPECIAL_FOLDERS[folder_key], file_name)
+                success, msg = _restore_from_recycle_bin(candidate)
+                if success:
+                    target = candidate
+                    break
+
+        if success:
+            return {
+                "status": "success",
+                "message": msg,
+                "path": target,
+                "verified": True,
+            }
+        else:
+            return {
+                "status": "error",
+                "message": msg,
+            }
+    except Exception as e:
+        return {"status": "error", "message": f"Error restoring item from Recycle Bin: {e}"}
+
+
+def undelete_file(path: str = None, **kwargs) -> dict:
+    """Alias for restore_recycle_bin_item."""
+    return restore_recycle_bin_item(path=path, **kwargs)
 
 
 # ─── Tool Declarations ──────────────────────────────────────────────────────
@@ -739,6 +1048,45 @@ TOOL_DECLARATIONS = [
             },
         },
     },
+    {
+        "name": "organize_desktop",
+        "description": "Clean and organize files on the Desktop into categorized folders (Images, Documents, Media, Code, Archives, Installers).",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "get_largest_files",
+        "description": "Find the largest files in a directory (sorted descending by size). Useful for cleaning disk space.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "directory": {
+                    "type": "string",
+                    "description": "Directory to search (defaults to 'Desktop').",
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of largest files to return (default: 10).",
+                }
+            }
+        },
+    },
+    {
+        "name": "restore_recycle_bin_item",
+        "description": "Restore a deleted file or folder from the Windows Recycle Bin (UNDELETE).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Original file path or name of the deleted item to restore from the Recycle Bin.",
+                }
+            },
+            "required": ["path"],
+        },
+    },
 ]
 
 TOOL_FUNCTIONS = {
@@ -762,4 +1110,12 @@ TOOL_FUNCTIONS = {
     "get_folder_contents": get_folder_contents,
     "list_folder": get_folder_contents,
     "list_files": get_folder_contents,
+    "organize_desktop": organize_desktop,
+    "get_largest_files": get_largest_files,
+    "largest_files": get_largest_files,
+    "restore_recycle_bin_item": restore_recycle_bin_item,
+    "restore_file": restore_recycle_bin_item,
+    "undelete_file": undelete_file,
+    "undelete": undelete_file,
 }
+

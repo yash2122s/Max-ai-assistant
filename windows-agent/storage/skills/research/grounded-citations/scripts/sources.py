@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _hermes_home import get_hermes_home  # noqa: E402
+from _max_home import get_max_home  # noqa: E402
 
 SCHEMA_VERSION = 1
 
@@ -65,10 +65,10 @@ _UNVERIFIED_RE = re.compile(r"\[unverified\]", re.IGNORECASE)
 def resolve_ledger_path(explicit: str | None = None) -> Path:
     if explicit:
         return Path(explicit).expanduser()
-    env = os.environ.get("HERMES_CITATION_LEDGER", "").strip()
+    env = os.environ.get("MAX_CITATION_LEDGER", "").strip() or os.environ.get("HERMES_CITATION_LEDGER", "").strip()
     if env:
         return Path(env).expanduser()
-    return get_hermes_home() / "cache" / "citations" / "ledger.json"
+    return get_max_home() / "cache" / "citations" / "ledger.json"
 
 
 def normalize_url(url: str) -> str:

@@ -111,7 +111,7 @@ class DocumentTools:
             "columns": ["ID", "Name", "Status", "Date"],
             "rows": [
                 [1, "Phase 24 Expansion", "In Progress", "2026-08-21"],
-                [2, "Hermes Primary Brain", "Complete", "2026-08-21"]
+                [2, "MAX Agent Brain", "Complete", "2026-08-21"]
             ]
         }
 

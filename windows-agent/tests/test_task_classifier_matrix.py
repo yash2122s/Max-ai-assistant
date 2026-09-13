@@ -43,10 +43,10 @@ class TestTaskClassifierMatrix:
         assert res.target == "android_agent"
         assert res.task_type == "android_action"
 
-    def test_tier_3_hermes_autonomous_reasoning(self, classifier):
+    def test_tier_3_max_autonomous_reasoning(self, classifier):
         res = classifier.classify("Analyze this information and plan a multi-step workflow")
         assert res.tier == TaskTier.TIER_3_REASONING.value
-        assert res.target == "hermes"
+        assert res.target == "max_agent"
         assert res.task_type == "reasoning"
 
     def test_tier_4_antigravity_developer_task(self, classifier):

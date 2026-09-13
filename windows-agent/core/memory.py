@@ -50,7 +50,14 @@ def remember_fact(key: str, value: str) -> dict:
     """
     try:
         from core.state_database import state_db
-        return state_db.save_memory(key=key, value=value)
+        res = state_db.save_memory(key=key, value=value)
+        # Asynchronously/safely persist dense vector in memory_vectors table
+        try:
+            from core.hybrid_search import hybrid_searcher
+            hybrid_searcher.embed_and_store(key, f"{key}: {value}")
+        except Exception as ve:
+            logger.debug(f"Vector embedding update error: {ve}")
+        return res
     except Exception as e:
         logger.error(f"Save memory error: {e}")
         return {"status": "error", "message": str(e)}
@@ -69,6 +76,29 @@ def recall_fact(query: str) -> dict:
     except Exception as e:
         logger.error(f"Recall memory error: {e}")
         return {"status": "error", "message": str(e)}
+
+
+def hybrid_recall_fact(query: str, limit: int = 5) -> dict:
+    """
+    Search permanent memory using OpenJarvis-adapted Hybrid Search
+    (combining FTS5 BM25 keyword matching with dense semantic cosine similarity via RRF).
+    
+    Args:
+        query: Search term or semantic description to look up.
+        limit: Maximum number of ranked results to return (default 5).
+    """
+    try:
+        from core.hybrid_search import hybrid_searcher
+        results = hybrid_searcher.search(query=query, limit=limit)
+        return {
+            "status": "success",
+            "query": query,
+            "count": len(results),
+            "results": results
+        }
+    except Exception as e:
+        logger.error(f"Hybrid recall error: {e}")
+        return recall_fact(query)
 
 
 def list_memories() -> dict:
@@ -143,6 +173,24 @@ TOOL_DECLARATIONS = [
         },
     },
     {
+        "name": "hybrid_recall_fact",
+        "description": "Advanced hybrid search (BM25 + Semantic Vector RRF) over permanent long-term memory.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query or natural language description to find in memory",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of results to return (default 5)",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
         "name": "list_memories",
         "description": "List all stored facts, preferences, and notes in permanent long-term memory.",
         "parameters": {"type": "object", "properties": {}},
@@ -166,6 +214,7 @@ TOOL_DECLARATIONS = [
 TOOL_FUNCTIONS = {
     "remember_fact": remember_fact,
     "recall_fact": recall_fact,
+    "hybrid_recall_fact": hybrid_recall_fact,
     "list_memories": list_memories,
     "forget_fact": forget_fact,
 }

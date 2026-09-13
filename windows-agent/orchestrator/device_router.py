@@ -1,6 +1,6 @@
 """
 MAX AI — Authoritative Device Router (Windows MASTER)
-Routes remote tool actions and goal steps from Gemini Live / TaskEngine
+Routes remote tool actions and goal steps from Realtime Voice / TaskEngine
 to authenticated Android Worker devices. Supports single-target, multi-target,
 and broadcast execution with capability validation, asyncio.Future correlation,
 timeout enforcement, and graceful disconnect recovery.

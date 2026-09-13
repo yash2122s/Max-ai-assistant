@@ -30,7 +30,7 @@ class TaskTier(int, Enum):
 class ClassificationResult:
     tier: int
     task_type: str
-    target: str  # "windows_agent", "android_agent", "hermes", "antigravity", "hybrid"
+    target: str  # "windows_agent", "android_agent", "max_agent", "antigravity", "hybrid"
     confidence: float
     reason: str
     requires_confirmation: bool = False
@@ -304,7 +304,7 @@ class TaskClassifier:
                 ]
             )
 
-        # 7. Check TIER 3 (Internal Autonomous Reasoning -> Hermes Runtime Worker)
+        # 7. Check TIER 3 (Internal Autonomous Reasoning -> MAX Agent Runtime Worker)
         reasoning_patterns = [
             r"\b(plan|analyze|reason|summarize|evaluate|compare|think|breakdown|strategy)\b",
             r"\b(multi-step|workflow|autonomous|schedule|cron)\b"
@@ -313,7 +313,7 @@ class TaskClassifier:
             return ClassificationResult(
                 tier=TaskTier.TIER_3_REASONING.value,
                 task_type="reasoning",
-                target="hermes",
+                target="max_agent",
                 confidence=0.88,
                 reason="Intent requires multi-turn reasoning, planning, or autonomous skill evaluation.",
                 requires_confirmation=is_destructive,

@@ -1,7 +1,7 @@
 """
 MAX AI — Unified Context Builder
 Builds compact, sanitized, budget-constrained context blocks
-enclosed in defensive <PASSIVE_CONTEXT> boundaries for Gemini Live and Planner.
+enclosed in defensive <PASSIVE_CONTEXT> boundaries for Realtime Voice and MAX Planner.
 """
 
 import logging
@@ -58,7 +58,7 @@ def build_context_block(
 ) -> str:
     """
     Builds a unified, sanitized, budget-constrained context block
-    for injection into Gemini Live system instructions or Gemini Planner.
+    for injection into Realtime Voice system instructions or MAX Planner.
     
     Returns:
         Formatted context block string enclosed in <PASSIVE_CONTEXT>...</PASSIVE_CONTEXT>

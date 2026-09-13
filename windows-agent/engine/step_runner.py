@@ -76,8 +76,10 @@ class StepRunner:
 
             # Execute tool through canonical UnifiedToolRegistry
             try:
-                # Call execute on UnifiedToolRegistry
-                exec_result = unified_tool_registry.execute(step.action, step.arguments)
+                if hasattr(unified_tool_registry, "execute_async"):
+                    exec_result = await unified_tool_registry.execute_async(step.action, step.arguments)
+                else:
+                    exec_result = unified_tool_registry.execute(step.action, step.arguments)
             except Exception as e:
                 logger.error(f"Error executing action '{step.action}': {e}", exc_info=True)
                 exec_result = {"status": "error", "message": str(e)}

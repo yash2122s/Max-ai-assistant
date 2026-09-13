@@ -16,11 +16,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Phase23Validator")
 
-from core.hermes_controller import (
-    HermesController,
-    HermesRequest,
-    HermesResult,
-    hermes_controller
+from core.max_orchestrator import (
+    MaxOrchestrator,
+    MaxAgentRequest,
+    MaxAgentResult,
+    max_orchestrator
 )
 from core.unified_tool_registry import unified_tool_registry
 from core.state_database import state_db
@@ -32,7 +32,7 @@ from core.learning_loop import TrajectoryEvaluator, LearnPromptBuilder
 
 async def run_all_tests():
     print("=" * 80)
-    print("      PHASE 23 — REAL HERMES AUTONOMOUS EXECUTION VALIDATION")
+    print("      PHASE 23 — REAL MAX AGENT AUTONOMOUS EXECUTION VALIDATION")
     print("=" * 80)
 
     results = {}
@@ -51,13 +51,13 @@ async def run_all_tests():
     # TEST 1: Simple Windows Action
     # ─────────────────────────────────────────────────────────────────────────────
     print("\n[TEST 1] Simple Windows Action: 'Open WhatsApp on PC'")
-    req1 = HermesRequest(
+    req1 = MaxAgentRequest(
         user_text="Open WhatsApp on PC",
         tool_name="open_application",
         arguments={"app_name": "notepad"},  # using notepad as safe native test app
         source="voice"
     )
-    res1 = await hermes_controller.handle_request(req1)
+    res1 = await max_orchestrator.handle_request(req1)
     print(f"  Status: {res1.status}")
     print(f"  Verification: {res1.verification_status}")
     print(f"  Tools Used: {res1.tools_used}")
@@ -70,13 +70,13 @@ async def run_all_tests():
     # TEST 2: Windows Multi-Step WhatsApp Automation
     # ─────────────────────────────────────────────────────────────────────────────
     print("\n[TEST 2] Windows Multi-Step WhatsApp: 'Open WhatsApp and send Hi to Yashwanth'")
-    req2 = HermesRequest(
+    req2 = MaxAgentRequest(
         user_text="Open WhatsApp and send Hi to Yashwanth",
         tool_name="send_whatsapp_message",
         arguments={"contact_name": "Yashwanth", "message": "Hi"},
         source="voice"
     )
-    res2 = await hermes_controller.handle_request(req2)
+    res2 = await max_orchestrator.handle_request(req2)
     print(f"  Status: {res2.status}")
     print(f"  Verification: {res2.verification_status}")
     print(f"  Memories Used: {[m.get('key') for m in res2.memories_used]}")
@@ -89,13 +89,13 @@ async def run_all_tests():
     # TEST 3: Windows Computer Use (Observation & UI State)
     # ─────────────────────────────────────────────────────────────────────────────
     print("\n[TEST 3] Windows Computer Use: Observe & Action")
-    req3 = HermesRequest(
+    req3 = MaxAgentRequest(
         user_text="Observe desktop state and verify active window",
         tool_name="observe_desktop_state",
         arguments={"include_visual": False},
         source="voice"
     )
-    res3 = await hermes_controller.handle_request(req3)
+    res3 = await max_orchestrator.handle_request(req3)
     print(f"  Status: {res3.status}")
     print(f"  Active Window Title: {res3.response.get('active_window', {}).get('title', 'Unknown')}")
     assert res3.status == "success"
@@ -105,7 +105,7 @@ async def run_all_tests():
     # TEST 4: Android Control
     # ─────────────────────────────────────────────────────────────────────────────
     print("\n[TEST 4] Android Control: 'Phone 1 flashlight on' & 'Phone 1 brightness 30'")
-    req4_a = HermesRequest(
+    req4_a = MaxAgentRequest(
         user_text="Phone 1 flashlight on",
         tool_name="execute_device_action",
         arguments={"target": "Phone 1", "action": "FLASHLIGHT_ON"},
@@ -122,13 +122,13 @@ async def run_all_tests():
     # TEST 5: Android WhatsApp Intent Composition
     # ─────────────────────────────────────────────────────────────────────────────
     print("\n[TEST 5] Android WhatsApp Intent Composition")
-    req5 = HermesRequest(
+    req5 = MaxAgentRequest(
         user_text="Phone 1 lo WhatsApp open chesi Yashwanth ki Hi pettu",
         tool_name="execute_device_action",
         arguments={"target": "Redmi K20 Pro", "action": "SEND_WHATSAPP", "arguments": {"contact": "Yashwanth", "message": "Hi"}},
         source="voice"
     )
-    res5 = await hermes_controller.handle_request(req5)
+    res5 = await max_orchestrator.handle_request(req5)
     print(f"  Status: {res5.status}")
     print(f"  Action: {req5.arguments.get('action')}")
     print(f"  Target: {req5.arguments.get('target')}")
@@ -147,12 +147,12 @@ async def run_all_tests():
         return {"status": "success", "message": "Recovered successfully on attempt 3"}
     mock_reg.execute_async = mock_execute
 
-    req6 = HermesRequest(
+    req6 = MaxAgentRequest(
         user_text="Open application with retry",
         tool_name="open_application",
         arguments={"app_name": "chrome"}
     )
-    res6 = await hermes_controller.handle_request(req6, tool_registry=mock_reg)
+    res6 = await max_orchestrator.handle_request(req6, tool_registry=mock_reg)
     print(f"  Final Status: {res6.status}")
     print(f"  Total Recovery Attempts: {res6.recovery_attempts}")
     assert res6.status == "success"
@@ -217,10 +217,10 @@ async def run_all_tests():
     # TEST 10: Direct Bypass Detection
     # ─────────────────────────────────────────────────────────────────────────────
     print("\n[TEST 10] Direct Bypass Prevention")
-    assert hermes_controller.is_fast_path("send_whatsapp_message", {}) is False
-    assert hermes_controller.is_fast_path("execute_device_action", {}) is False
-    assert hermes_controller.is_fast_path("open_application", {}) is False
-    print("  Confirmed: Mutative and automation actions are classified as HERMES_REQUIRED.")
+    assert max_orchestrator.is_fast_path("send_whatsapp_message", {}) is False
+    assert max_orchestrator.is_fast_path("execute_device_action", {}) is False
+    assert max_orchestrator.is_fast_path("open_application", {}) is False
+    print("  Confirmed: Mutative and automation actions are classified as MAX_AGENT_REQUIRED.")
     results["test_10_bypass_prevention"] = "PASS"
 
     # ─────────────────────────────────────────────────────────────────────────────
@@ -232,12 +232,12 @@ async def run_all_tests():
         return {"status": "error", "message": "Physical device rejected command"}
     fail_reg.execute_async = fail_exec
 
-    req11 = HermesRequest(
+    req11 = MaxAgentRequest(
         user_text="Turn on flashlight",
         tool_name="execute_device_action",
         arguments={"target": "Phone 1", "action": "FLASHLIGHT_ON"}
     )
-    res11 = await hermes_controller.handle_request(req11, tool_registry=fail_reg)
+    res11 = await max_orchestrator.handle_request(req11, tool_registry=fail_reg)
     print(f"  Reported Status: {res11.status}")
     print(f"  User Message: '{res11.user_message}'")
     assert res11.status == "error"

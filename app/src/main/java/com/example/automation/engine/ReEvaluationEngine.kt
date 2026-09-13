@@ -33,7 +33,8 @@ object ReEvaluationEngine {
         remainingSteps: List<ActionStep>,
         executionOutputs: Map<String, Map<String, Any?>> = emptyMap(),
         reEvalCount: Int = 0,
-        planningProvider: com.example.network.provider.LLMPlanningProvider? = null
+        planningProvider: com.example.network.provider.LLMPlanningProvider? = null,
+        context: android.content.Context? = null
     ): ReEvalDecision {
         Log.i(TAG, "Evaluating failure for step '${failedStep.stepId}' (${failedStep.actionType}) on goal: '$goal' (reEvalCount: $reEvalCount)")
 
@@ -74,7 +75,8 @@ object ReEvaluationEngine {
                 remainingSteps = remainingSteps,
                 executionOutputs = executionOutputs,
                 reEvalCount = reEvalCount,
-                provider = planningProvider
+                provider = planningProvider,
+                context = context
             )
             if (llmDecision != null) {
                 return llmDecision
@@ -153,47 +155,39 @@ object ReEvaluationEngine {
         remainingSteps: List<ActionStep>,
         executionOutputs: Map<String, Map<String, Any?>>,
         reEvalCount: Int,
-        provider: com.example.network.provider.LLMPlanningProvider
+        provider: com.example.network.provider.LLMPlanningProvider,
+        context: android.content.Context? = null
     ): ReEvalDecision? {
         try {
-            val prompt = """
-                You are the MAX Agent Dynamic Re-Evaluation Engine.
-                An execution step in a multi-step plan has failed.
-                
-                GOAL: $goal
-                FAILED STEP: ${failedStep.stepId} (${failedStep.actionType}, target: ${failedStep.targetText ?: failedStep.resourceId})
-                FAILURE CODE: ${toolResult.errorCode}
-                FAILURE MESSAGE: ${toolResult.message}
-                CURRENT APP: ${worldState.currentApp} (Activity: ${worldState.currentActivity})
-                COMPLETED STEPS: ${completedSteps.map { it.stepId }}
-                REMAINING STEPS: ${remainingSteps.map { "${it.stepId}:${it.actionType}" }}
-                RE-EVALUATION ATTEMPT: ${reEvalCount + 1}/$MAX_REEVALUATIONS
-                
-                Choose EXACTLY ONE decision:
-                1. "CONTINUE": Discard failed step and continue remaining independent steps.
-                2. "MODIFY": Provide a revised list of JSON steps to recover and achieve the goal.
-                3. "ABANDON": Abort the plan safely if the goal cannot be achieved.
-                
-                Respond in strictly valid JSON:
-                {
-                  "decision": "CONTINUE" | "MODIFY" | "ABANDON",
-                  "reason": "Brief explanation",
-                  "modifiedSteps": [ ... ] (only if decision is MODIFY)
+            val liveScreenContext = if (context != null) {
+                try {
+                    com.example.voice.vision.ScreenContextProvider.captureScreenContext(context, focus = "general")
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed capturing live screen context for re-evaluation: ${e.message}")
+                    null
                 }
-            """.trimIndent()
+            } else null
+
+            val screenPayload = liveScreenContext ?: com.example.voice.vision.ScreenContextPayload(
+                packageName = worldState.currentApp.ifBlank { null },
+                prunedNodes = emptyList(),
+                visibleText = "",
+                clickableElements = emptyList(),
+                screenshotJpeg = null,
+                isScreenshotSent = false,
+                hasAccessibility = false,
+                focusMode = "general"
+            )
+
+            val prompt = "Recovery re-plan for original goal: '$goal'. " +
+                "Previous step '${failedStep.stepId}' (${failedStep.actionType}, target: ${failedStep.targetText ?: failedStep.resourceId}) " +
+                "failed with error: '${toolResult.message ?: toolResult.errorCode}'. " +
+                "Current foreground app: '${screenPayload.packageName ?: worldState.currentApp}'. " +
+                "Provide the remaining sequence of ActionSteps to complete the goal."
 
             val planningRequest = com.example.network.provider.PlanningRequest(
                 goal = prompt,
-                screenContext = com.example.voice.vision.ScreenContextPayload(
-                    packageName = worldState.currentApp.ifBlank { null },
-                    prunedNodes = emptyList(),
-                    visibleText = "",
-                    clickableElements = emptyList(),
-                    screenshotJpeg = null,
-                    isScreenshotSent = false,
-                    hasAccessibility = false,
-                    focusMode = "general"
-                )
+                screenContext = screenPayload
             )
 
             val planningResult = provider.generatePlan(planningRequest)
@@ -217,7 +211,7 @@ object ReEvaluationEngine {
 
             return ReEvalDecision.MODIFY(
                 updatedSteps = modifiedSteps,
-                reason = "LLM proposed valid modified recovery sequence."
+                reason = "LLM proposed valid modified recovery sequence grounded in live screen context."
             )
         } catch (e: Exception) {
             Log.w(TAG, "Exception during LLM re-evaluation: ${e.message}")

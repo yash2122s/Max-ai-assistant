@@ -8,12 +8,12 @@ import subprocess
 import logging
 from typing import Dict, Any, List, Optional
 
-logger = logging.getLogger("MAXWindowsAgent.GitTools")
+logger = logging.getLogger("MAX.GitTools")
 
 
 class GitTools:
     """
-    Git version control capabilities for Hermes code manipulation.
+    Git version control capabilities for MAX code manipulation.
     """
 
     def _run_git(self, repo_path: str, args: List[str]) -> Dict[str, Any]:

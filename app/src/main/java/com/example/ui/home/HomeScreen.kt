@@ -799,8 +799,13 @@ private fun InlineAgentActivityCard(
                 )
 
                 Text(
-                    text = if (activityState.stage == AgentStage.COMPLETED) "Completed"
-                    else "Working on your request...",
+                    text = when (activityState.stage) {
+                        AgentStage.COMPLETED -> "Completed"
+                        AgentStage.FAILED -> "Failed"
+                        AgentStage.CANCELLED -> "Cancelled"
+                        AgentStage.PLANNING -> "Planning..."
+                        else -> "Working on your request..."
+                    },
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaxTextPrimary,
@@ -854,7 +859,7 @@ private fun InlineAgentActivityCard(
                         }
                     }
 
-                    if (activityState.stage !in listOf(AgentStage.COMPLETED, AgentStage.FAILED, AgentStage.IDLE)) {
+                    if (activityState.stage !in listOf(AgentStage.COMPLETED, AgentStage.FAILED, AgentStage.CANCELLED, AgentStage.IDLE)) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = "Cancel",

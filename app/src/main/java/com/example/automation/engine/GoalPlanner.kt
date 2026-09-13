@@ -211,426 +211,64 @@ object GoalPlanner {
             return AgentExecutionResult(
                 success = false,
                 goalPrompt = goalPrompt,
-                executedStepsCount = completedSteps.size,
+                executedStepsCount = 0,
                 totalStepsCount = 0,
                 errorMessage = "No active goal or action steps in queue."
             )
         }
 
-        Log.d(TAG, "Starting executePlan() for goal: '$goalPrompt' with $initialTotalSteps total steps")
-        var executedStepsCount = completedSteps.size
-        val stepResults = mutableListOf<ToolResult>()
+        Log.d(TAG, "GoalPlanner delegating plan execution to LongTaskOrchestrator for goal: '$goalPrompt'")
+        val orchestrator = com.example.automation.engine.execution.LongTaskOrchestrator(
+            context = context,
+            capabilityRouter = com.example.automation.engine.execution.CapabilityRouter(context),
+            verificationEngine = com.example.automation.engine.execution.VerificationEngine(context),
+            recoveryEngine = com.example.automation.engine.execution.TaskRecoveryEngine(),
+            taskPlanner = com.example.automation.engine.planning.TaskPlanner()
+        )
+
         activeCancellationToken = cancellationToken
-
         return try {
-            val result = withTimeoutOrNull(DEFAULT_PLAN_TIMEOUT_MS) {
-                while (isGoalActive()) {
-                // 1. Check cancellation
-                if (cancellationToken.isCancelled || !currentCoroutineContext().isActive) {
-                    Log.w(TAG, "Plan execution cancelled by token or coroutine cancellation.")
-                    val cancelId = java.util.UUID.randomUUID()
-                    com.example.automation.event.AutomationEventBus.publish(
-                        com.example.automation.event.AutomationEvent.ExecutionCancelled(cancelId, "Plan execution was cancelled.")
-                    )
-                    clearGoal()
-                    return@withTimeoutOrNull AgentExecutionResult(
-                        success = false,
-                        goalPrompt = goalPrompt,
-                        executedStepsCount = executedStepsCount,
-                        totalStepsCount = initialTotalSteps,
-                        errorMessage = "Plan execution was cancelled.",
-                        stepResults = stepResults,
-                        isCancelled = true
-                    )
-                }
-
-                // 2. Enforce safety step limit
-                if (executedStepsCount >= MAX_TOTAL_PLAN_STEPS) {
-                    Log.e(TAG, "Safety limit reached: Exceeded maximum allowed steps ($MAX_TOTAL_PLAN_STEPS). Stopping plan.")
-                    clearGoal()
-                    return@withTimeoutOrNull AgentExecutionResult(
-                        success = false,
-                        goalPrompt = goalPrompt,
-                        executedStepsCount = executedStepsCount,
-                        totalStepsCount = initialTotalSteps,
-                        errorMessage = "Plan exceeded safety limit of $MAX_TOTAL_PLAN_STEPS steps.",
-                        stepResults = stepResults
-                    )
-                }
-
-                // 3. Dequeue next ready step
-                val step = getNextStep()
-                if (step == null) {
-                    if (actionQueue.isEmpty()) {
-                        break // All steps completed
-                    }
-                    // Remaining steps are blocked in DAG
-                    val blockedRemaining = actionQueue.getActiveSteps()
-                    Log.w(TAG, "${blockedRemaining.size} steps remaining in queue but blocked by dependencies. Evaluating plan recovery.")
-                    
-                    val dummyFailed = blockedRemaining.first()
-                    val dummyResult = ToolResult.failure(
-                        toolName = dummyFailed.actionType,
-                        errorCode = "DEPENDENCY_BLOCKED",
-                        message = "Step '${dummyFailed.stepId}' is blocked because its dependencies failed."
-                    )
-                    val decision = ReEvaluationEngine.evaluate(
-                        goal = goalPrompt,
-                        failedStep = dummyFailed,
-                        toolResult = dummyResult,
-                        worldState = WorldStateManager.getCurrentState(),
-                        completedSteps = completedSteps.toList(),
-                        remainingSteps = blockedRemaining,
-                        executionOutputs = executionOutputs,
-                        reEvalCount = activeReEvalCount,
-                        planningProvider = planningProvider
-                    )
-                    when (decision) {
-                        is ReEvalDecision.CONTINUE -> break
-                        is ReEvalDecision.MODIFY -> {
-                            activeReEvalCount++
-                            actionQueue.replaceQueue(decision.updatedSteps)
-                            WorldStateManager.setCurrentGoal(goalPrompt, decision.updatedSteps)
-                            continue
-                        }
-                        is ReEvalDecision.ABANDON -> {
-                            clearGoal()
-                            return@withTimeoutOrNull AgentExecutionResult(
-                                success = false,
-                                goalPrompt = goalPrompt,
-                                executedStepsCount = executedStepsCount,
-                                totalStepsCount = initialTotalSteps,
-                                errorMessage = "Plan blocked: ${decision.reason}",
-                                stepResults = stepResults
-                            )
-                        }
-                    }
-                }
-
-                // 4. Execute step with pre-authorization, action-specific verification and recovery
-                val outcome = executeStepWithRecovery(
-                    context = context,
-                    step = step,
-                    goalPrompt = goalPrompt,
-                    initialTotalSteps = initialTotalSteps,
-                    executedStepsCount = executedStepsCount,
-                    cancellationToken = cancellationToken,
-                    stepResults = stepResults
-                )
-
-                when (outcome) {
-                    is StepExecutionOutcome.NeedsInput -> {
-                        val toolResult = outcome.toolResult
-                        val question = toolResult.needsInputQuestion ?: toolResult.message ?: "Input required to proceed"
-                        Log.i(TAG, "Step ${step.stepId} (${step.actionType}) needs user input: '$question'. Pausing plan.")
-
-                        activeWaitingState = WaitingForInputState(
-                            planId = goalPrompt,
-                            step = step,
-                            question = question,
-                            options = toolResult.needsInputOptions,
-                            targetParam = toolResult.targetParam,
-                            savedOutputs = executionOutputs.toMap(),
-                            completedSteps = completedSteps.toList(),
-                            reEvalCount = activeReEvalCount
-                        )
-
-                        val execId = java.util.UUID.randomUUID()
-                        com.example.automation.event.AutomationEventBus.publish(
-                            com.example.automation.event.AutomationEvent.NeedsUserInput(
-                                executionId = execId,
-                                stepId = step.stepId,
-                                question = question,
-                                options = toolResult.needsInputOptions,
-                                targetParam = toolResult.targetParam
-                            )
-                        )
-                        com.example.voice.assistant.AssistantEventBus.emit(
-                            com.example.voice.assistant.AssistantEvent.NeedsUserInput(
-                                stepId = step.stepId,
-                                question = question,
-                                options = toolResult.needsInputOptions,
-                                targetParam = toolResult.targetParam
-                            )
-                        )
-
-                        return@withTimeoutOrNull AgentExecutionResult(
-                            success = false,
-                            goalPrompt = goalPrompt,
-                            executedStepsCount = executedStepsCount,
-                            totalStepsCount = initialTotalSteps,
-                            errorMessage = question,
-                            stepResults = stepResults,
-                            isWaitingForInput = true
-                        )
-                    }
-
-                    is StepExecutionOutcome.Failed -> {
-                        failedStepIds.add(step.stepId)
-                        val toolResult = outcome.toolResult
-                        Log.w(TAG, "Step ${step.stepId} (${step.actionType}) failed: ${outcome.failureReason}. Evaluating recovery via ReEvaluationEngine.")
-
-                        val execId = java.util.UUID.randomUUID()
-                        com.example.automation.event.AutomationEventBus.publish(
-                            com.example.automation.event.AutomationEvent.StepProgress(
-                                executionId = execId,
-                                stepIndex = executedStepsCount + 1,
-                                totalSteps = initialTotalSteps,
-                                actionType = step.actionType,
-                                targetText = step.targetText ?: step.resourceId ?: step.contentDescription ?: step.params.values.firstOrNull(),
-                                status = "FAILED"
-                            )
-                        )
-
-                        val decision = ReEvaluationEngine.evaluate(
-                            goal = goalPrompt,
-                            failedStep = step,
-                            toolResult = toolResult,
-                            worldState = WorldStateManager.getCurrentState(),
-                            completedSteps = completedSteps.toList(),
-                            remainingSteps = actionQueue.getActiveSteps(),
-                            executionOutputs = executionOutputs,
-                            reEvalCount = activeReEvalCount,
-                            planningProvider = planningProvider
-                        )
-
-                        when (decision) {
-                            is ReEvalDecision.CONTINUE -> {
-                                Log.i(TAG, "ReEvaluation decision: CONTINUE with remaining independent steps.")
-                                continue
-                            }
-                            is ReEvalDecision.MODIFY -> {
-                                Log.i(TAG, "ReEvaluation decision: MODIFY (${decision.reason}) - replacing remaining steps with ${decision.updatedSteps.size} recovery steps.")
-                                activeReEvalCount++
-                                actionQueue.replaceQueue(decision.updatedSteps)
-                                WorldStateManager.setCurrentGoal(goalPrompt, decision.updatedSteps)
-                                continue
-                            }
-                            is ReEvalDecision.ABANDON -> {
-                                Log.e(TAG, "ReEvaluation decision: ABANDON (${decision.reason}). Halting plan.")
-                                clearGoal()
-                                return@withTimeoutOrNull AgentExecutionResult(
-                                    success = false,
-                                    goalPrompt = goalPrompt,
-                                    executedStepsCount = executedStepsCount,
-                                    totalStepsCount = initialTotalSteps,
-                                    failedStepId = step.stepId,
-                                    failedActionType = step.actionType,
-                                    errorMessage = decision.reason,
-                                    stepResults = stepResults
-                                )
-                            }
-                        }
-                    }
-
-                    is StepExecutionOutcome.Success -> {
-                        // 8. Step Succeeded: Record outputs and progress
-                        executedStepsCount++
-                        completedStepIds.add(step.stepId)
-                        completedSteps.add(step)
-
-                        val toolResult = outcome.toolResult
-                        if (toolResult.outputData.isNotEmpty()) {
-                            val map = executionOutputs.getOrPut(step.stepId) { mutableMapOf() }
-                            map.putAll(toolResult.outputData)
-                            if (step.outputKey != null) {
-                                executionOutputs[step.outputKey] = map
-                            }
-                        }
-
-                        val execId = java.util.UUID.randomUUID()
-                        com.example.automation.event.AutomationEventBus.publish(
-                            com.example.automation.event.AutomationEvent.StepProgress(
-                                executionId = execId,
-                                stepIndex = executedStepsCount,
-                                totalSteps = initialTotalSteps,
-                                actionType = step.actionType,
-                                targetText = step.targetText ?: step.resourceId ?: step.contentDescription ?: step.params.values.firstOrNull(),
-                                status = "COMPLETED"
-                            )
-                        )
-
-                        WorldStateManager.recordActionExecuted(
-                            actionName = step.actionType,
-                            targetDescription = step.targetText ?: step.resourceId ?: step.contentDescription ?: step.actionType,
-                            success = true
-                        )
-
-                        // 9. Capture fresh ScreenContext observation for next step ONLY after verified step
-                        if (isGoalActive() && !actionQueue.isEmpty()) {
-                            try {
-                                val freshContext = ScreenContextProvider.captureScreenContext(context, focus = "general")
-                                if (!freshContext.packageName.isNullOrBlank()) {
-                                    WorldStateManager.setForegroundApp(freshContext.packageName)
-                                }
-                                com.example.automation.event.AutomationEventBus.publish(
-                                    com.example.automation.event.AutomationEvent.ObservationCompleted(
-                                        executionId = execId,
-                                        packageName = freshContext.packageName,
-                                        nodeCount = freshContext.prunedNodes.size,
-                                        visibleSummary = freshContext.visibleText.take(100)
-                                    )
-                                )
-                            } catch (e: Exception) {
-                                Log.w(TAG, "Error capturing fresh screen context post-step: ${e.message}")
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 10. All steps completed successfully
-            Log.d(TAG, "Goal '$goalPrompt' completed successfully ($executedStepsCount steps executed).")
-            clearGoal()
-            AgentExecutionResult(
-                success = true,
+            val activeSteps = actionQueue.getActiveSteps()
+            val result = orchestrator.executePlan(
+                context = context,
                 goalPrompt = goalPrompt,
-                executedStepsCount = executedStepsCount,
-                totalStepsCount = initialTotalSteps,
-                stepResults = stepResults
+                steps = activeSteps,
+                cancellationToken = cancellationToken,
+                planningProvider = planningProvider
             )
-        }
 
-            result ?: run {
-                Log.e(TAG, "Goal '$goalPrompt' timed out after ${DEFAULT_PLAN_TIMEOUT_MS}ms.")
+            if (result.success || result.isCancelled || result.failedStepId != null) {
                 clearGoal()
-                AgentExecutionResult(
-                    success = false,
-                    goalPrompt = goalPrompt,
-                    executedStepsCount = executedStepsCount,
-                    totalStepsCount = initialTotalSteps,
-                    errorMessage = "Plan execution timed out after ${DEFAULT_PLAN_TIMEOUT_MS / 1000}s.",
-                    stepResults = stepResults
-                )
             }
+            result
         } finally {
             activeCancellationToken = null
         }
     }
 
-    private sealed interface StepExecutionOutcome {
-        data class Success(val toolResult: ToolResult) : StepExecutionOutcome
-        data class NeedsInput(val toolResult: ToolResult) : StepExecutionOutcome
-        data class Failed(val toolResult: ToolResult, val failureReason: String) : StepExecutionOutcome
-    }
-
-    private suspend fun executeStepWithRecovery(
-        context: Context,
-        step: ActionStep,
-        goalPrompt: String,
-        initialTotalSteps: Int,
-        executedStepsCount: Int,
-        cancellationToken: CancellationToken,
-        stepResults: MutableList<ToolResult>
-    ): StepExecutionOutcome {
-        // 1. Authorize step against original intent before executing
-        val target = step.targetText ?: step.resourceId ?: step.contentDescription ?: step.params["target"] ?: step.params["text"]
-        val auth = ActionAuthorizer.authorizeAction(goalPrompt, step.actionType, target)
-        if (!auth.authorized) {
-            val unauthResult = ToolResult.failure(
-                toolName = step.actionType,
-                errorCode = "UNAUTHORIZED_STEP",
-                message = "Step '${step.stepId}' is unauthorized: ${auth.reason}"
-            )
-            stepResults.add(unauthResult)
-            return StepExecutionOutcome.Failed(unauthResult, "Unauthorized action drift on step ${step.stepId}: ${auth.reason}")
-        }
-
-        // 2. Build ExecutionRequest
-        val args = JsonObject().apply {
-            step.targetText?.let {
-                addProperty("text", it)
-                addProperty("target", it)
-                addProperty("app_name", it)
-                addProperty("app", it)
-                addProperty("appName", it)
-                addProperty("query", it)
-                addProperty("system_action_str", it)
-                addProperty("direction", it)
-                addProperty("mode", it)
-                if (it.equals("true", ignoreCase = true) || it.equals("on", ignoreCase = true)) {
-                    addProperty("enabled", true)
-                    addProperty("dndEnabled", true)
-                    addProperty("state", true)
-                } else if (it.equals("false", ignoreCase = true) || it.equals("off", ignoreCase = true)) {
-                    addProperty("enabled", false)
-                    addProperty("dndEnabled", false)
-                    addProperty("state", false)
-                }
-                it.toIntOrNull()?.let { num ->
-                    addProperty("level", num)
-                    addProperty("percent", num)
-                }
-            }
-            step.resourceId?.let {
-                addProperty("resourceId", it)
-                addProperty("id", it)
-            }
-            step.contentDescription?.let {
-                addProperty("description", it)
-                addProperty("desc", it)
-                addProperty("message", it)
-            }
-            step.fallbackX?.let { addProperty("x", it) }
-            step.fallbackY?.let { addProperty("y", it) }
-            for ((k, v) in step.params) {
-                addProperty(k, v)
-            }
-        }
-
-        val actionName = when (step.actionType.uppercase().trim()) {
-            "OPEN_SETTINGS", "SETTINGS" -> {
-                args.addProperty("app_name", "Settings")
-                "OPEN_APP"
-            }
-            "LAUNCH_APP" -> "OPEN_APP"
-            else -> step.actionType
-        }
-
-        val request = ExecutionRequest(
-            action = actionName,
-            arguments = args,
-            source = ExecutionSource.PLANNER,
-            cancellationToken = cancellationToken
-        )
-
-        Log.d(TAG, "Executing plan step ${executedStepsCount + 1}/$initialTotalSteps: ${step.actionType} (ID: ${step.stepId})")
-        com.example.automation.event.AutomationEventBus.publish(
-            com.example.automation.event.AutomationEvent.StepProgress(
-                executionId = request.executionId,
-                stepIndex = executedStepsCount + 1,
-                totalSteps = initialTotalSteps,
-                actionType = step.actionType,
-                targetText = step.targetText ?: step.resourceId ?: step.contentDescription ?: step.params.values.firstOrNull(),
-                status = "RUNNING"
-            )
-        )
-
-        // 3. Execute via ExecutionEngine (which triggers action-specific verification contracts)
-        val toolResult = ExecutionEngine.execute(context, request, executionOutputs)
-        stepResults.add(toolResult)
-
-        // 4. Handle NEEDS_INPUT
-        if (toolResult.status == com.example.automation.tools.ToolResultStatus.NEEDS_INPUT) {
-            return StepExecutionOutcome.NeedsInput(toolResult)
-        }
-
-        // 5. Handle verification failure
-        if (!toolResult.success) {
-            return StepExecutionOutcome.Failed(toolResult, toolResult.message ?: "Step verification failed")
-        }
-
-        return StepExecutionOutcome.Success(toolResult)
-    }
-
-    val SUPPORTED_ACTIONS = setOf(
-        "OPEN_APP", "OPEN_SETTINGS", "LAUNCH_APP", "SETTINGS", "CLICK_ELEMENT", "CLICK_TEXT", "CLICK_INDEX", "CLICK_UI", "FIND_ELEMENT", "TYPE_TEXT", "SCROLL_SCREEN",
-        "PRESS_ENTER", "IME_ENTER", "ENTER_KEY", "PERFORM_ENTER", "BACK",
+    val BASE_PLANNER_ACTIONS = setOf(
+        "OPEN_APP", "OPEN_SETTINGS", "LAUNCH_APP", "SETTINGS", "CLICK_ELEMENT", "CLICK_TEXT", "CLICK_INDEX", "CLICK_UI", "FIND_ELEMENT", "TYPE_TEXT", "CLEAR_TEXT", "SCROLL_SCREEN",
+        "PRESS_ENTER", "IME_ENTER", "ENTER_KEY", "PERFORM_ENTER", "BACK", "PRESS_BACK",
+        "PRESS_KEY", "KEYBOARD_ACTION", "KEY_PRESS", "TAP", "SWIPE", "WAIT_FOR_UI",
         "SYSTEM_ACTION", "SET_VOLUME", "SET_BRIGHTNESS", "SET_DND", "SET_RINGER_MODE",
         "GET_BATTERY_STATUS", "GET_DEVICE_STATUS", "SEND_WHATSAPP_MESSAGE", "SEND_WHATSAPP", "FLASHLIGHT_ON", "FLASHLIGHT_OFF",
         "CALL_PHONE", "CREATE_CONTACT", "YOUTUBE_SEARCH", "OPEN_WHATSAPP_CHAT", "UNLOCK_DEVICE", "TAKE_SCREENSHOT",
         "SCROLL_DOWN", "SCROLL_UP", "MAX_DIAGNOSTICS"
     )
+
+    /**
+     * Dynamic capability validation: checks against registered tools in ToolRegistry as well
+     * as fundamental planner primitives. Eliminates hardcoded whitelist drift.
+     */
+    fun isActionSupported(action: String): Boolean {
+        val norm = action.uppercase().trim()
+        if (BASE_PLANNER_ACTIONS.contains(norm)) return true
+        if (com.example.automation.tools.ToolRegistry.getToolForAction(norm) != null) return true
+        return false
+    }
+
+    val SUPPORTED_ACTIONS: Set<String>
+        get() = BASE_PLANNER_ACTIONS + com.example.automation.tools.ToolRegistry.getAllCapabilities().map { it.uppercase() }
 
     /**
      * Validates a generated list of ActionSteps against schema rules, supported actions,
@@ -651,7 +289,6 @@ object GoalPlanner {
             return "Plan step '${confirmationStep.stepId}' (${confirmationStep.actionType}) requires explicit user confirmation and cannot run as a plan step."
         }
 
-
         // 1. Validate Dependency Graph (Kahn's algorithm cycle check, missing IDs, duplicate IDs)
         val dagValidation = DependencyGraphResolver.validatePlan(steps)
         if (dagValidation is PlanValidationResult.Invalid) {
@@ -660,14 +297,20 @@ object GoalPlanner {
 
         for (step in steps) {
             val normalizedAction = step.actionType.uppercase().trim()
-            if (normalizedAction !in SUPPORTED_ACTIONS) {
+            if (!isActionSupported(normalizedAction)) {
                 return "Unsupported actionType '$normalizedAction' at step '${step.stepId}'."
             }
 
             when (normalizedAction) {
-                "OPEN_APP", "CLICK_ELEMENT", "CLICK_TEXT", "CLICK_INDEX", "CLICK_UI", "FIND_ELEMENT", "TYPE_TEXT" -> {
+                "OPEN_APP", "CLICK_ELEMENT", "CLICK_TEXT", "CLICK_INDEX", "CLICK_UI", "FIND_ELEMENT", "TYPE_TEXT", "TAP" -> {
                     if (step.targetText.isNullOrBlank() && step.resourceId.isNullOrBlank() && step.contentDescription.isNullOrBlank() && step.params.isEmpty()) {
                         return "Action '$normalizedAction' at step '${step.stepId}' requires targetText, resourceId, contentDescription, or params."
+                    }
+                }
+                "PRESS_KEY", "KEYBOARD_ACTION", "KEY_PRESS" -> {
+                    val key = step.targetText ?: step.params["key"] ?: step.params["keyCode"] ?: step.params["key_name"] ?: step.resourceId
+                    if (key.isNullOrBlank()) {
+                        return "Action '$normalizedAction' at step '${step.stepId}' requires a key name or code in targetText, params, or resourceId."
                     }
                 }
                 "SYSTEM_ACTION" -> {
@@ -800,10 +443,10 @@ object GoalPlanner {
                             dependsOn = dependsOn
                         )
                     }
-                    else -> { // "CLICK"
+                    else -> { // "CLICK" or "TAP"
                         ActionStep(
                             stepId = stepId,
-                            actionType = "CLICK_TEXT",
+                            actionType = if (act.action.equals("TAP", ignoreCase = true)) "TAP" else "CLICK_TEXT",
                             targetText = act.target,
                             params = act.params,
                             dependsOn = dependsOn
@@ -814,7 +457,7 @@ object GoalPlanner {
                 prevStepId = stepId
             }
 
-            return steps
+            return com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.normalizePlan(steps, goal)
         }
 
         // 2. Single-Step Normalized Command Fast-Path
@@ -959,6 +602,26 @@ object GoalPlanner {
             return executePlan(context, cancellationToken)
         }
 
+        // 1.5. Skill Memory Recall (Phase 9) - Check if a verified skill exists for this goal
+        val savedSkill = try {
+            com.example.memory.skill.SkillMemoryRepository(context).findSkill(goal)
+        } catch (e: Exception) {
+            Log.w(TAG, "Skill memory lookup error: ${e.message}")
+            null
+        }
+
+        if (savedSkill != null && savedSkill.steps.isNotEmpty()) {
+            Log.i(TAG, "[SKILL_MEMORY_RECALL] Reusing ${savedSkill.steps.size} verified steps for goal: '$goal' (skill: '${savedSkill.task}')")
+            val normalizedSteps = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.normalizePlan(savedSkill.steps, goal)
+            val validationError = validatePlan(normalizedSteps, goal)
+            if (validationError == null) {
+                initializeGoalPlan(goal, normalizedSteps)
+                return executePlan(context, cancellationToken)
+            } else {
+                Log.w(TAG, "Recalled skill failed validation ($validationError). Falling back to LLM planning.")
+            }
+        }
+
         // Emit planning started for LLM path
         com.example.automation.event.AutomationEventBus.publish(
             com.example.automation.event.AutomationEvent.PlanningStarted(executionId, goal)
@@ -1045,7 +708,8 @@ object GoalPlanner {
             )
         }
 
-        val plan = planningResult.plan
+        val rawPlan = planningResult.plan
+        val plan = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.normalizePlan(rawPlan, goal)
         com.example.automation.event.AutomationEventBus.publish(
             com.example.automation.event.AutomationEvent.PlanCreated(executionId, plan)
         )

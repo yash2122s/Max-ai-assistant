@@ -1,7 +1,7 @@
 """
 MAX AI — Unified Tool Registry & Execution Pipeline
 Single canonical registry and execution boundary for all MAX Windows tools.
-Unifies Gemini Live voice function declarations, WebSocket packet handlers,
+Unifies Realtime Voice function declarations, WebSocket packet handlers,
 and HTTP tool endpoints under one security-guarded execution engine.
 """
 
@@ -72,6 +72,71 @@ TOOL_ALIASES = {
     "snap_left": "snap_window",
     "snap_right": "snap_window",
     "split_window": "split_screen",
+    # Phase 1 Reliability Aliases (Undo & Persistent Reminders)
+    "undo": "undo_last_action",
+    "undo_action": "undo_last_action",
+    "rollback": "undo_last_action",
+    "rollback_last_action": "undo_last_action",
+    "undo_history": "list_undo_history",
+    "list_reminders": "list_scheduled_reminders",
+    "get_reminders": "list_scheduled_reminders",
+    "cancel_reminder": "cancel_scheduled_reminder",
+    "delete_reminder": "cancel_scheduled_reminder",
+    "clean_desktop": "organize_desktop",
+    "cleanup_desktop": "organize_desktop",
+    "largest_files": "get_largest_files",
+    "find_largest_files": "get_largest_files",
+    # Phase 2 Universal Multimodal File Processing Aliases
+    "file_processor": "process_file",
+    "universal_file_processor": "process_file",
+    "pdf_extract_text": "extract_pdf_text",
+    "extract_pdf": "extract_pdf_text",
+    "pdf_summarize": "summarize_pdf",
+    "summarize_document": "summarize_pdf",
+    "pdf_pages": "extract_pdf_pages",
+    "slice_pdf": "extract_pdf_pages",
+    "pdf_to_word": "pdf_to_docx",
+    "convert_pdf_to_word": "pdf_to_docx",
+    "convert_pdf": "pdf_to_docx",
+    "docx_read": "read_docx",
+    "docx_reformat": "reformat_docx",
+    "format_docx": "reformat_docx",
+    "docx_extract_text": "extract_docx_text",
+    "csv_read": "read_tabular",
+    "read_csv": "read_tabular",
+    "read_excel": "read_tabular",
+    "analyze_csv": "get_tabular_statistics",
+    "csv_stats": "get_tabular_statistics",
+    "filter_csv": "filter_tabular",
+    "sort_csv": "sort_tabular",
+    "convert_csv": "convert_tabular",
+    "csv_to_excel": "convert_tabular",
+    "excel_to_csv": "convert_tabular",
+    "pptx_text": "extract_pptx_text",
+    "pptx_summary": "summarize_pptx",
+    "ocr": "image_ocr",
+    "ocr_image": "image_ocr",
+    "image_info": "get_image_info",
+    "media_info": "get_media_info",
+    "video_info": "get_media_info",
+    "audio_info": "get_media_info",
+    "transcribe_audio": "transcribe_media",
+    "transcribe_video": "transcribe_media",
+    "extract_audio": "extract_video_audio",
+    "video_to_audio": "extract_video_audio",
+    "video_to_mp3": "extract_video_audio",
+    "extract_frame": "extract_video_frame",
+    "video_screenshot": "extract_video_frame",
+    "video_frame": "extract_video_frame",
+    "shrink_video": "compress_video",
+    "shrink_image": "compress_image",
+    "unzip": "extract_archive",
+    "unpack_archive": "extract_archive",
+    "zip_files": "create_archive",
+    "zip_folder": "create_archive",
+    "undelete": "restore_recycle_bin_item",
+    "undelete_file": "restore_recycle_bin_item",
+    "restore_file": "restore_recycle_bin_item",
 }
 
 
@@ -79,10 +144,10 @@ class UnifiedToolRegistry:
     """
     Canonical tool registry for MAX Windows Agent.
     Manages:
-    1. Function-based tool registry (Gemini Live voice & AI agent)
+    1. Function-based tool registry (Realtime Voice & AI agent)
     2. Class-based BaseTool registry (WebSocket protocol & HTTP API)
     3. Remote Android multi-device control tools
-    4. Hermes Primary Agent tools (Skills, MCP, PTC, Subagents, Cron)
+    4. MAX Agent Primary tools (Skills, MCP, PTC, Subagents, Cron)
     5. Security confirmation gate & Risk classification
     6. Post-execution action verification
     """
@@ -115,7 +180,7 @@ class UnifiedToolRegistry:
 
     def _register_default_modules(self):
         """Registers all built-in tool modules and their declarations."""
-        from tools import system_control, app_control, web_tools, file_manager, productivity
+        from tools import system_control, app_control, web_tools, file_manager, productivity, universal_file_tool
         from core import memory
         modules = [
             system_control,
@@ -123,29 +188,30 @@ class UnifiedToolRegistry:
             web_tools,
             file_manager,
             productivity,
+            universal_file_tool,
             memory,
         ]
         for mod in modules:
             self.register_module(mod)
 
-        # Expose UI Automation tools to Gemini Live voice declarations
+        # Expose UI Automation tools to Realtime Voice declarations
         self._register_uia_tools()
 
-        # Expose Orchestrator goal execution to Gemini Live voice declarations
+        # Expose Orchestrator goal execution to Realtime Voice declarations
         self._register_orchestrator_tools()
 
-        # Expose Remote Android Device control tools to Gemini Live voice declarations
+        # Expose Remote Android Device control tools to Realtime Voice declarations
         self._register_remote_device_tools()
 
-        # Expose Hermes Primary Agent capabilities (Skills, MCP, PTC, Patch, Subagents, Cron)
+        # Expose MAX Primary Agent capabilities (Skills, MCP, PTC, Patch, Subagents, Cron)
         try:
-            from core.hermes_engine import hermes_engine
-            hermes_engine.register_all_hermes_tools(self)
+            from core.max_agent_engine import max_agent_engine
+            max_agent_engine.register_all_max_agent_tools(self)
         except Exception as he:
-            logger.warning(f"Notice: Hermes tools registration: {he}")
+            logger.warning(f"Notice: MAX Agent tools registration: {he}")
 
     def _register_remote_device_tools(self):
-        """Registers remote Android device management and execution tools for Gemini Live voice."""
+        """Registers remote Android device management and execution tools for Realtime Voice."""
         async def execute_device_action(
             target: str,
             action: str,
@@ -434,7 +500,7 @@ class UnifiedToolRegistry:
         self._declarations.extend(orchestrator_declarations)
 
     def _register_uia_tools(self):
-        """Registers UIA semantic element inspection and clicking for Gemini Live voice."""
+        """Registers UIA semantic element inspection and clicking for Realtime Voice."""
         from core.ui_automation import uia_engine
         def click_ui_element(
             target: str,
@@ -556,9 +622,9 @@ class UnifiedToolRegistry:
     def get_voice_declarations(self, max_tools: int = 48) -> List[Dict[str, Any]]:
         """
         Returns a prioritized, de-duplicated subset of tool declarations optimized
-        for the Gemini Live real-time bidirectional voice WebSocket protocol.
+        for the Realtime Voice bidirectional WebSocket protocol.
         Guarantees mandatory device and goal tools are ALWAYS inserted first and
-        stays strictly below Gemini Live's 57-tool protocol ceiling.
+        stays strictly below the 57-tool protocol ceiling.
         """
         MANDATORY_VOICE_TOOLS = [
             "get_connected_devices",

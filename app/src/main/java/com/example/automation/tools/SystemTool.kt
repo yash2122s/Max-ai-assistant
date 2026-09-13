@@ -46,7 +46,14 @@ class SystemTool(private val systemAction: SystemAction) : Tool {
                     "PERFORM_RECENT_APPS" -> "recent"
                     "PERFORM_NOTIFICATIONS" -> "notifications"
                     "PERFORM_QUICK_SETTINGS" -> "quick_settings"
-                    else -> request.action.lowercase()
+                    else -> {
+                        val argAction = jsonPayload.optString("action").ifEmpty {
+                            jsonPayload.optString("target").ifEmpty {
+                                jsonPayload.optString("text")
+                            }
+                        }
+                        if (argAction.isNotEmpty()) argAction.lowercase() else request.action.lowercase()
+                    }
                 }
                 jsonPayload.put("system_action_str", mappedStr)
             }

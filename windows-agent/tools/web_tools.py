@@ -229,13 +229,13 @@ TOOL_DECLARATIONS = [
     },
     {
         "name": "search_web_fast",
-        "description": "Rapidly search the web using parallel provider racing. Returns direct summarized answers without requiring manual browser interaction.",
+        "description": "Search the live web for real-time, current, breaking news, or live external information. Use this ONLY when current/latest web information is required (e.g. today's news, current prices, live scores, recent documentation). Do NOT use this for arithmetic, math calculations, basic reasoning, stable general knowledge, definition of terms, conversation, or facts already available to the model.",
         "parameters": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "The factual search query or question to research",
+                    "description": "The specific live web search query for current or external information",
                 }
             },
             "required": ["query"],

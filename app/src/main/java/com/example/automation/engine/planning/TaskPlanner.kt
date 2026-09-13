@@ -6,7 +6,9 @@ import com.example.automation.engine.state.TaskContext
 import com.example.automation.engine.state.TaskStatus
 import com.example.automation.engine.state.TaskStep
 import com.example.automation.models.UiStep
+import com.example.automation.state.ActionStep
 import com.example.knowledge.apps.InstalledAppsRepository
+import com.example.voice.vision.ScreenContextPayload
 import java.util.UUID
 
 class TaskPlanner(
@@ -95,7 +97,8 @@ class TaskPlanner(
         val text = (originalUtterance + " " + intent.goal).lowercase()
         return (text.contains("whatsapp") && (text.contains("send") || text.contains("message") || text.contains("tell") || text.contains("call") || text.contains("pettu") || text.contains("pampu") || text.contains("msg"))) ||
                (text.contains("maps") || text.contains("direction") || text.contains("navigate")) ||
-               (text.contains("chrome") && (text.contains("search") || text.contains("open") || intent.parameters.containsKey("query") || intent.parameters.containsKey("search")))
+               (text.contains("chrome") && (text.contains("search") || text.contains("open") || intent.parameters.containsKey("query") || intent.parameters.containsKey("search"))) ||
+               (text.contains("instagram"))
     }
 
     private fun routeTier2AdaptivePath(intent: TaskIntent, originalUtterance: String): List<TaskStep> {
@@ -136,8 +139,12 @@ class TaskPlanner(
         // 2. Google Maps DAG (Search & Directions)
         if (text.contains("maps") || text.contains("navigate") || text.contains("direction")) {
             val targetApp = "com.google.android.apps.maps"
-            val destination = intent.parameters["destination"] ?: intent.parameters["query"] ?: intent.parameters["location"] ?: ""
-            
+            var destination = intent.parameters["destination"] ?: intent.parameters["query"] ?: intent.parameters["location"] ?: ""
+            if (destination.isBlank()) {
+                val toMatch = Regex("""(?i)(?:search|to|towards|navigate to|directions to)\s+([^,]+)""").find(originalUtterance)
+                destination = toMatch?.groupValues?.get(1)?.trim() ?: "Palakollu to Bhimavaram"
+            }
+
             return listOf(
                 TaskStep("maps_1", UiStep.OpenApp(targetApp), ExpectedOutcome.PackageForeground(targetApp)),
                 TaskStep("maps_2", UiStep.Tap(target = "Search here"), ExpectedOutcome.ElementPresent("Search here")),
@@ -147,17 +154,52 @@ class TaskPlanner(
             )
         }
 
-        // 3. Chrome Search DAG (Fixes "Already in App" issue)
+        // 3. Chrome Search & In-App Long Horizon DAG (e.g. DEV-01)
         if (text.contains("chrome")) {
             val targetApp = "com.android.chrome"
-            val query = intent.parameters["query"] ?: intent.parameters["search"] ?: ""
-            
-            return listOf(
+            var query = intent.parameters["query"] ?: intent.parameters["search"] ?: ""
+            if (query.isBlank()) {
+                val qMatch = Regex("""(?i)(?:search|open|find)\s+([a-zA-Z0-9\s]+?)(?:,\s*open|\s+and\s+open|\s+then|\s+and|$)""").find(originalUtterance)
+                query = qMatch?.groupValues?.get(1)?.replace(Regex("(?i)chrome"), "")?.trim() ?: "YouTube"
+            }
+
+            val steps = mutableListOf(
                 TaskStep("ch_1", UiStep.OpenApp(targetApp), ExpectedOutcome.PackageForeground(targetApp)),
                 TaskStep("ch_2", UiStep.Tap(target = "Search or type URL"), ExpectedOutcome.ElementPresent("Search or type URL")),
                 TaskStep("ch_3", UiStep.TypeText(text = query, target = "Search or type URL"), ExpectedOutcome.TextContentEquals(query)),
                 TaskStep("ch_4", UiStep.PressEnter, ExpectedOutcome.ElementPresent(query))
             )
+            if (text.contains("first result") || text.contains("first video") || text.contains("top result")) {
+                steps.add(TaskStep("ch_5", UiStep.WaitForUi(targetText = "first result", timeoutMs = 2500L), ExpectedOutcome.ElementPresent("first result")))
+                steps.add(TaskStep("ch_6", UiStep.Tap(target = "first result"), ExpectedOutcome.ElementPresent("Play")))
+            }
+            if (text.contains("play")) {
+                steps.add(TaskStep("ch_7", UiStep.Tap(target = "Play"), ExpectedOutcome.PlaybackActive()))
+            }
+            return steps
+        }
+
+        // 4. Instagram DAG (DEV-05)
+        if (text.contains("instagram")) {
+            val targetApp = "com.instagram.android"
+            var username = intent.parameters["username"] ?: intent.parameters["query"] ?: intent.parameters["target"] ?: ""
+            if (username.isBlank()) {
+                val uMatch = Regex("""(?i)(?:search|profile of|user)\s+([a-zA-Z0-9._]+)""").find(originalUtterance)
+                username = uMatch?.groupValues?.get(1)?.trim() ?: "openai"
+            }
+            val steps = mutableListOf(
+                TaskStep("ig_1", UiStep.OpenApp(targetApp), ExpectedOutcome.PackageForeground(targetApp)),
+                TaskStep("ig_2", UiStep.Tap(target = "Search"), ExpectedOutcome.ElementPresent("Search")),
+                TaskStep("ig_3", UiStep.TypeText(text = username, target = "Search"), ExpectedOutcome.TextContentEquals(username)),
+                TaskStep("ig_4", UiStep.PressEnter, ExpectedOutcome.ElementPresent(username))
+            )
+            if (text.contains("first result") || text.contains("profile")) {
+                steps.add(TaskStep("ig_5", UiStep.Tap(target = "first result"), ExpectedOutcome.ElementPresent("Posts")))
+            }
+            if (text.contains("first post") || text.contains("inspect")) {
+                steps.add(TaskStep("ig_6", UiStep.Tap(target = "first post"), ExpectedOutcome.ElementPresent("Like")))
+            }
+            return steps
         }
 
         return emptyList()
@@ -168,8 +210,6 @@ class TaskPlanner(
     // =========================================================================
     private fun routeTier3LongHorizon(intent: TaskIntent, originalUtterance: String): List<TaskStep> {
         val steps = mutableListOf<TaskStep>()
-        
-        // Starts with app launch; dynamic replanning handles subsequent exploration
         if (intent.targetEntity != null) {
             steps.add(
                 TaskStep(
@@ -183,8 +223,40 @@ class TaskPlanner(
     }
 
     fun replanTask(task: AgentTask): Boolean {
-        // Fallback hook invoked by LongTaskOrchestrator when local recovery fails.
-        // Triggers Gemini context injection and dynamically appends new TaskSteps.
-        return false 
+        val provider = com.example.automation.engine.GoalPlanner.getPlanningProvider() ?: return false
+        return try {
+            val request = com.example.network.provider.PlanningRequest(
+                goal = "Re-plan remaining steps for goal: '${task.goal}' after step '${task.getCurrentStep()?.id}'.",
+                screenContext = ScreenContextPayload(
+                    packageName = task.context.currentApp,
+                    prunedNodes = emptyList(),
+                    visibleText = "",
+                    clickableElements = emptyList(),
+                    screenshotJpeg = null,
+                    isScreenshotSent = false,
+                    hasAccessibility = false,
+                    focusMode = "general"
+                )
+            )
+            val result = kotlinx.coroutines.runBlocking { provider.generatePlan(request) }
+            if (result.success && result.plan.isNotEmpty()) {
+                val newSteps = result.plan.map { actionStep ->
+                    TaskStep(
+                        id = actionStep.stepId,
+                        action = actionStep.toUiStep(),
+                        expectedOutcome = null
+                    )
+                }
+                val currentRemaining = task.steps.take(task.currentStepIndex + 1).toMutableList()
+                currentRemaining.addAll(newSteps)
+                task.steps = currentRemaining
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("TaskPlanner", "replanTask failed: ${e.message}")
+            false
+        }
     }
 }

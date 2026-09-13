@@ -159,13 +159,22 @@ object SemanticUiCommandParser {
         val trimmed = rawText.trim()
         if (trimmed.isBlank()) return null
 
-        // Strip conversational prefix / causal conjunction preambles (e.g. "సెర్చ్ బార్ ఓపెన్ చేసావ్ కాబట్టి...", "since you did X, now do Y")
+        val isTypeCommand = trimmed.startsWith("type ", ignoreCase = true) ||
+                            trimmed.startsWith("write ", ignoreCase = true) ||
+                            trimmed.startsWith("enter ", ignoreCase = true) ||
+                            trimmed.startsWith("input ", ignoreCase = true) ||
+                            trimmed.startsWith("రాయి ", ignoreCase = true) ||
+                            trimmed.startsWith("టైప్ ", ignoreCase = true)
+
         var clean = trimmed
             .replace(Regex("^.*?(?:చేసావ్ కాబట్టి|చేసావు కాబట్టి|ఓపెన్ చేసావ్ కాబట్టి|ఓపెన్ చేసావు కాబట్టి|కాబట్టి|అందుకని|అందువల్ల)\\s+", RegexOption.IGNORE_CASE), "")
             .replace(Regex("^(?:so|now|then)\\s+", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("[.!?,;]+$"), "")
-            .replace(Regex("\\s+"), " ")
-            .trim()
+
+        if (!isTypeCommand) {
+            clean = clean.replace(Regex("[.!?,;]+$"), "")
+        }
+
+        clean = clean.replace(Regex("\\s+"), " ").trim()
 
         // 1. Tanglish / Telugu Compound App Search ("Google maps open chesi Palakollu ane search chey")
         TANGLISH_APP_TYPE_SEARCH_COMPOUND.find(clean)?.let { match ->
@@ -280,7 +289,7 @@ object SemanticUiCommandParser {
      * Preserves exact sequence and duplicate actions.
      */
     private fun parseMultiClauseSequence(input: String): SemanticUiCommand? {
-        val rawClauses = input.split(Regex("(?:,|\\s+(?:then|and then|తర్వాత)\\s+|\\s+(?:and|మరియు|అలాగే)\\s+(?=(?:tap|click|press|select|hit|touch|type|write|enter|input|find|search|నొక్కు|ట్యాప్|రాయి|టైప్)\\b))", RegexOption.IGNORE_CASE))
+        val rawClauses = input.split(Regex("(?:,|\\s+(?:then|and then|తర్వాత)\\s+|\\s+(?:and|మరియు|అలాగే)\\s+(?=(?:tap|click|press|select|hit|touch|type|write|enter|input|find|search|play|watch|open|directions|నొక్కు|ట్యాప్|రాయి|టైప్)\\b))", RegexOption.IGNORE_CASE))
             .map { it.trim() }
             .filter { it.isNotBlank() }
 
@@ -312,10 +321,28 @@ object SemanticUiCommandParser {
         val trimmed = clause.trim()
         if (trimmed.isBlank()) return null
 
-        // Pattern 1: App launch ("Open Calculator", "Launch Settings", "గూగుల్ మ్యాప్స్ ఓపెన్ చేయి")
+        // Pattern 0a: Play action ("play the video", "play it", "play", "watch the video")
+        val playMatch = Regex("^(?:play|watch)(?:\\s+(?:the\\s+)?(?:video|it|song|media|first\\s+video))?$", RegexOption.IGNORE_CASE).find(trimmed)
+        if (playMatch != null) {
+            return ParsedAction("CLICK", target = "Play")
+        }
+
+        // Pattern 0b: Directions action ("open directions", "get directions", "directions", "show directions")
+        val directionsMatch = Regex("^(?:open|get|show|start)?\\s*(?:the\\s+)?directions$", RegexOption.IGNORE_CASE).find(trimmed)
+        if (directionsMatch != null) {
+            return ParsedAction("CLICK", target = "Directions")
+        }
+
+        // Pattern 1: App launch or UI Element open ("Open Calculator", "Launch Settings", "open the first result", "open first video")
         val openMatch = Regex("^(?:open|launch|start|go to|ఓపెన్|స్టార్ట్|తెరువు)\\s+(?:the\\s+)?(.+)$", RegexOption.IGNORE_CASE).find(trimmed)
         if (openMatch != null) {
-            val app = cleanAppTarget(openMatch.groupValues[1])
+            val raw = openMatch.groupValues[1].trim()
+            if (raw.contains("result", ignoreCase = true) || raw.contains("direction", ignoreCase = true) ||
+                raw.contains("video", ignoreCase = true) || raw.contains("link", ignoreCase = true) ||
+                raw.contains("post", ignoreCase = true) || raw.contains("tab", ignoreCase = true)) {
+                return ParsedAction("CLICK", target = cleanElementTarget(raw))
+            }
+            val app = cleanAppTarget(raw)
             if (app.isNotBlank() && !containsActionVerb(app)) {
                 return ParsedAction("OPEN_APP", target = app)
             }
@@ -462,10 +489,13 @@ object SemanticUiCommandParser {
 
     private fun buildAppSearchCommand(rawApp: String, rawQuery: String): SemanticUiCommand? {
         val cleanApp = cleanAppTarget(rawApp)
-        val cleanQuery = cleanSearchQuery(rawQuery)
+        if (cleanApp.isBlank() || cleanApp.contains(",") || containsActionVerb(cleanApp)) return null
 
-        if (cleanApp.isBlank() || cleanQuery.isBlank()) return null
-        if (cleanApp.contains(",") || containsActionVerb(cleanApp)) return null
+        val split = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.splitArgumentAndTrailingClauses(rawQuery)
+        val actualQuery = split?.argument ?: rawQuery
+        val cleanQuery = cleanSearchQuery(actualQuery)
+
+        if (cleanQuery.isBlank()) return null
 
         // If query is literally "search" or "search button" or "search icon", treat as click on search
         if (cleanQuery.equals("search", ignoreCase = true) ||
@@ -481,20 +511,29 @@ object SemanticUiCommandParser {
             )
         }
 
+        val trailingActions = split?.trailingClauses?.mapNotNull {
+            com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.parseTrailingActionClause(it)
+        } ?: emptyList()
+
+        val actions = mutableListOf(
+            ParsedAction("OPEN_APP", target = cleanApp),
+            ParsedAction("CLICK", target = "Search"),
+            ParsedAction("TYPE", target = cleanQuery, text = cleanQuery),
+            ParsedAction("PRESS_ENTER", target = "enter")
+        )
+        actions.addAll(trailingActions)
+
         return SemanticUiCommand(
             intent = "UI_AUTOMATION",
             app = cleanApp,
-            actions = listOf(
-                ParsedAction("OPEN_APP", target = cleanApp),
-                ParsedAction("CLICK", target = "Search"),
-                ParsedAction("TYPE", target = cleanQuery, text = cleanQuery),
-                ParsedAction("PRESS_ENTER", target = "enter")
-            )
+            actions = actions
         )
     }
 
     private fun buildStandaloneSearchCommand(rawQuery: String): SemanticUiCommand? {
-        val cleanQuery = cleanSearchQuery(rawQuery)
+        val split = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.splitArgumentAndTrailingClauses(rawQuery)
+        val actualQuery = split?.argument ?: rawQuery
+        val cleanQuery = cleanSearchQuery(actualQuery)
         if (cleanQuery.isBlank()) return null
         if (containsActionVerb(cleanQuery)) return null
 
@@ -508,13 +547,20 @@ object SemanticUiCommandParser {
             )
         }
 
+        val trailingActions = split?.trailingClauses?.mapNotNull {
+            com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.parseTrailingActionClause(it)
+        } ?: emptyList()
+
+        val actions = mutableListOf(
+            ParsedAction("TYPE", target = cleanQuery, text = cleanQuery),
+            ParsedAction("PRESS_ENTER", target = "enter")
+        )
+        actions.addAll(trailingActions)
+
         return SemanticUiCommand(
             intent = "UI_AUTOMATION",
             app = null,
-            actions = listOf(
-                ParsedAction("TYPE", target = cleanQuery, text = cleanQuery),
-                ParsedAction("PRESS_ENTER", target = "enter")
-            )
+            actions = actions
         )
     }
 

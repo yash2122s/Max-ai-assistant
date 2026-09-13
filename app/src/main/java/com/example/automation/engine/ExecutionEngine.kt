@@ -51,7 +51,9 @@ object ExecutionEngine {
                         )
                         AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, "InterpolationEngine", "UNRESOLVED_VARIABLE", interpolation.message))
                         AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-                        AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+                        if (request.source != ExecutionSource.PLANNER) {
+                            AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+                        }
                         return failResult
                     }
                 }
@@ -69,7 +71,9 @@ object ExecutionEngine {
                 )
                 AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, "UNKNOWN", "TOOL_NOT_FOUND", "No tool matches action: ${effectiveRequest.action}"))
                 AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-                AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+                if (effectiveRequest.source != ExecutionSource.PLANNER) {
+                    AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+                }
                 return failResult
             }
 
@@ -82,7 +86,9 @@ object ExecutionEngine {
                 )
                 AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, tool.name, "VALIDATION_FAILED", "Request validation failed"))
                 AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-                AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+                if (effectiveRequest.source != ExecutionSource.PLANNER) {
+                    AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+                }
                 return failResult
             }
 
@@ -176,11 +182,15 @@ object ExecutionEngine {
             if (completedResult.success) {
                 AutomationEventBus.publish(AutomationEvent.ToolFinished(executionId, tool.name, completedResult))
                 AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.SUCCEEDED))
-                AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, true))
+                if (effectiveRequest.source != ExecutionSource.PLANNER) {
+                    AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, true))
+                }
             } else {
                 AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, tool.name, completedResult.errorCode ?: "EXECUTION_FAILED", completedResult.message ?: "Failed"))
                 AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-                AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+                if (effectiveRequest.source != ExecutionSource.PLANNER) {
+                    AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+                }
             }
 
             return completedResult
@@ -195,7 +205,9 @@ object ExecutionEngine {
             )
             AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, "UNKNOWN", "EXECUTION_EXCEPTION", e.message ?: "Uncaught exception"))
             AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-            AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+            if (request.source != ExecutionSource.PLANNER) {
+                AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
+            }
             return failResult
         }
     }

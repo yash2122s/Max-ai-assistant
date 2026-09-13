@@ -63,4 +63,12 @@ node_modules/
 frontend/build/
 frontend/dist/
 windows-agent/test_profile/
+**/.next/
+*.tsbuildinfo
 
+# .NET / C# WPF Build
+**/bin/
+**/obj/
+**/publish/
+*.user
+*.suo

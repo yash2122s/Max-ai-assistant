@@ -32,7 +32,9 @@ class KeyboardActionTool : Tool {
         val key = args.get("key")?.asString
             ?: args.get("keyCode")?.asString
             ?: args.get("key_name")?.asString
-            ?: request.action.removePrefix("KEY_")
+            ?: args.get("text")?.asString
+            ?: args.get("target")?.asString
+            ?: if (request.action.startsWith("KEY_")) request.action.removePrefix("KEY_") else "ENTER"
         val target = args.get("target")?.asString
             ?: args.get("field")?.asString
 

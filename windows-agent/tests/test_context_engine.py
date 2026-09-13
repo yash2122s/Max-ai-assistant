@@ -447,12 +447,12 @@ class TestContextEngine(unittest.TestCase):
 
     # ─── INTEGRATION TESTS ────────────────────────────────────────────────────
 
-    def test_30_gemini_live_uses_canonical_context_builder(self):
-        """Test 30: GeminiLiveSession._build_system_instruction incorporates build_context_block()."""
-        from core.gemini_live import GeminiLiveSession
+    def test_30_realtime_voice_uses_canonical_context_builder(self):
+        """Test 30: RealtimeVoiceSession._build_system_instruction incorporates build_context_block()."""
+        from core.realtime_voice import RealtimeVoiceSession
         from core.unified_tool_registry import unified_tool_registry
 
-        agent = GeminiLiveSession(tool_registry=unified_tool_registry)
+        agent = RealtimeVoiceSession(tool_registry=unified_tool_registry)
 
         with patch("context.builder.build_context_block", return_value="\n\n<PASSIVE_CONTEXT>\n- Active Window: 'TestApp'\n</PASSIVE_CONTEXT>"):
             prompt = agent._build_system_instruction()
@@ -461,10 +461,10 @@ class TestContextEngine(unittest.TestCase):
 
     def test_31_existing_memory_injection_intact(self):
         """Test 31: User permanent memory continues to inject separately alongside passive context."""
-        from core.gemini_live import GeminiLiveSession
+        from core.realtime_voice import RealtimeVoiceSession
         from core.unified_tool_registry import unified_tool_registry
 
-        agent = GeminiLiveSession(tool_registry=unified_tool_registry)
+        agent = RealtimeVoiceSession(tool_registry=unified_tool_registry)
 
         with patch("core.memory.get_all_memories_summary", return_value="- user_name: Yaswanth"), \
              patch("context.builder.build_context_block", return_value="\n\n<PASSIVE_CONTEXT>\n- Active Window: 'VS Code'\n</PASSIVE_CONTEXT>"):

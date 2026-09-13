@@ -12,13 +12,21 @@ from core.worktree_isolation import WorktreeManager, WorktreeInfo
 @pytest.fixture
 def temp_worktree_manager():
     temp_dir = tempfile.mkdtemp()
-    manager = WorktreeManager(storage_dir=temp_dir, max_active=3)
+    base_repo_dir = os.path.join(temp_dir, "mock_repo")
+    os.makedirs(base_repo_dir, exist_ok=True)
+    manager = WorktreeManager(storage_dir=os.path.join(temp_dir, "wt_store"), max_active=3)
+    manager._base_repo_mock = base_repo_dir
     yield manager
+    for wt in list(manager._worktrees.keys()):
+        try:
+            manager.discard_worktree(wt)
+        except Exception:
+            pass
     shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 def test_worktree_creation(temp_worktree_manager):
-    info = temp_worktree_manager.create_worktree("task-123", base_repo=".", branch_name="test-branch")
+    info = temp_worktree_manager.create_worktree("task-123", base_repo=temp_worktree_manager._base_repo_mock, branch_name="test-branch")
     assert isinstance(info, WorktreeInfo)
     assert info.task_id == "task-123"
     assert info.status == "active"
@@ -27,19 +35,21 @@ def test_worktree_creation(temp_worktree_manager):
 
 
 def test_worktree_capacity_limit(temp_worktree_manager):
-    temp_worktree_manager.create_worktree("task-1")
-    temp_worktree_manager.create_worktree("task-2")
-    temp_worktree_manager.create_worktree("task-3")
+    base = temp_worktree_manager._base_repo_mock
+    temp_worktree_manager.create_worktree("task-1", base_repo=base)
+    temp_worktree_manager.create_worktree("task-2", base_repo=base)
+    temp_worktree_manager.create_worktree("task-3", base_repo=base)
 
     assert len(temp_worktree_manager.list_active_worktrees()) == 3
 
     # Exceeding limit of 3 should raise RuntimeError
     with pytest.raises(RuntimeError, match="Worktree capacity exhausted"):
-        temp_worktree_manager.create_worktree("task-4")
+        temp_worktree_manager.create_worktree("task-4", base_repo=base)
 
 
 def test_worktree_discard(temp_worktree_manager):
-    info = temp_worktree_manager.create_worktree("task-discard")
+    base = temp_worktree_manager._base_repo_mock
+    info = temp_worktree_manager.create_worktree("task-discard", base_repo=base)
     assert os.path.exists(info.worktree_path)
 
     res = temp_worktree_manager.discard_worktree("task-discard")
@@ -49,7 +59,8 @@ def test_worktree_discard(temp_worktree_manager):
 
 
 def test_antigravity_cannot_self_merge(temp_worktree_manager):
-    temp_worktree_manager.create_worktree("task-self-merge")
+    base = temp_worktree_manager._base_repo_mock
+    temp_worktree_manager.create_worktree("task-self-merge", base_repo=base)
 
     # Antigravity self-authorization MUST be rejected
     res = temp_worktree_manager.authorize_merge(
@@ -62,7 +73,8 @@ def test_antigravity_cannot_self_merge(temp_worktree_manager):
 
 
 def test_unverified_merge_rejected(temp_worktree_manager):
-    temp_worktree_manager.create_worktree("task-unverified")
+    base = temp_worktree_manager._base_repo_mock
+    temp_worktree_manager.create_worktree("task-unverified", base_repo=base)
 
     # Unverified merge MUST be rejected
     res = temp_worktree_manager.authorize_merge(
@@ -76,7 +88,8 @@ def test_unverified_merge_rejected(temp_worktree_manager):
 
 
 def test_authorized_verified_merge_succeeds(temp_worktree_manager):
-    temp_worktree_manager.create_worktree("task-valid-merge")
+    base = temp_worktree_manager._base_repo_mock
+    temp_worktree_manager.create_worktree("task-valid-merge", base_repo=base)
 
     # MAX authorized merge with verification succeeds
     res = temp_worktree_manager.authorize_merge(

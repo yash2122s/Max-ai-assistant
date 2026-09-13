@@ -174,7 +174,7 @@ class ProcessSupervisor:
         for proc in psutil.process_iter(["pid", "name", "cmdline"]):
             try:
                 cmd = " ".join(proc.info.get("cmdline") or []).lower()
-                if "agy" in cmd or "antigravity" in cmd or "hermes_worker" in cmd:
+                if "agy" in cmd or "antigravity" in cmd or "max_worker" in cmd or "hermes_worker" in cmd:
                     logger.info(f"Terminating orphaned worker process PID {proc.info['pid']}")
                     proc.kill()
             except (psutil.NoSuchProcess, psutil.AccessDenied):

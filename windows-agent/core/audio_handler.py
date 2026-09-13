@@ -1,6 +1,6 @@
 """
-JARVIS Audio Handler
-Real-time microphone capture and speaker playback for Gemini Live API.
+JARVIS Audio Handler for MAX Windows Agent
+Real-time microphone capture and speaker playback for Realtime Voice API.
 Handles barge-in (stops playback when user speaks).
 Uses a shared PyAudio singleton to prevent PortAudio thread conflicts on Windows.
 
@@ -272,6 +272,14 @@ class AudioCapture:
                     data = self._stream.read(
                         INPUT_CHUNK_SIZE, exception_on_overflow=False
                     )
+                    # Feed wake word engine
+                    try:
+                        from core.wake_word import wake_word_engine
+                        if wake_word_engine.is_running:
+                            wake_word_engine.feed_audio(data)
+                    except Exception:
+                        pass
+
                     if self._loop and self._loop.is_running():
                         self._loop.call_soon_threadsafe(
                             self._queue_put_nowait, data
@@ -313,67 +321,232 @@ class AudioCapture:
             pass
 
 
-class AudioPlayer:
+class SpeakerOutputManager:
     """
-    Plays raw PCM audio chunks received from Gemini.
-    Uses a dedicated background thread with an audio jitter pre-buffer to ensure
-    smooth, stutter-free playback even over variable network latency.
-    Supports barge-in: can be interrupted immediately when user speaks.
+    Authoritative manager for Realtime Voice audio playback on Windows.
+    
+    Guarantees:
+    - Single stream owner with thread-safe writes and state transitions.
+    - Automatic recovery and reopening on PortAudio errors (-9999, -9988, -9985, etc.).
+    - Comprehensive structured logging (OPEN, READY, WRITE, STOP_REQUESTED, CLOSED, REOPEN_ATTEMPT, REOPEN_SUCCESS, REOPEN_FAILED).
+    - Invariant: IF VoiceGate.state == LIVE_CONVERSATION THEN speaker output MUST remain available.
+    - Jitter buffering for smooth playback and zero-latency flush on turn complete.
     """
 
-    def __init__(self):
+    def __init__(self, sample_rate: int = OUTPUT_SAMPLE_RATE, channels: int = OUTPUT_CHANNELS):
+        self._sample_rate = sample_rate
+        self._channels = channels
         self._pa: pyaudio.PyAudio | None = None
-        self._stream = None
-        self._playing = False
-        self._interrupted = False
-        self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=300)
+        self._stream: pyaudio.Stream | None = None
+        self._stream_lock = threading.RLock()
+        self._queue: queue.Queue[bytes | None] = queue.Queue(maxsize=500)
         self._worker_thread: threading.Thread | None = None
         self._running = False
-        self._lock = threading.Lock()
-        self._prebuffer_target = 2  # Buffer ~80-100ms before starting playback to absorb jitter
+        self._playing = False
+        self._interrupted = False
         self._is_buffering = True
+        self._prebuffer_target = 2
+        self._voice_gate = None
+        self._gemini_session = None
+        self._chunks_written = 0
+        self._bytes_written = 0
+        self._reopen_count = 0
+        self._lock = threading.Lock()
+
+    def set_voice_gate(self, voice_gate):
+        """Set VoiceGate reference for invariant checking and diagnostic logging."""
+        self._voice_gate = voice_gate
+
+    def set_realtime_session(self, session):
+        """Set RealtimeVoiceSession reference for session state diagnostics."""
+        self._gemini_session = session
+
+    def set_gemini_session(self, session):
+        """Set RealtimeVoiceSession reference (backward compatible)."""
+        self.set_realtime_session(session)
 
     @property
     def is_playing(self) -> bool:
         return self._playing or not self._queue.empty()
 
-    def start(self):
-        """Initialize the audio output stream and background playback worker thread."""
+    @property
+    def is_stream_active(self) -> bool:
+        with self._stream_lock:
+            if self._stream is None:
+                return False
+            try:
+                return self._stream.is_active() and not self._stream.is_stopped()
+            except Exception:
+                return False
+
+    def _get_best_output_device_index(self, pa: pyaudio.PyAudio) -> int | None:
+        """Find the best output device index."""
+        try:
+            def_info = pa.get_default_output_device_info()
+            if def_info.get("maxOutputChannels", 0) > 0:
+                return def_info.get("index")
+        except Exception:
+            pass
+
+        for i in range(pa.get_device_count()):
+            try:
+                info = pa.get_device_info_by_index(i)
+                if info.get("maxOutputChannels", 0) > 0:
+                    return i
+            except Exception:
+                pass
+        return None
+
+    def _open_stream_internal(self) -> bool:
+        """Internal helper to open PortAudio output stream. Must be called with _stream_lock held."""
         try:
             self._pa = get_shared_pyaudio()
+            dev_idx = self._get_best_output_device_index(self._pa)
+            dev_name = (
+                self._pa.get_device_info_by_index(dev_idx).get("name", "Default")
+                if dev_idx is not None
+                else "Default"
+            )
+
+            # Close existing stream if any
+            if self._stream is not None:
+                try:
+                    if self._stream.is_active():
+                        self._stream.stop_stream()
+                    self._stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+
+            logger.info(
+                "SPEAKER: OPEN (dev_index=%s, dev_name='%s', rate=%d, channels=%d)",
+                dev_idx, dev_name, self._sample_rate, self._channels
+            )
             self._stream = self._pa.open(
                 format=pyaudio.paInt16,
-                channels=OUTPUT_CHANNELS,
-                rate=OUTPUT_SAMPLE_RATE,
+                channels=self._channels,
+                rate=self._sample_rate,
                 output=True,
+                output_device_index=dev_idx,
                 frames_per_buffer=1024,
             )
+            logger.info(
+                "SPEAKER: READY (stream_id=%s, active=%s, stopped=%s)",
+                id(self._stream), self._stream.is_active(), self._stream.is_stopped()
+            )
+            return True
+        except Exception as e:
+            logger.error("SPEAKER: OPEN_FAILED (error: %s)", e)
+            self._stream = None
+            return False
+
+    def start(self):
+        """Initialize the audio output stream and background playback worker thread."""
+        with self._stream_lock:
+            if self._running:
+                return
             self._running = True
+            self._interrupted = False
             self._is_buffering = True
+            self._open_stream_internal()
+
             self._worker_thread = threading.Thread(
                 target=self._playback_loop,
                 daemon=True,
-                name="MAX-AudioPlayer-Worker",
+                name="MAX-SpeakerManager-Worker",
             )
             self._worker_thread.start()
             logger.info(
-                f"🔊 Speaker opened: {OUTPUT_SAMPLE_RATE}Hz, {OUTPUT_CHANNELS}ch (Jitter-Buffered Worker active)"
+                f"🔊 Speaker opened: {self._sample_rate}Hz, {self._channels}ch (SpeakerOutputManager active)"
             )
-        except Exception as e:
-            logger.error(f"🔊 Speaker initialization failed: {e}")
+
+    def ensure_stream_ready(self) -> bool:
+        """
+        Enforces the invariant:
+        IF VoiceGate.state == LIVE_CONVERSATION THEN speaker output MUST remain available.
+        Checks if stream is active and reopens if closed or invalid.
+        """
+        with self._stream_lock:
+            if not self._running:
+                return False
+            if self._stream is not None:
+                try:
+                    if self._stream.is_active() and not self._stream.is_stopped():
+                        return True
+                except Exception:
+                    pass
+            # Stream is not ready, attempt reopen
+            return self._reopen_stream(reason="ensure_stream_ready check failed")
+
+    def _log_write_error(self, error: Exception, chunk_len: int):
+        """Explicit structured logging for write errors with full diagnostic telemetry."""
+        with self._stream_lock:
+            stream_id = id(self._stream) if self._stream else None
+            is_active = False
+            is_stopped = True
+            if self._stream:
+                try:
+                    is_active = self._stream.is_active()
+                    is_stopped = self._stream.is_stopped()
+                except Exception:
+                    pass
+
+        voice_state = "UNKNOWN"
+        if self._voice_gate is not None and hasattr(self._voice_gate, "state"):
+            voice_state = getattr(self._voice_gate.state, "value", str(self._voice_gate.state))
+
+        session_state = "UNKNOWN"
+        if self._gemini_session is not None:
+            session_state = f"active={getattr(self._gemini_session, '_session_active', 'N/A')}"
+
+        thread_name = threading.current_thread().name
+
+        logger.error(
+            "SPEAKER: WRITE_ERROR [Err: %s] | stream_id=%s, active=%s, stopped=%s, "
+            "chunk_bytes=%d, voice_state=%s, session_state=%s, thread='%s'",
+            error, stream_id, is_active, is_stopped, chunk_len, voice_state, session_state, thread_name
+        )
+
+    def _reopen_stream(self, reason: str = "") -> bool:
+        """Attempt to reopen the speaker stream after a PortAudio failure."""
+        with self._stream_lock:
+            if not self._running:
+                return False
+            self._reopen_count += 1
+            logger.warning("SPEAKER: REOPEN_ATTEMPT (attempt=%d, reason='%s')", self._reopen_count, reason)
+
+            # Close old stream cleanly
+            if self._stream is not None:
+                try:
+                    if self._stream.is_active():
+                        self._stream.stop_stream()
+                    self._stream.close()
+                except Exception:
+                    pass
+                self._stream = None
+
+            # Small backoff before reopening to let Windows audio driver stabilize
+            import time
+            time.sleep(0.05)
+
+            success = self._open_stream_internal()
+            if success:
+                logger.info("SPEAKER: REOPEN_SUCCESS (stream_id=%s, attempt=%d)", id(self._stream), self._reopen_count)
+            else:
+                logger.error("SPEAKER: REOPEN_FAILED (attempt=%d)", self._reopen_count)
+            return success
 
     def _playback_loop(self):
         """Background worker thread that continuously drains audio queue to the speaker stream with jitter buffering."""
+        import time
+        logger.info("🔊 Playback worker thread running")
         while self._running:
             try:
-                # If buffering at the start of a turn, wait until minimum chunks accumulate or flush is triggered
                 with self._lock:
                     buffering = self._is_buffering
                     q_size = self._queue.qsize()
 
                 if buffering and q_size < self._prebuffer_target:
-                    # Give a tiny slice for network chunks to arrive smoothly
-                    import time
                     time.sleep(0.015)
                     continue
 
@@ -389,23 +562,48 @@ class AudioPlayer:
                         continue
                     self._playing = True
 
-                try:
-                    if self._stream and chunk:
-                        self._stream.write(chunk, exception_on_underflow=False)
-                except Exception as e:
-                    logger.warning(f"Speaker write error: {e}")
-                finally:
-                    with self._lock:
-                        if self._queue.empty():
-                            self._playing = False
-                            self._is_buffering = True
-                    self._queue.task_done()
+                write_success = False
+                for attempt in range(2):
+                    with self._stream_lock:
+                        if not self._running or self._interrupted:
+                            break
+                        if self._stream is None:
+                            self._reopen_stream(reason="stream was None before write")
+
+                        if self._stream is not None:
+                            try:
+                                self._stream.write(chunk, exception_on_underflow=False)
+                                self._chunks_written += 1
+                                self._bytes_written += len(chunk)
+                                if self._chunks_written % 50 == 1:
+                                    logger.debug(
+                                        "SPEAKER: WRITE (chunk=%d bytes, total_chunks=%d)",
+                                        len(chunk), self._chunks_written
+                                    )
+                                write_success = True
+                                break
+                            except Exception as e:
+                                self._log_write_error(e, len(chunk))
+
+                    # If write failed, recover and retry
+                    if not write_success and self._running and not self._interrupted:
+                        logger.warning("SPEAKER: Recovering from write failure...")
+                        self._reopen_stream(reason="write failure recovery")
+                        time.sleep(0.02)
+
+                with self._lock:
+                    if self._queue.empty():
+                        self._playing = False
+                        self._is_buffering = True
+                self._queue.task_done()
             except queue.Empty:
                 with self._lock:
                     self._playing = False
                     self._is_buffering = True
             except Exception as e:
                 logger.debug(f"Audio playback worker exception: {e}")
+
+        logger.info("🔊 Playback worker thread terminated")
 
     def play_chunk(self, audio_data: bytes):
         """
@@ -419,7 +617,6 @@ class AudioPlayer:
         try:
             self._queue.put_nowait(audio_data)
         except queue.Full:
-            # If queue is full, discard oldest chunk to keep audio real-time
             try:
                 self._queue.get_nowait()
                 self._queue.put_nowait(audio_data)
@@ -458,6 +655,7 @@ class AudioPlayer:
 
     def stop(self):
         """Clean up audio output resources and stop the playback worker thread."""
+        logger.info("SPEAKER: STOP_REQUESTED")
         self._running = False
         with self._lock:
             self._playing = False
@@ -473,7 +671,7 @@ class AudioPlayer:
             self._worker_thread.join(timeout=0.5)
             self._worker_thread = None
 
-        with self._lock:
+        with self._stream_lock:
             stream, self._stream = self._stream, None
         if stream:
             try:
@@ -482,4 +680,8 @@ class AudioPlayer:
                 stream.close()
             except Exception:
                 pass
-            logger.info("🔊 Speaker stopped")
+            logger.info("SPEAKER: CLOSED")
+
+
+# Canonical backward-compatible alias
+AudioPlayer = SpeakerOutputManager

@@ -36,5 +36,15 @@ class EventType(Enum):
     COMMAND_REQUEST_SENT = "command_request_sent"
     COMMAND_RESULT_RECEIVED = "command_result_received"
 
+    # Desktop Overlay UI Events
+    VOICE_STATE = "voice_state"
+    VOICE_AUDIO_LEVEL = "voice_audio_level"
+    TRANSCRIPT_USER = "transcript_user"
+    TRANSCRIPT_ASSISTANT = "transcript_assistant"
+    OVERLAY_TASK_STATE = "overlay_task_state"
+    DEVICE_CONTROL = "device_control"
+    CONFIRMATION_REQUIRED = "confirmation_required"
+    CONFIRMATION_RESPONSE = "confirmation_response"
+
 
 

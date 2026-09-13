@@ -3,12 +3,12 @@ import uuid
 import logging
 from typing import Dict, Any, List, Optional
 
-logger = logging.getLogger("MAXWindowsAgent.SubagentTools")
+logger = logging.getLogger("MAX.Subagents")
 
 
 class SubagentTools:
     """
-    Subagent delegation capabilities for Hermes multi-agent workflows.
+    Subagent delegation capabilities for MAX multi-agent workflows.
     """
 
     @staticmethod

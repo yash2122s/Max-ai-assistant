@@ -1,7 +1,7 @@
 """
 MAX Task Authority — Sole Top-Level Root Orchestration Authority
 Enforces all core architectural invariants:
-- MAX is the sole root authority. Workers (Hermes, Antigravity, Windows Agent, Android Agent) cannot create independent root tasks.
+- MAX is the sole root authority. Workers (MaxAgent, Antigravity, Windows Agent, Android Agent) cannot create independent root tasks.
 - Child Permissions ⊆ Parent Permissions (strict subset enforcement).
 - Granular permissions, depth semantics (root=0, max_depth=3).
 - End-to-end observable, cancellable, verifiable execution.
@@ -87,7 +87,7 @@ class MAXTaskAuthority:
         4. Applies SecurityPolicy validation.
         5. Creates exactly one root TaskEnvelope (origin="max", depth=0, parent_task_id=None).
         6. Persists task in CanonicalTaskStore.
-        7. Dispatches to assigned worker (Antigravity in worktree, Windows Agent, Android, Hermes, or Hybrid).
+        7. Dispatches to assigned worker (Antigravity in worktree, Windows Agent, Android, MAX Agent, or Hybrid).
         8. Runs post-execution VerificationEngine verification.
         9. Synthesizes a clean, natural-language spoken response for voice TTS playback.
         """
@@ -532,8 +532,8 @@ class MAXTaskAuthority:
                 result = await self._execute_windows_agent_task(envelope)
             elif envelope.worker == "android_agent":
                 result = await self._execute_android_agent_task(envelope)
-            elif envelope.worker == "hermes":
-                result = await self._execute_hermes_task(envelope)
+            elif envelope.worker in ("max_agent", "hermes"):
+                result = await self._execute_max_agent_task(envelope)
             else:
                 result = await self._execute_direct_task(envelope)
 
@@ -932,15 +932,17 @@ class MAXTaskAuthority:
             summary=f"Executed Android action: {envelope.goal}"
         )
 
-    async def _execute_hermes_task(self, envelope: TaskEnvelope) -> TaskResult:
-        """Executes autonomous multi-step reasoning task via Hermes Engine."""
+    async def _execute_max_agent_task(self, envelope: TaskEnvelope) -> TaskResult:
+        """Executes autonomous multi-step reasoning task via MAX Agent Engine."""
         return TaskResult(
             task_id=envelope.task_id,
             status=TaskStatus.COMPLETED,
             claimed_success=True,
             verified_success=True,
-            summary=f"Hermes completed reasoning: {envelope.goal}"
+            summary=f"MAX Agent completed reasoning: {envelope.goal}"
         )
+
+    _execute_hermes_task = _execute_max_agent_task
 
     async def _execute_direct_task(self, envelope: TaskEnvelope) -> TaskResult:
         """Direct action execution."""

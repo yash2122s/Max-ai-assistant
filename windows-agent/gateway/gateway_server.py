@@ -39,7 +39,7 @@ class MultiPlatformGateway:
         if not text:
             return {"status": "ignored", "message": "Empty message payload"}
 
-        # Route message to Hermes reasoning loop in background
+        # Route message to MAX reasoning loop in background
         logger.info(f"Routing '{clean_plat}' message from '{sender}': '{text}'")
         return {
             "status": "received",

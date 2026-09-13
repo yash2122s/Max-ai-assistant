@@ -11,21 +11,20 @@ import logging
 from typing import Dict, Any, List, Optional, Generator
 
 import httpx
-from openai import OpenAI
 from config import GEMINI_API_KEY
 
-logger = logging.getLogger("MAXWindowsAgent.ProviderManager")
+logger = logging.getLogger("MAX.ProviderManager")
 
 
 class ProviderManager:
     """
-    Unified LLM provider abstraction for Hermes autonomous reasoning.
+    Unified LLM provider abstraction for MAX Agent autonomous reasoning.
     """
     _instance: Optional['ProviderManager'] = None
 
     def __init__(self):
-        self.default_provider = os.getenv("HERMES_PROVIDER", "gemini").lower()
-        self.default_model = os.getenv("HERMES_MODEL", "gemini-3.6-flash")
+        self.default_provider = os.getenv("MAX_PROVIDER", os.getenv("HERMES_PROVIDER", "gemini")).lower()
+        self.default_model = os.getenv("MAX_MODEL", os.getenv("HERMES_MODEL", "gemini-flash-latest"))
         self._init_clients()
 
     @classmethod
@@ -36,22 +35,29 @@ class ProviderManager:
 
     def _init_clients(self):
         """Initializes API clients for configured providers."""
-        # 1. OpenAI / OpenRouter / DeepSeek client
-        openai_key = os.getenv("OPENAI_API_KEY", "")
-        openai_base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        self.openai_client = OpenAI(api_key=openai_key or "mock-key", base_url=openai_base) if openai_key else None
+        try:
+            from openai import OpenAI
+            # 1. OpenAI / OpenRouter / DeepSeek client
+            openai_key = os.getenv("OPENAI_API_KEY", "")
+            openai_base = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+            self.openai_client = OpenAI(api_key=openai_key or "mock-key", base_url=openai_base) if openai_key else None
 
-        # 2. DeepSeek client
-        deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
-        self.deepseek_client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com/v1") if deepseek_key else None
+            # 2. DeepSeek client
+            deepseek_key = os.getenv("DEEPSEEK_API_KEY", "")
+            self.deepseek_client = OpenAI(api_key=deepseek_key, base_url="https://api.deepseek.com/v1") if deepseek_key else None
 
-        # 3. OpenRouter client
-        openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
-        self.openrouter_client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1") if openrouter_key else None
+            # 3. OpenRouter client
+            openrouter_key = os.getenv("OPENROUTER_API_KEY", "")
+            self.openrouter_client = OpenAI(api_key=openrouter_key, base_url="https://openrouter.ai/api/v1") if openrouter_key else None
 
-        # 4. Local Ollama client
-        ollama_base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
-        self.ollama_client = OpenAI(api_key="ollama", base_url=ollama_base)
+            # 4. Local Ollama client
+            ollama_base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
+            self.ollama_client = OpenAI(api_key="ollama", base_url=ollama_base)
+        except ImportError:
+            self.openai_client = None
+            self.deepseek_client = None
+            self.openrouter_client = None
+            self.ollama_client = None
 
     def chat_completion(
         self,
@@ -111,11 +117,11 @@ class ProviderManager:
 
             # Cascading fallback list of stable models
             candidate_models = [
+                "gemini-3-flash-preview",
+                "gemini-flash-latest",
                 selected_model,
-                "gemini-3.6-flash",
-                "gemini-3.5-flash",
-                "gemini-3.7-flash",
-                "gemini-3.1-flash-lite"
+                "gemini-2.5-flash",
+                "gemini-pro-latest"
             ]
             seen_models = set()
             unique_candidates = [m for m in candidate_models if m and not (m in seen_models or seen_models.add(m))]
@@ -172,7 +178,50 @@ class ProviderManager:
                         "tool_calls": tool_calls
                     }
                 except Exception as e:
-                    logger.warning(f"Gemini model '{candidate}' call failed ({e}); trying next candidate...")
+                    err_str = str(e)
+                    logger.warning(f"Gemini model '{candidate}' call failed ({e}); checking fallback/retry...")
+                    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                        import time
+                        time.sleep(4.0)
+                        try:
+                            resp = client.models.generate_content(
+                                model=candidate,
+                                contents=genai_contents,
+                                config=config
+                            )
+                            tool_calls = []
+                            if hasattr(resp, "function_calls") and resp.function_calls:
+                                for fc in resp.function_calls:
+                                    tool_calls.append({
+                                        "id": getattr(fc, "id", None) or f"call_{uuid.uuid4().hex[:6]}",
+                                        "name": fc.name,
+                                        "arguments": dict(fc.args or {})
+                                    })
+                            text_content = ""
+                            if hasattr(resp, "candidates") and resp.candidates:
+                                for cand in resp.candidates:
+                                    if hasattr(cand, "content") and cand.content and hasattr(cand.content, "parts"):
+                                        for part in cand.content.parts:
+                                            if hasattr(part, "text") and part.text:
+                                                text_content += part.text
+                            elif hasattr(resp, "text"):
+                                try:
+                                    text_content = resp.text or ""
+                                except Exception:
+                                    pass
+                            if not tool_calls and text_content:
+                                parsed_call = self._extract_json_tool_call(text_content)
+                                if parsed_call:
+                                    tool_calls.append(parsed_call)
+                            return {
+                                "status": "success",
+                                "provider": "gemini",
+                                "model": candidate,
+                                "content": text_content,
+                                "tool_calls": tool_calls
+                            }
+                        except Exception:
+                            pass
 
         # 2. OpenAI / DeepSeek / OpenRouter / Ollama Provider
         client = None
