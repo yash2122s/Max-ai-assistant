@@ -14,12 +14,16 @@ logger = logging.getLogger("MAX.IntentRouter")
 
 
 class IntentCategory(str, Enum):
+    FORM_FILL = "FORM_FILL"
+    FORM_ANALYZE = "FORM_ANALYZE"
     CALCULATION = "CALCULATION"
     GENERAL_KNOWLEDGE = "GENERAL_KNOWLEDGE"
     CONVERSATION = "CONVERSATION"
     CURRENT_INFO = "CURRENT_INFO"
     WEB_RESEARCH = "WEB_RESEARCH"
     LOCAL_COMPUTER = "LOCAL_COMPUTER"
+    COMPUTER_USE = "COMPUTER_USE"
+    MCP = "MCP"
     FILE_OPERATION = "FILE_OPERATION"
     DEVICE_CONTROL = "DEVICE_CONTROL"
     CODE_TASK = "CODE_TASK"
@@ -226,23 +230,26 @@ class IntentRouter:
                 confidence=0.95
             )
 
-        # 5. Check for Local Computer Action (Apps, Volume, Windows control)
-        app_patterns = [
-            r"^\s*(open|launch|start|close|quit|kill)\s+([a-zA-Z0-9_\-\s]+)$",
-            r"\b(volume|mute|unmute|brightness|screenshot|lock\s+screen|battery)\b",
-            r"\b(maximize|minimize|restore|snap|switch\s+to)\b"
+        # 5. Check for MCP (Model Context Protocol) External Tools
+        mcp_patterns = [
+            r"\b(list|show|get)\s+(?:all\s+)?(?:available\s+)?(?:external|mcp)\s+tools\b",
+            r"\b(mcp\s+list|list\s+mcp|mcp\s+discover|discover\s+mcp)\b",
+            r"\b(read|get|list|fetch)\s+(?:my\s+)?github\s+(?:issues|prs|pull\s+requests|repositories|repos)\b",
+            r"\b(mcp\s+call|call\s+mcp|execute\s+mcp)\b",
+            r"\b(query|search)\s+(?:external|postgres|mysql|sqlite)\s+(?:database|db)\b"
         ]
-        if any(re.search(pat, low) or re.search(pat, low_norm) for pat in app_patterns) and not any(w in low for w in ("website", "url", "youtube", "google")):
+        if any(re.search(pat, low) or re.search(pat, low_norm) for pat in mcp_patterns):
+            tool = "mcp_list_tools" if any(w in low for w in ("list", "show", "discover")) else "mcp_call_tool"
             return RouteDecision(
-                intent=IntentCategory.LOCAL_COMPUTER,
-                tool="windows_automation",
+                intent=IntentCategory.MCP,
+                tool=tool,
                 should_bypass_web_search=True,
                 direct_answer=None,
-                reason="local computer action",
-                confidence=0.95
+                reason="external MCP tool request",
+                confidence=0.96
             )
 
-        # 6. Check for Filesystem Action
+        # 6. Check for Filesystem Action (Native)
         file_patterns = [
             r"\b(create|make|write|read|delete|remove|move|copy|rename)\b.*\b(folder|directory|file|text\s+file)\b",
             r"\b(desktop|downloads|documents)\b.*\b(folder|file)\b"
@@ -257,7 +264,110 @@ class IntentRouter:
                 confidence=0.95
             )
 
-        # 7. Check for Android / Device Control Action
+        # 7. Check for Local Computer Action (Apps, Volume, Windows control - Native)
+        app_patterns = [
+            r"^\s*(open|launch|start|close|quit|kill)\s+([a-zA-Z0-9_\-\s]+)$",
+            r"\b(volume|mute|unmute|brightness|screenshot|lock\s+screen|battery)\b",
+            r"\b(maximize|minimize|restore|snap|switch\s+to)\b"
+        ]
+        if any(re.search(pat, low) or re.search(pat, low_norm) for pat in app_patterns) and not any(w in low for w in ("website", "url", "youtube", "google", "button", "box", "field")):
+            return RouteDecision(
+                intent=IntentCategory.LOCAL_COMPUTER,
+                tool="windows_automation",
+                should_bypass_web_search=True,
+                direct_answer=None,
+                reason="local computer action",
+                confidence=0.95
+            )
+
+        # 7.5 Check for Form Understanding & Form Filling Action
+        form_analyze_patterns = [
+            r"\b(what('?s|\s+is)\s+missing\s+from\s+this\s+form|tell\s+me\s+what\s+is\s+missing|what\s+info(?:rmation)?\s+is\s+missing)\b",
+            r"\b(analyze\s+(?:this|the)?\s*form|inspect\s+(?:this|the)?\s*form|what\s+fields\s+are\s+on\s+this\s+form)\b",
+            r"\b(check\s+what\s+fields\s+are\s+missing|check\s+missing\s+info)\b"
+        ]
+        form_fill_patterns = [
+            r"\b(fill\s+this\s+form|fill\s+the\s+form|fill\s+form|fill\s+out\s+(?:the|this)?\s*form)\b",
+            r"\b(fill\s+(?:this|the)?\s*(?:job\s+application|application|registration|profile|contact|address))\b",
+            r"\b(enter\s+my\s+(?:name|email|phone|details|information))\b",
+            r"\b(fill\s+using\s+my\s+resume|use\s+my\s+resume|fill\s+from\s+resume)\b",
+            r"\b(select\s+(?:java|python|male|female|[a-z0-9\s]+and[a-z0-9\s]+))\b",
+            r"\b(set\s+gender\s+to|choose\s+[a-z\s]+\s+as\s+country|enter\s+today'?s\s+date)\b",
+            r"\b(fill\s+all\s+required\s+fields|fill\s+only\s+required\s+fields|fill\s+required\s+fields)\b",
+            r"\b(fill\s+the\s+address\s+section|fill\s+everything\s+you\s+can)\b",
+            r"\b(fill\s+this\s+registration\s+form\s+but\s+don'?t\s+submit|fill\s+and\s+submit)\b",
+            r"\b(set\s+city\s+to|change\s+the\s+email|replace\s+the\s+existing|update\s+this\s+field)\b",
+        ]
+
+        if any(re.search(pat, low) or re.search(pat, low_norm) for pat in form_analyze_patterns):
+            return RouteDecision(
+                intent=IntentCategory.FORM_ANALYZE,
+                tool="form_analyze",
+                should_bypass_web_search=True,
+                direct_answer=None,
+                reason="form analysis and missing field query",
+                confidence=0.98
+            )
+
+        if any(re.search(pat, low) or re.search(pat, low_norm) for pat in form_fill_patterns):
+            return RouteDecision(
+                intent=IntentCategory.FORM_FILL,
+                tool="form_fill",
+                should_bypass_web_search=True,
+                direct_answer=None,
+                reason="form understanding and intelligent form filling",
+                confidence=0.98
+            )
+
+        # 8. Check for Computer Use Action (Direct Screen & UI Interaction)
+        cu_click_patterns = [
+            r"^\s*(?:click|tap|press)\s+(?:on\s+)?(?:the\s+)?([a-zA-Z0-9_\-\s@]+?)(?:\s+button|\s+icon|\s+link|\s+tab|\s+menu)?\s*$",
+            r"\b(double\s+click|right\s+click)\b",
+            r"\bclick\s+(?:on\s+)?(?:the\s+)?(?:address\s+bar|search\s+bar|search\s+button|save\s+button|submit|ok|cancel|close|settings|input|@e[0-9]+)\b"
+        ]
+        cu_type_patterns = [
+            r"^\s*type\s+(.+?)\s+(?:in|into)\s+(?:the\s+)?([a-zA-Z0-9_\-\s@]+)\s*$",
+            r"^\s*type\s+(.+?)\s+(?:in|into)\s+notepad\s*$",
+            r"\btype\s+this\s+into\s+([a-zA-Z0-9_\-\s]+)\b"
+        ]
+        cu_observe_patterns = [
+            r"\b(observe|inspect|scan|see)\s+(?:the\s+)?(?:screen|desktop|ui|elements)\b",
+            r"\b(resolve|find)\s+(?:the\s+)?(?:ui\s+)?target\b",
+            r"\bscroll\s+(up|down|left|right)\b"
+        ]
+
+        if any(re.search(pat, low) or re.search(pat, low_norm) for pat in cu_click_patterns):
+            return RouteDecision(
+                intent=IntentCategory.COMPUTER_USE,
+                tool="computer_use_click",
+                should_bypass_web_search=True,
+                direct_answer=None,
+                reason="computer use UI click",
+                confidence=0.96
+            )
+
+        if any(re.search(pat, low) or re.search(pat, low_norm) for pat in cu_type_patterns):
+            return RouteDecision(
+                intent=IntentCategory.COMPUTER_USE,
+                tool="computer_use_type",
+                should_bypass_web_search=True,
+                direct_answer=None,
+                reason="computer use UI type",
+                confidence=0.96
+            )
+
+        if any(re.search(pat, low) or re.search(pat, low_norm) for pat in cu_observe_patterns):
+            tool = "computer_use_observe" if "observe" in low or "inspect" in low else "computer_use_step"
+            return RouteDecision(
+                intent=IntentCategory.COMPUTER_USE,
+                tool=tool,
+                should_bypass_web_search=True,
+                direct_answer=None,
+                reason="computer use screen perception/navigation",
+                confidence=0.95
+            )
+
+        # 9. Check for Android / Device Control Action
         android_patterns = [
             r"\b(phone|android|mobile|torch|flashlight|whatsapp\s+message|call\s+contact)\b"
         ]
@@ -271,7 +381,7 @@ class IntentRouter:
                 confidence=0.92
             )
 
-        # 8. Check for General Knowledge / Static Encyclopedic Inquiries
+        # 10. Check for General Knowledge / Static Encyclopedic Inquiries
         if any(re.match(pat, low) or re.match(pat, low_norm) for pat in GENERAL_KNOWLEDGE_PATTERNS):
             return RouteDecision(
                 intent=IntentCategory.GENERAL_KNOWLEDGE,
@@ -282,7 +392,7 @@ class IntentRouter:
                 confidence=0.90
             )
 
-        # 9. Fallback: Ambiguous / General Query
+        # 11. Fallback: Ambiguous / General Query
         return RouteDecision(
             intent=IntentCategory.AMBIGUOUS,
             tool=None,

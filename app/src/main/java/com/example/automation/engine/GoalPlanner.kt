@@ -443,6 +443,15 @@ object GoalPlanner {
                             dependsOn = dependsOn
                         )
                     }
+                    "WAIT", "WAIT_FOR_UI" -> {
+                        ActionStep(
+                            stepId = stepId,
+                            actionType = "WAIT_FOR_UI",
+                            targetText = act.target ?: "composer",
+                            params = act.params.ifEmpty { mapOf("timeout" to "5000") },
+                            dependsOn = dependsOn
+                        )
+                    }
                     else -> { // "CLICK" or "TAP"
                         ActionStep(
                             stepId = stepId,

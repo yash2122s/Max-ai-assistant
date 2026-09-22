@@ -748,71 +748,270 @@ class MAXTaskAuthority:
         artifacts = []
 
         try:
-            # 1. Filesystem Operations (Folder & File Creation without Worktree Isolation)
-            if any(w in low_goal for w in ("folder", "directory")) and any(w in low_goal for w in ("create", "make", "new", "add", "cheyyi")):
+            # 1. Filesystem Operations (Folder & File Creation, Writing, Reading, Opening)
+            is_fs_op = any(w in low_goal for w in ("folder", "directory", "file", "text file", ".txt", ".md", ".csv", ".json", ".py", ".log")) and any(
+                w in low_goal for w in ("create", "make", "new", "write", "read", "open", "delete", "save", "cheyyi", "pettuko")
+            )
+            if is_fs_op:
                 from pathlib import Path
                 import re
-                folder_name = "VoiceTest"
-                match = re.search(r"(?:named|called)\s+['\"]?([a-zA-Z0-9_\-]+)['\"]?", envelope.goal, re.IGNORECASE)
-                if match:
-                    folder_name = match.group(1)
-                elif "voicetest" in low_goal:
-                    folder_name = "VoiceTest"
-                elif "bangaru" in low_goal:
-                    folder_name = "Bangaru"
-                elif "yashwanth" in low_goal:
-                    folder_name = "Yashwanth"
-
-                if "desktop" in low_goal:
-                    base_dir = Path.home() / "Desktop"
-                elif "download" in low_goal:
-                    base_dir = Path.home() / "Downloads"
-                else:
-                    base_dir = Path(envelope.workspace or config.PROJECT_ROOT)
-
-                target_dir = base_dir / folder_name
-                target_dir.mkdir(parents=True, exist_ok=True)
-                artifacts.append(str(target_dir))
-
-                from core.verifier import action_verifier
-                verified = action_verifier.verify_folder_created_sync(str(target_dir))
-                return TaskResult(
-                    task_id=envelope.task_id,
-                    status=TaskStatus.COMPLETED if verified else TaskStatus.VERIFICATION_FAILED,
-                    claimed_success=True,
-                    verified_success=verified,
-                    summary=f"Created folder '{folder_name}' successfully.",
-                    artifacts=artifacts
+                from tools.file_manager import (
+                    _resolve_user_path,
+                    create_folder,
+                    create_file,
+                    write_file,
+                    read_file,
+                    open_file,
+                    delete_file,
                 )
+                from core.verifier import action_verifier
 
-            if any(w in low_goal for w in ("file", "text file")) and any(w in low_goal for w in ("create", "make", "new", "write", "cheyyi")):
-                from tools.file_manager import create_file
-                from pathlib import Path
-                import re
-                # Resolve target path and content
-                target_path = None
-                if "download" in low_goal:
-                    base_dir = Path.home() / "Downloads"
-                elif "desktop" in low_goal:
-                    base_dir = Path.home() / "Desktop"
-                else:
-                    base_dir = Path(envelope.workspace or config.PROJECT_ROOT)
+                # 1. Extract requested content (Priority: metadata -> plan -> regex -> None)
+                extracted_content = None
+                if envelope.metadata:
+                    extracted_content = envelope.metadata.get("content") or envelope.metadata.get("text")
+                if extracted_content is None:
+                    m_content = re.search(r"(?:content|text|write|saying)\s+['\"]([^'\"]+)['\"]", envelope.goal, re.IGNORECASE)
+                    if m_content:
+                        extracted_content = m_content.group(1)
+                    else:
+                        quoted_all = re.findall(r"['\"]([^'\"]+)['\"]", envelope.goal)
+                        for q in quoted_all:
+                            if not any(q.lower().endswith(ext) for ext in (".txt", ".md", ".json", ".csv", ".py", ".log")) and "/" not in q and "\\" not in q:
+                                extracted_content = q
+                                break
 
-                match = re.search(r"([a-zA-Z0-9_\-\\]+\.(?:txt|md|csv|py|json))", envelope.goal, re.IGNORECASE)
-                if match:
-                    target_path = str(base_dir / match.group(1))
-                else:
-                    target_path = str(base_dir / "notes.txt")
+                # 2. Extract potential paths from goal
+                file_path_match = re.search(r"((?:Desktop|Downloads|Documents|[a-zA-Z]:[\\/])[a-zA-Z0-9_\-\.\/\\]*\.[a-zA-Z0-9]+|\b[a-zA-Z0-9_\-\/\\]+\.[a-zA-Z0-9]+\b)", envelope.goal, re.IGNORECASE)
+                raw_file_path = file_path_match.group(1) if file_path_match else None
 
-                res = create_file(path=target_path, content="Created via MAX Windows Agent.")
-                verified = res.get("verified", False) or res.get("status") == "success"
+                folder_path_match = re.search(r"(?:folder|directory)\s+['\"]?((?:Desktop|Downloads|Documents|[a-zA-Z]:[\\/])[a-zA-Z0-9_\-\.\/\\]*|[a-zA-Z0-9_\-]+)['\"]?", envelope.goal, re.IGNORECASE)
+                if not folder_path_match:
+                    folder_path_match = re.search(r"['\"]?((?:Desktop|Downloads|Documents)[\\/][a-zA-Z0-9_\-\.\/\\]+)['\"]?\s+(?:folder|directory)", envelope.goal, re.IGNORECASE)
+                raw_folder_path = folder_path_match.group(1) if folder_path_match else None
+
+                executed_actions = []
+                last_target_path = None
+                verification_evidence = {
+                    "path_exists": False,
+                    "is_file": False,
+                    "content_verified": False,
+                    "details": {}
+                }
+
+                # Step A: Folder Creation (if requested)
+                if any(w in low_goal for w in ("folder", "directory")) and any(w in low_goal for w in ("create", "make", "new", "add", "cheyyi")):
+                    target_folder = raw_folder_path
+                    if not target_folder:
+                        if "voicetest" in low_goal:
+                            target_folder = "Desktop/VoiceTest"
+                        elif "bangaru" in low_goal:
+                            target_folder = "Desktop/Bangaru"
+                        elif "yashwanth" in low_goal:
+                            target_folder = "Desktop/Yashwanth"
+                        elif "desktop" in low_goal:
+                            target_folder = "Desktop/NewFolder"
+                        else:
+                            target_folder = "NewFolder"
+                    
+                    try:
+                        resolved_folder = _resolve_user_path(target_folder)
+                    except Exception as pe:
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.PERMISSION_DENIED if "Traversal" in str(pe) or "denied" in str(pe).lower() else TaskStatus.FAILED,
+                            claimed_success=False,
+                            verified_success=False,
+                            summary=f"Path resolution rejected: {pe}",
+                            error={"code": "PATH_SECURITY_ERROR", "message": str(pe)}
+                        )
+
+                    f_res = create_folder(resolved_folder)
+                    v_folder = action_verifier.verify_folder_created_sync(resolved_folder)
+                    if not v_folder:
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.VERIFICATION_FAILED,
+                            claimed_success=True,
+                            verified_success=False,
+                            summary=f"Folder creation verification failed for '{resolved_folder}'.",
+                            artifacts=[resolved_folder],
+                            error={"code": "VERIFICATION_FAILED", "message": f"Folder '{resolved_folder}' was not verified on disk."}
+                        )
+                    artifacts.append(resolved_folder)
+                    executed_actions.append(f"created folder '{resolved_folder}'")
+                    last_target_path = resolved_folder
+                    verification_evidence["path_exists"] = True
+
+                # Step B: File Creation (if requested)
+                has_file_create = any(w in low_goal for w in ("file", "text file", ".txt", ".md", ".csv", ".py", ".json", ".log")) and any(w in low_goal for w in ("create", "make", "new", "cheyyi"))
+                if has_file_create:
+                    target_file = raw_file_path
+                    if not target_file:
+                        if raw_folder_path:
+                            target_file = f"{raw_folder_path}/notes.txt"
+                        elif "desktop" in low_goal:
+                            target_file = "Desktop/notes.txt"
+                        elif "download" in low_goal:
+                            target_file = "Downloads/notes.txt"
+                        else:
+                            target_file = "notes.txt"
+
+                    try:
+                        resolved_file = _resolve_user_path(target_file)
+                    except Exception as pe:
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.PERMISSION_DENIED if "Traversal" in str(pe) or "denied" in str(pe).lower() else TaskStatus.FAILED,
+                            claimed_success=False,
+                            verified_success=False,
+                            summary=f"Path resolution rejected: {pe}",
+                            error={"code": "PATH_SECURITY_ERROR", "message": str(pe)}
+                        )
+
+                    content_to_write = extracted_content if extracted_content is not None else ""
+                    c_res = create_file(path=resolved_file, content=content_to_write)
+                    v_file = action_verifier.verify_file_created_sync(resolved_file, expected_content=content_to_write if extracted_content is not None else None)
+                    if not v_file:
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.VERIFICATION_FAILED,
+                            claimed_success=True,
+                            verified_success=False,
+                            summary=f"File creation verification failed for '{resolved_file}'.",
+                            artifacts=[resolved_file],
+                            error={"code": "VERIFICATION_FAILED", "message": f"File '{resolved_file}' was not verified on disk."}
+                        )
+                    if resolved_file not in artifacts:
+                        artifacts.append(resolved_file)
+                    executed_actions.append(f"created file '{resolved_file}'")
+                    last_target_path = resolved_file
+                    verification_evidence["path_exists"] = True
+                    verification_evidence["is_file"] = True
+                    if extracted_content is not None:
+                        verification_evidence["content_verified"] = True
+
+                # Step C: File Write / Content Update (if write is explicitly specified)
+                has_write = any(w in low_goal for w in ("write", "save", "append", "update content"))
+                if has_write and extracted_content is not None:
+                    target_file = raw_file_path or (last_target_path if last_target_path and "." in last_target_path else "Desktop/notes.txt")
+                    try:
+                        resolved_file = _resolve_user_path(target_file)
+                    except Exception as pe:
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.PERMISSION_DENIED if "Traversal" in str(pe) or "denied" in str(pe).lower() else TaskStatus.FAILED,
+                            claimed_success=False,
+                            verified_success=False,
+                            summary=f"Path resolution rejected: {pe}",
+                            error={"code": "PATH_SECURITY_ERROR", "message": str(pe)}
+                        )
+
+                    w_res = write_file(path=resolved_file, content=extracted_content)
+                    v_write = action_verifier.verify_file_content_sync(resolved_file, extracted_content)
+                    if not v_write:
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.VERIFICATION_FAILED,
+                            claimed_success=True,
+                            verified_success=False,
+                            summary=f"Write verification failed for '{resolved_file}'. Expected content did not match.",
+                            artifacts=[resolved_file],
+                            error={"code": "VERIFICATION_FAILED", "message": f"File content verification failed for '{resolved_file}'."}
+                        )
+                    if resolved_file not in artifacts:
+                        artifacts.append(resolved_file)
+                    executed_actions.append(f"wrote content to '{resolved_file}'")
+                    last_target_path = resolved_file
+                    verification_evidence["path_exists"] = True
+                    verification_evidence["is_file"] = True
+                    verification_evidence["content_verified"] = True
+
+                # Step D: File Read (if read requested)
+                has_read = any(w in low_goal for w in ("read", "view file", "show content", "get content"))
+                if has_read and not has_file_create and not has_write:
+                    target_file = raw_file_path or (last_target_path if last_target_path else "Desktop/notes.txt")
+                    try:
+                        resolved_file = _resolve_user_path(target_file)
+                    except Exception as pe:
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.PERMISSION_DENIED if "Traversal" in str(pe) or "denied" in str(pe).lower() else TaskStatus.FAILED,
+                            claimed_success=False,
+                            verified_success=False,
+                            summary=f"Path resolution rejected: {pe}",
+                            error={"code": "PATH_SECURITY_ERROR", "message": str(pe)}
+                        )
+
+                    r_res = read_file(path=resolved_file)
+                    if r_res.get("status") == "error":
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.FAILED,
+                            claimed_success=False,
+                            verified_success=False,
+                            summary=r_res.get("message", "Failed to read file."),
+                            error=r_res.get("error", {"code": "FILE_READ_ERROR"})
+                        )
+                    if resolved_file not in artifacts:
+                        artifacts.append(resolved_file)
+                    executed_actions.append(f"read file '{resolved_file}'")
+                    last_target_path = resolved_file
+                    verification_evidence["path_exists"] = True
+                    verification_evidence["is_file"] = True
+
+                # Step E: Open File / Folder (if open requested)
+                has_open = any(w in low_goal for w in ("open", "launch")) and not ("app" in low_goal or "application" in low_goal or "chrome" in low_goal or "paint" in low_goal or "notepad" in low_goal or "code" in low_goal)
+                if has_open:
+                    target_to_open = raw_file_path or raw_folder_path or last_target_path
+                    if not target_to_open:
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.FAILED,
+                            claimed_success=False,
+                            verified_success=False,
+                            summary="Target file or folder for open operation could not be resolved.",
+                            error={"code": "TARGET_UNRESOLVED", "message": "No valid file or folder path found to open."}
+                        )
+                    try:
+                        resolved_target = _resolve_user_path(target_to_open)
+                    except Exception as pe:
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.PERMISSION_DENIED if "Traversal" in str(pe) or "denied" in str(pe).lower() else TaskStatus.FAILED,
+                            claimed_success=False,
+                            verified_success=False,
+                            summary=f"Path resolution rejected: {pe}",
+                            error={"code": "PATH_SECURITY_ERROR", "message": str(pe)}
+                        )
+
+                    o_res = open_file(path=resolved_target)
+                    if o_res.get("status") == "error" or not o_res.get("verified", False):
+                        return TaskResult(
+                            task_id=envelope.task_id,
+                            status=TaskStatus.VERIFICATION_FAILED,
+                            claimed_success=True,
+                            verified_success=False,
+                            summary=f"Failed to open '{resolved_target}': {o_res.get('message', 'Open verification failed')}",
+                            artifacts=[resolved_target],
+                            error={"code": "OPEN_VERIFICATION_FAILED", "message": o_res.get("message", "File open verification failed")}
+                        )
+                    if resolved_target not in artifacts:
+                        artifacts.append(resolved_target)
+                    executed_actions.append(f"opened '{resolved_target}'")
+                    verification_evidence["path_exists"] = True
+                    if Path(resolved_target).is_file():
+                        verification_evidence["is_file"] = True
+
+                summary_text = "Successfully " + ", ".join(executed_actions) + "." if executed_actions else f"Executed filesystem task for {envelope.goal}."
                 return TaskResult(
                     task_id=envelope.task_id,
-                    status=TaskStatus.COMPLETED if verified else TaskStatus.FAILED,
+                    status=TaskStatus.COMPLETED,
                     claimed_success=True,
-                    verified_success=verified,
-                    summary=f"Created file at {target_path}.",
-                    artifacts=[target_path]
+                    verified_success=True,
+                    summary=summary_text,
+                    artifacts=artifacts,
+                    verification=verification_evidence
                 )
 
             # 2. Browser Tab Switching (Keyboard-First Deterministic Action)

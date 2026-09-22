@@ -20,59 +20,64 @@ class YoutubeTool : Tool {
 
     override fun validate(request: ExecutionRequest): Boolean {
         if (request.action == "OPEN_YOUTUBE") return true
-        val query = request.arguments.get("query")?.asString
+        val query = (request.arguments.get("query")?.asString
             ?: request.arguments.get("search_query")?.asString
-            ?: request.arguments.get("app")?.asString
-            ?: request.arguments.get("app_name")?.asString
-            ?: ""
-        return query.isNotEmpty() || request.action == "OPEN_YOUTUBE"
+            ?: "").trim()
+        return query.isNotEmpty()
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
-        val query = request.arguments.get("query")?.asString
-            ?: request.arguments.get("search_query")?.asString
-            ?: request.arguments.get("app")?.asString
-            ?: request.arguments.get("app_name")?.asString
-            ?: ""
-
-        Log.d(TAG, "YouTube action '${request.action}' with query: '$query'")
-        return try {
-            if (request.action == "OPEN_YOUTUBE" || query.isBlank()) {
-                val launchIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.youtube")
-                if (launchIntent != null) {
-                    launchIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(launchIntent)
-                    ToolResult(
-                        success = true,
-                        toolName = name,
-                        verificationRequired = true,
-                        metadata = JSONObject().put("action", "OPEN_YOUTUBE").put("package", "com.google.android.youtube")
-                    )
-                } else {
-                    ToolResult(
-                        success = false,
-                        toolName = name,
-                        errorCode = "YOUTUBE_NOT_INSTALLED",
-                        message = "YouTube application is not installed on this device"
-                    )
-                }
+        if (request.action == "OPEN_YOUTUBE") {
+            Log.d(TAG, "Executing OPEN_YOUTUBE action")
+            val launchIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.youtube")
+            return if (launchIntent != null) {
+                launchIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                context.startActivity(launchIntent)
+                ToolResult(
+                    success = true,
+                    toolName = name,
+                    verificationRequired = true,
+                    metadata = JSONObject().put("action", "OPEN_YOUTUBE").put("package", "com.google.android.youtube")
+                )
             } else {
-                val success = com.example.automation.YoutubeAutomation.searchAndPlay(context, query)
-                if (success) {
-                    ToolResult(
-                        success = true,
-                        toolName = name,
-                        verificationRequired = true,
-                        metadata = JSONObject().put("query", query).put("action", request.action)
-                    )
-                } else {
-                    ToolResult(
-                        success = false,
-                        toolName = name,
-                        errorCode = "YOUTUBE_SEARCH_FAILED",
-                        message = "YouTube automation failed to locate or play results for '$query'"
-                    )
-                }
+                ToolResult(
+                    success = false,
+                    toolName = name,
+                    errorCode = "YOUTUBE_NOT_INSTALLED",
+                    message = "YouTube application is not installed on this device"
+                )
+            }
+        }
+
+        val query = (request.arguments.get("query")?.asString
+            ?: request.arguments.get("search_query")?.asString
+            ?: "").trim()
+
+        if (query.isBlank()) {
+            return ToolResult(
+                success = false,
+                toolName = name,
+                errorCode = "INVALID_ARGUMENTS",
+                message = "YouTube search query cannot be empty"
+            )
+        }
+
+        return try {
+            val success = com.example.automation.YoutubeAutomation.searchAndPlay(context, query)
+            if (success) {
+                ToolResult(
+                    success = true,
+                    toolName = name,
+                    verificationRequired = true,
+                    metadata = JSONObject().put("query", query).put("action", request.action)
+                )
+            } else {
+                ToolResult(
+                    success = false,
+                    toolName = name,
+                    errorCode = "YOUTUBE_SEARCH_FAILED",
+                    message = "YouTube automation failed to locate or play results for '$query'"
+                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "YouTube execution threw exception", e)

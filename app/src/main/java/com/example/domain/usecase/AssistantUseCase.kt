@@ -145,12 +145,13 @@ class AssistantUseCase(private val context: Context) {
             }
             val planError = planResult.errorMessage ?: ""
             val plannerDeclinedOrModelFailover =
-                planError.startsWith("Ambiguous request:") ||
-                planError.startsWith("Generated plan is empty") ||
-                planError.startsWith("Plan generation failed") ||
-                planError.startsWith("Planning exception") ||
+                planError.contains("Ambiguous request") ||
+                planError.contains("Generated plan is empty") ||
+                planError.contains("Invalid generated plan") ||
+                planError.contains("Plan generation failed") ||
+                planError.contains("Planning exception") ||
                 planError.contains("HTTP ") ||
-                planError.startsWith("Empty user goal")
+                planError.contains("Empty user goal")
             if (plannerDeclinedOrModelFailover) {
                 // Planner declined (conversational/ambiguous) or model/network hiccup:
                 // safe failover to the Live conversational brain.

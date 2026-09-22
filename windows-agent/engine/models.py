@@ -46,6 +46,12 @@ class VerificationType(str, Enum):
     NONE = "none"
     APP_LAUNCHED = "app_launched"
     WINDOW_CLOSED = "window_closed"
+    FILE_CREATED = "file_created"
+    FILE_WRITTEN = "file_written"
+    FILE_OPENED = "file_opened"
+    FOLDER_CREATED = "folder_created"
+    PATH_EXISTS = "path_exists"
+    PATH_DELETED = "path_deleted"
     CUSTOM = "custom"
 
 

@@ -95,6 +95,19 @@ TOOL AUTOMATION RULES:
 - For "Paduko" / "Go to sleep" / "Sleep" / "Stop listening" / "Standby": Call go_to_sleep().
 - For "gurthupettuko" / "remember this": Call remember_fact(key=..., value=...).
 - For "gurthundha?" / "recall cheyyi": Call recall_fact(query=...) or list_memories().
+- For "YouTube lo X play cheyyi" / "Play X on YouTube" / "Play X song": Call play_youtube_video(query="X").
+- For "Ee YouTube video summarize cheyyi" / "Summarize this YouTube video" / "YouTube video summary cheyyi": Call summarize_youtube_video(url=...).
+- For "YouTube trending videos em unnayi?" / "Show trending videos on YouTube": Call get_youtube_trending(region="IN").
+- For "YouTube video details / views / duration cheppu": Call get_youtube_video_info(url=...).
+- For "Field clear cheyyi" / "Input box clear cheyyi" / "Clear this text": Call clear_field().
+- For "Smart type cheyyi" / "Clear chesi X type cheyyi": Call smart_type(text="X", clear_first=True).
+- For "Screen paina X button / icon click cheyyi" / "Screen lo X ni kanipetti click chey": Call screen_click(description="X").
+- For "Fake / Dummy / Random test data generate cheyyi" (e.g. email, password, name, phone): Call generate_random_data(data_type="...").
+- For "PC webcam lo photo teesuko" / "Webcam photo teesuko" / "Take a webcam photo" / "Webcam lo photo theeyi": Call capture_webcam().
+- For "Webcam detect cheyyi" / "Check webcam" / "Webcam check cheyyi": Call detect_webcam().
+- For "Wallpaper X ga set cheyyi" / "Change wallpaper to X" / "Set desktop wallpaper": Call set_wallpaper(path="...").
+- For "Current wallpaper enti?" / "Present wallpaper cheppu": Call get_wallpaper().
+- For "Internet nundi X image wallpaper ga pettu" / "Set wallpaper from URL": Call set_wallpaper_from_url(url="...").
 - For explicit code inspection, bug fixing, or codebase modification (e.g. "Inspect the Paint automation code", "Fix Paint automation", "Check repository files"): Call developer_task(instruction=...).
 - CRITICAL CONVERSATION RULE: DO NOT call developer_task for casual conversation, remarks about building/enhancing MAX (e.g., "I enhanced you", "ninne build chesanu"), or casual questions like "What happened?", "Em jarigindi?", or "How are you?". Always respond conversationally.
 

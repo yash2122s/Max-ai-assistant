@@ -21,6 +21,7 @@ import com.example.automation.resolver.WhatsAppContactResolver
 import com.example.core.registry.ServiceRegistry
 import com.example.utils.NotificationHelper
 import java.io.ByteArrayOutputStream
+import java.util.Locale
 
 enum class SendVerificationResult {
     SUCCESS,
@@ -52,7 +53,23 @@ class JarvisAccessibilityService : AccessibilityService() {
         var pendingTask: AutomationTask? = null
         var instance: JarvisAccessibilityService? = null
         var lastSendVerificationResult: SendVerificationResult? = null
-        fun isServiceRunning(): Boolean = instance != null
+        var testRootProvider: (() -> AccessibilityNodeInfo?)? = null
+        var testWindowsProvider: (() -> List<android.view.accessibility.AccessibilityWindowInfo>?)? = null
+        var testGestureDispatcher: ((android.accessibilityservice.GestureDescription) -> Boolean)? = null
+
+        fun isServiceRunning(): Boolean = instance != null || testRootProvider != null
+
+        fun getActiveRoot(): AccessibilityNodeInfo? {
+            return instance?.rootInActiveWindow ?: testRootProvider?.invoke()
+        }
+
+        fun getActiveWindows(): List<android.view.accessibility.AccessibilityWindowInfo>? {
+            return instance?.windows ?: testWindowsProvider?.invoke()
+        }
+
+        fun dispatchGestureAction(gesture: android.accessibilityservice.GestureDescription): Boolean {
+            return instance?.dispatchGesture(gesture, null, null) ?: testGestureDispatcher?.invoke(gesture) ?: false
+        }
     }
 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -678,7 +695,7 @@ class JarvisAccessibilityService : AccessibilityService() {
         val screenWidth = displayMetrics.widthPixels.toFloat()
         val screenHeight = displayMetrics.heightPixels.toFloat()
 
-        // 1. Try precise gesture tap at the exact center of text node
+        // 1. Try precise gesture tap at the exact center of the contact NAME text node (bypasses left avatar entirely)
         val textRect = Rect()
         textNode.getBoundsInScreen(textRect)
         if (!textRect.isEmpty && textRect.width() > 0 && textRect.height() > 0) {
@@ -704,7 +721,9 @@ class JarvisAccessibilityService : AccessibilityService() {
         var parent = textNode.parent
         var depth = 0
         while (parent != null && depth < 6) {
-            if (parent.isClickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            val parentId = (parent.viewIdResourceName ?: "").lowercase(Locale.ROOT)
+            val isAvatar = parentId.contains("contact_photo") || parentId.contains("avatar") || parentId.contains("profile_picture")
+            if (!isAvatar && parent.isClickable && parent.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                 Log.d("WA_DEBUG", "ACTION_CLICK succeeded on ancestor depth=$depth")
                 return true
             }
@@ -712,11 +731,12 @@ class JarvisAccessibilityService : AccessibilityService() {
             depth++
         }
 
-        // 4. Fallback: Gesture tap on row container's exact bounding center
+        // 4. Fallback: Gesture tap on the center-right of the row container (offset to avoid left avatar)
         val rowRect = Rect()
         rowNode.getBoundsInScreen(rowRect)
         if (!rowRect.isEmpty && rowRect.width() > 0 && rowRect.height() > 0) {
-            val tapX = rowRect.exactCenterX().coerceIn(0f, (screenWidth - 1f).coerceAtLeast(0f))
+            // Tap at 55% across the row width to ensure it hits the text area and not the avatar on the left
+            val tapX = (rowRect.left + rowRect.width() * 0.55f).coerceIn(0f, (screenWidth - 1f).coerceAtLeast(0f))
             val tapY = rowRect.exactCenterY().coerceIn(0f, (screenHeight - 1f).coerceAtLeast(0f))
             val path = Path()
             path.moveTo(tapX, tapY)
@@ -724,7 +744,7 @@ class JarvisAccessibilityService : AccessibilityService() {
                 .addStroke(GestureDescription.StrokeDescription(path, 0, 100))
                 .build()
             val dispatched = dispatchGesture(gesture, null, null)
-            Log.d("WA_DEBUG", "Dispatched gesture tap at row center ($rowRect, tap=($tapX, $tapY)): $dispatched")
+            Log.d("WA_DEBUG", "Dispatched gesture tap at row center-right ($rowRect, tap=($tapX, $tapY)): $dispatched")
             return dispatched
         }
 

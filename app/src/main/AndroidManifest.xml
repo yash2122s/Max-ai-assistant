@@ -196,6 +196,7 @@
 
         <service
             android:name=".voice.session.JarvisRecognitionService"
+            android:permission="android.permission.BIND_RECOGNITION_SERVICE"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.speech.RecognitionService" />

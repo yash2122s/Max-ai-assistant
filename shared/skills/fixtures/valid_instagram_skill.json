@@ -1,0 +1,132 @@
+{
+  "skill_id": "com.max.automation.instagram.search_chat",
+  "name": "Instagram Direct Message Search",
+  "description": "Opens Instagram, navigates to Direct Messages, searches for a user, and prepares the chat view.",
+  "version": "1.0.0",
+  "schema_version": "1.0.0",
+  "author": "MAX Ecosystem",
+  "trust_level": "LOCAL_USER",
+  "checksum": "",
+  "supported_platforms": ["android", "windows"],
+  "requirements": {
+    "common": {
+      "capabilities": ["network"],
+      "permissions": []
+    },
+    "android": {
+      "capabilities": ["accessibility"],
+      "permissions": []
+    },
+    "windows": {
+      "capabilities": ["uia"],
+      "permissions": []
+    }
+  },
+  "allowed_capabilities": ["app.open", "ui.click", "ui.type_text", "ui.wait"],
+  "intents": {
+    "exact_phrases": [
+      "open instagram chat",
+      "message someone on instagram",
+      "instagram lo chat open cheyi"
+    ],
+    "trigger_keywords": ["instagram", "direct message", "insta dm"],
+    "category": "messaging"
+  },
+  "inputs": [
+    {
+      "name": "target_user",
+      "type": "string",
+      "required": true,
+      "default_value": "",
+      "description": "Username or contact name to search for"
+    }
+  ],
+  "preconditions": [
+    {
+      "app_identifier": "Instagram",
+      "window_state": "any"
+    }
+  ],
+  "steps": [
+    {
+      "step_id": "step_open_app",
+      "action": "app.open",
+      "target": "Instagram",
+      "depends_on": [],
+      "arguments": {
+        "app_name": "Instagram"
+      },
+      "platform_overrides": {
+        "android": { "package_name": "com.instagram.android" },
+        "windows": { "process_name": "Instagram.exe", "window_title": "Instagram" }
+      },
+      "timeout_ms": 8000,
+      "retry_policy": {
+        "max_retries": 1,
+        "delay_ms": 500
+      },
+      "verification": {
+        "type": "APP_FOREGROUND",
+        "expected_value": "Instagram",
+        "timeout_ms": 3000
+      }
+    },
+    {
+      "step_id": "step_click_dm",
+      "action": "ui.click",
+      "target": "Direct Messages Icon",
+      "depends_on": ["step_open_app"],
+      "arguments": {},
+      "platform_overrides": {
+        "android": {
+          "content_description": "Direct messaging",
+          "resource_id": "com.instagram.android:id/action_bar_inbox_button"
+        },
+        "windows": {
+          "automation_id": "DirectMessageNavButton",
+          "control_type": "Button"
+        }
+      },
+      "timeout_ms": 5000,
+      "retry_policy": {
+        "max_retries": 0,
+        "delay_ms": 0
+      },
+      "verification": {
+        "type": "ELEMENT_VISIBLE",
+        "expected_value": "Search",
+        "timeout_ms": 3000
+      }
+    },
+    {
+      "step_id": "step_search_user",
+      "action": "ui.type_text",
+      "target": "Search Input Box",
+      "depends_on": ["step_click_dm"],
+      "arguments": {
+        "text": "${inputs.target_user}",
+        "press_enter": true
+      },
+      "platform_overrides": {
+        "android": {
+          "resource_id": "com.instagram.android:id/search_edit_text"
+        },
+        "windows": {
+          "automation_id": "SearchQueryInput",
+          "control_type": "Edit"
+        }
+      },
+      "timeout_ms": 5000,
+      "retry_policy": {
+        "max_retries": 0,
+        "delay_ms": 0
+      },
+      "verification": {
+        "type": "TEXT_MATCH",
+        "expected_value": "${inputs.target_user}",
+        "timeout_ms": 3000
+      }
+    }
+  ],
+  "failure_policy": "ABORT"
+}

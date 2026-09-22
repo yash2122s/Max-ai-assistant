@@ -124,9 +124,9 @@ class TestTaskEngine(unittest.TestCase):
         """Verify tasks execute steps sequentially from Step 1 to Step N."""
         steps = [
             Step(step_id="s1", task_id="", sequence=1, action="get_volume"),
-            Step(step_id="s2", task_id="", sequence=2, action="get_brightness")
+            Step(step_id="s2", task_id="", sequence=2, action="get_system_info")
         ]
-        task = self.engine.create_task(goal="Volume and Brightness", steps=steps)
+        task = self.engine.create_task(goal="Volume and System Info", steps=steps)
         self.assertEqual(task.status, TaskState.CREATED)
 
         async def run():
@@ -159,7 +159,7 @@ class TestTaskEngine(unittest.TestCase):
         """Verify task cancellation halts execution cleanly between steps."""
         steps = [
             Step(step_id="s1", task_id="", sequence=1, action="get_volume"),
-            Step(step_id="s2", task_id="", sequence=2, action="get_brightness")
+            Step(step_id="s2", task_id="", sequence=2, action="get_system_info")
         ]
         task = self.engine.create_task(goal="Cancel Test", steps=steps)
 

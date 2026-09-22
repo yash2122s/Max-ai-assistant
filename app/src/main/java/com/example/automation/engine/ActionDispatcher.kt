@@ -148,6 +148,12 @@ object ActionDispatcher {
                     normalized.put("target_entity", "WhatsApp")
                     normalized.put("required_outcome", "MessageSent")
                     return dispatch(context, normalized)
+                } else if (transcription.contains("instagram")) {
+                    normalized.put("action", "TASK_INTENT")
+                    normalized.put("goal", "send_instagram_message")
+                    normalized.put("target_entity", "Instagram")
+                    normalized.put("required_outcome", "MessageSent")
+                    return dispatch(context, normalized)
                 }
                 return false
             }
@@ -208,6 +214,12 @@ object ActionDispatcher {
                     normalized.put("target_entity", "WhatsApp")
                     normalized.put("required_outcome", "MessageSent")
                     return dispatchWithResult(context, normalized)
+                } else if (transcription.contains("instagram")) {
+                    normalized.put("action", "TASK_INTENT")
+                    normalized.put("goal", "send_instagram_message")
+                    normalized.put("target_entity", "Instagram")
+                    normalized.put("required_outcome", "MessageSent")
+                    return dispatchWithResult(context, normalized)
                 }
             }
         }
@@ -254,9 +266,11 @@ object ActionDispatcher {
                 longTaskOrchestrator.executeTask(plan)
             }
 
-            // 3. Immediately unblock Gemini Live
+            // 3. Immediately unblock Gemini Live with explicit RUNNING status (success=false because it is not completed)
             return JSONObject().apply {
-                put("success", true)
+                put("status", "RUNNING")
+                put("success", false)
+                put("executionState", "RUNNING")
                 put("message", "Task dispatched to background orchestrator.")
                 put("data", JSONObject().apply {
                     put("taskId", plan.id)
@@ -276,7 +290,9 @@ object ActionDispatcher {
                 ExecutionEngine.execute(context, request)
             }
             val returnJson = JSONObject().apply {
+                put("status", if (result.success) "success" else "error")
                 put("success", result.success)
+                put("executionState", if (result.success) "COMPLETED" else "FAILED")
                 put("message", result.message ?: (if (result.success) "Success" else "Execution failed"))
                 if (!result.success) {
                     put("error", JSONObject().apply {
@@ -299,7 +315,9 @@ object ActionDispatcher {
         } catch (e: Exception) {
             Log.e(TAG, "Error in dispatchWithResult: $actionName", e)
             JSONObject().apply {
+                put("status", "error")
                 put("success", false)
+                put("executionState", "FAILED")
                 put("message", e.message ?: "Unknown error in ActionDispatcher")
                 put("error", JSONObject().apply {
                     put("code", "DISPATCH_ERROR")

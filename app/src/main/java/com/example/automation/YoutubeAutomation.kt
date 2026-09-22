@@ -29,45 +29,45 @@ object YoutubeAutomation {
             return false
         }
 
-        // Wait for YouTube search results page to load and render
-        delay(1800)
-
-        // 2. Try to auto-click the first playable video via Accessibility Service
-        var root = getFreshRoot()
+        // 2. Dynamically poll for YouTube search results UI and click the first playable video
+        val startTime = System.currentTimeMillis()
+        val timeoutMs = 4000L
+        val pollIntervalMs = 150L
         var clickedVideo = false
 
-        if (root != null) {
-            clickedVideo = clickFirstVideo(root)
-            if (!clickedVideo) {
-                // Retry once after short delay for slow networks/rendering
-                delay(1200)
-                root = getFreshRoot()
-                if (root != null) {
-                    clickedVideo = clickFirstVideo(root)
+        while (System.currentTimeMillis() - startTime < timeoutMs) {
+            val root = getFreshRoot()
+            if (root != null) {
+                val pkg = root.packageName?.toString().orEmpty()
+                if (pkg.equals("com.google.android.youtube", ignoreCase = true)) {
+                    if (clickFirstVideo(root)) {
+                        clickedVideo = true
+                        Log.d(TAG, "Successfully clicked first YouTube video result after ${System.currentTimeMillis() - startTime}ms!")
+                        break
+                    }
                 }
             }
+            delay(pollIntervalMs)
         }
 
-        if (clickedVideo) {
-            Log.d(TAG, "Successfully clicked first YouTube video result!")
-        } else {
-            Log.w(TAG, "Opened YouTube search results for '$cleanQuery', but could not auto-click video. (Results are visible on screen)")
+        if (!clickedVideo) {
+            val root = getFreshRoot()
+            if (root == null) {
+                Log.e(TAG, "Failed YouTube automation: Accessibility Service is disconnected or root is null")
+            } else {
+                Log.e(TAG, "Failed YouTube automation: Opened search for '$cleanQuery', but could not locate/click playable video within ${timeoutMs}ms")
+            }
+            return false
         }
 
-        // Return true because YouTube is guaranteed to be open with the requested query results!
         return true
     }
 
     private fun getFreshRoot(): AccessibilityNodeInfo? {
-        val service = JarvisAccessibilityService.instance
-            ?: ServiceRegistry.get<JarvisAccessibilityService>(ServiceType.ACCESSIBILITY)
-        if (service == null) {
-            Log.w(TAG, "Accessibility Service is not currently connected")
-            return null
-        }
-        val root = service.rootInActiveWindow
+        val root = JarvisAccessibilityService.getActiveRoot()
+            ?: ServiceRegistry.get<JarvisAccessibilityService>(ServiceType.ACCESSIBILITY)?.rootInActiveWindow
         if (root == null) {
-            Log.w(TAG, "rootInActiveWindow is null")
+            Log.w(TAG, "Accessibility root is not currently available")
         }
         return root
     }
@@ -143,37 +143,60 @@ object YoutubeAutomation {
     }
 
     private fun clickFirstVideo(root: AccessibilityNodeInfo): Boolean {
-        // Known YouTube Video container & thumbnail view IDs across app versions
-        val targetIds = listOf(
-            "com.google.android.youtube:id/thumbnail",
-            "com.google.android.youtube:id/video_info",
-            "com.google.android.youtube:id/compact_renderer",
-            "com.google.android.youtube:id/title",
-            "com.google.android.youtube:id/player_view"
-        )
+        // Scope search to the results list if present, preventing accidental clicks on toolbar / filters / header
+        val searchScope = root.findAccessibilityNodeInfosByViewId("com.google.android.youtube:id/results").firstOrNull()
+            ?: root.findAccessibilityNodeInfosByViewId("com.google.android.youtube:id/pane_fragment_contents").firstOrNull()
+            ?: root
 
-        for (resId in targetIds) {
-            val nodes = root.findAccessibilityNodeInfosByViewId(resId)
-            for (node in nodes) {
-                if (performClick(node)) {
-                    Log.d(TAG, "Clicked video node by ID: $resId")
-                    return true
-                }
+        fun isAdOrChannelOrNav(node: AccessibilityNodeInfo?): Boolean {
+            if (node == null) return false
+            val desc = node.contentDescription?.toString()?.lowercase() ?: ""
+            val text = node.text?.toString()?.lowercase() ?: ""
+            val id = (node.viewIdResourceName ?: "").lowercase()
+
+            val bounds = android.graphics.Rect()
+            node.getBoundsInScreen(bounds)
+
+            // Reject anything in the top header/appbar/filter area (y <= 340)
+            if (bounds.bottom <= 340 && bounds.top < 200) {
+                return true
             }
+
+            // Reject Ads
+            if (desc.contains("sponsored") || desc.contains("advertisement") || desc.contains("link opens in new window") ||
+                text.equals("ad", ignoreCase = true) || text.contains("sponsored") ||
+                id.contains("ad_") || id.contains("promoted")) {
+                return true
+            }
+            // Reject Channels / Avatars / Subscribe
+            if (desc.contains("subscribe") || desc.contains("go to channel") || desc.contains("explore menu") ||
+                id.contains("avatar") || id.contains("channel_header") || id.contains("subscribe") || id.contains("channel_name")) {
+                return true
+            }
+            // Reject Shorts / Navigation / Bars
+            if (desc.contains("play short") || desc.contains("shorts") || desc.contains("filter") || desc.contains("explore") ||
+                id.contains("search") || id.contains("filter") || id.contains("chip") ||
+                id.contains("tab") || id.contains("pivot") || id.contains("action_bar") ||
+                id.contains("toolbar") || id.contains("menu") || id.contains("header") ||
+                id.contains("bar") || id.contains("logo") || id.contains("short")) {
+                return true
+            }
+            return false
         }
 
-        // Content Description matching across YouTube versions (e.g. "by", "views", "ago", "play video")
+        // 1. Content Description matching on video cards
         fun findVideoByDesc(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
             if (node == null) return null
             val desc = node.contentDescription?.toString()?.lowercase() ?: ""
-            val id = (node.viewIdResourceName ?: "").lowercase()
             
-            // Skip search bar / filters / tabs / navigation buttons
-            if (!id.contains("search") && !id.contains("filter") && !id.contains("tab") && !id.contains("action_bar") && !id.contains("menu")) {
-                if (desc.contains("play video") || 
-                    (desc.contains("ago") && (desc.contains("views") || desc.contains("streamed"))) ||
-                    (desc.contains("minute") && desc.contains("second")) ||
-                    desc.contains("by ") && desc.contains("views")) {
+            if (!isAdOrChannelOrNav(node)) {
+                val hasVideoIndicators = desc.contains("play video") || 
+                    (desc.contains("ago") && (desc.contains("view") || desc.contains("crore") || desc.contains("lakh") || desc.contains("streamed"))) ||
+                    ((desc.contains("minute") || desc.contains("second") || desc.contains("hour")) && (desc.contains("view") || desc.contains("ago") || desc.contains("·") || desc.contains("-"))) ||
+                    (desc.contains("by ") && (desc.contains("view") || desc.contains("ago"))) ||
+                    (desc.contains("watch") && (desc.contains("view") || desc.contains("ago")))
+
+                if (hasVideoIndicators) {
                     return node
                 }
             }
@@ -186,33 +209,39 @@ object YoutubeAutomation {
             return null
         }
 
-        val descNode = findVideoByDesc(root)
+        val descNode = findVideoByDesc(searchScope)
         if (descNode != null && performClick(descNode)) {
-            Log.d(TAG, "Clicked video node by content description: ${descNode.contentDescription}")
+            Log.d(TAG, "Clicked video node by verified content description: ${descNode.contentDescription}")
             return true
         }
 
-        // Generic clickable row fallback: find the first clickable element in the main content body
-        fun findFirstClickableContent(node: AccessibilityNodeInfo?, depth: Int = 0): AccessibilityNodeInfo? {
-            if (node == null || depth > 20) return null
-            val id = (node.viewIdResourceName ?: "").lowercase()
-            if (!id.contains("search") && !id.contains("filter") && !id.contains("tab") && !id.contains("header") && !id.contains("bar")) {
-                if (node.isClickable && (node.contentDescription?.isNotEmpty() == true || node.text?.isNotEmpty() == true)) {
-                    return node
+        // 2. Known YouTube Video container & thumbnail view IDs
+        val targetIds = listOf(
+            "com.google.android.youtube:id/compact_renderer",
+            "com.google.android.youtube:id/video_info",
+            "com.google.android.youtube:id/thumbnail",
+            "com.google.android.youtube:id/title"
+        )
+
+        for (resId in targetIds) {
+            val nodes = searchScope.findAccessibilityNodeInfosByViewId(resId)
+            for (node in nodes) {
+                if (!isAdOrChannelOrNav(node) && performClick(node)) {
+                    Log.d(TAG, "Clicked video node by ID: $resId")
+                    return true
                 }
             }
-            for (i in 0 until node.childCount) {
-                val child = node.getChild(i) ?: continue
-                val res = findFirstClickableContent(child, depth + 1)
-                if (res != null) return res
-            }
-            return null
         }
 
-        val contentNode = findFirstClickableContent(root)
-        if (contentNode != null && performClick(contentNode)) {
-            Log.d(TAG, "Clicked video via first clickable content node")
-            return true
+        // 3. Fallback: Search direct items inside searchScope (RecyclerView)
+        for (i in 0 until searchScope.childCount) {
+            val item = searchScope.getChild(i) ?: continue
+            if (!isAdOrChannelOrNav(item)) {
+                if (performClick(item)) {
+                    Log.d(TAG, "Clicked video card item in results list at index $i")
+                    return true
+                }
+            }
         }
 
         return false
@@ -230,6 +259,25 @@ object YoutubeAutomation {
             }
             parent = parent.parent
             depth++
+        }
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            if (child.isClickable && child.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                return true
+            }
+        }
+        val service = JarvisAccessibilityService.instance
+        if (service != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val bounds = android.graphics.Rect()
+            node.getBoundsInScreen(bounds)
+            if (bounds.width() > 0 && bounds.height() > 0) {
+                val x = bounds.centerX().toFloat()
+                val y = bounds.centerY().toFloat()
+                val path = android.graphics.Path().apply { moveTo(x, y) }
+                val stroke = android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 80)
+                val gesture = android.accessibilityservice.GestureDescription.Builder().addStroke(stroke).build()
+                return service.dispatchGesture(gesture, null, null)
+            }
         }
         return false
     }

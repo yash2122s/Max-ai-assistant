@@ -1,0 +1,148 @@
+{
+  "workflow_id": "whatsapp_desktop_chat_automation",
+  "version": "1.0.0",
+  "name": "WhatsApp Windows Desktop Chat Automation Workflow",
+  "description": "Windows Start Search -> WhatsApp Launch -> Dynamic Search Contact -> Open Chat -> Type Message -> Task Done Notification",
+  "author": "Antigravity MAX Automation",
+  "created_at": "2026-09-22T22:04:11+05:30",
+  "dynamic_variables": {
+    "TARGET_CONTACT": {
+      "type": "string",
+      "default": "yaswanth",
+      "description": "Name or phone number of the WhatsApp contact to search"
+    },
+    "MESSAGE_TEXT": {
+      "type": "string",
+      "default": "hello",
+      "description": "Message content to type in the chat box"
+    },
+    "APP_NAME": {
+      "type": "string",
+      "default": "WhatsApp",
+      "description": "Desktop application name to search from Windows Start"
+    },
+    "LAUNCH_WAIT_SECONDS": {
+      "type": "number",
+      "default": 2.5,
+      "description": "Seconds to wait for WhatsApp window to launch and stabilize"
+    },
+    "SEARCH_WAIT_SECONDS": {
+      "type": "number",
+      "default": 1.2,
+      "description": "Seconds to wait for search results to populate"
+    },
+    "SEND_ENTER": {
+      "type": "boolean",
+      "default": false,
+      "description": "Whether to press Enter to send message, or only type it"
+    }
+  },
+  "steps": [
+    {
+      "step_number": 1,
+      "id": "press_windows_key",
+      "title": "Press Windows Key",
+      "description_te": "Windows Start మెనూ ఓపెన్ చేయడం కొరకు Windows కీ ప్రెస్ చేయడం",
+      "description_en": "Open Windows Start Menu by pressing Win key",
+      "action_type": "key_press",
+      "params": {
+        "key": "win",
+        "post_delay_sec": 0.5
+      }
+    },
+    {
+      "step_number": 2,
+      "id": "type_app_name",
+      "title": "Search WhatsApp Application",
+      "description_te": "స్టార్ట్ మెనూలో WhatsApp అని టైప్ చేయడం",
+      "description_en": "Type 'WhatsApp' in Windows Search bar",
+      "action_type": "type_text",
+      "params": {
+        "text": "{{APP_NAME}}",
+        "interval_sec": 0.08,
+        "post_delay_sec": 0.6
+      }
+    },
+    {
+      "step_number": 3,
+      "id": "launch_app",
+      "title": "Launch WhatsApp Application",
+      "description_te": "WhatsApp ఓపెన్ చేయడానికి Enter కీ ప్రెస్ చేయడం",
+      "description_en": "Press Enter to launch WhatsApp",
+      "action_type": "key_press",
+      "params": {
+        "key": "enter",
+        "post_delay_sec": "{{LAUNCH_WAIT_SECONDS}}"
+      }
+    },
+    {
+      "step_number": 4,
+      "id": "focus_search_bar",
+      "title": "Focus WhatsApp Search Bar",
+      "description_te": "WhatsApp లో సెర్చ్ బార్ ఓపెన్ చేయడం (Ctrl + F లేదా Ctrl + E)",
+      "description_en": "Focus the search input in WhatsApp using keyboard shortcut Ctrl+F",
+      "action_type": "hotkey",
+      "params": {
+        "keys": [
+          "ctrl",
+          "f"
+        ],
+        "post_delay_sec": 0.8
+      }
+    },
+    {
+      "step_number": 5,
+      "id": "search_contact",
+      "title": "Search Target Contact",
+      "description_te": "కాంటాక్ట్ పేరును (డైనమిక్: {{TARGET_CONTACT}}) సెర్చ్ బాక్స్‌లో టైప్ చేయడం",
+      "description_en": "Type the target contact name in the search bar",
+      "action_type": "type_text",
+      "params": {
+        "text": "{{TARGET_CONTACT}}",
+        "interval_sec": 0.08,
+        "post_delay_sec": "{{SEARCH_WAIT_SECONDS}}"
+      }
+    },
+    {
+      "step_number": 6,
+      "id": "open_chat",
+      "title": "Open Contact Chat",
+      "description_te": "సెర్చ్ రిజల్ట్స్ నుండి మొదటి చాట్ ఓపెన్ చేయడానికి Down Arrow & Enter ప్రెస్ చేయడం",
+      "description_en": "Select and open the top search result using Down arrow and Enter",
+      "action_type": "key_sequence",
+      "params": {
+        "sequence": [
+          "down",
+          "enter"
+        ],
+        "interval_sec": 0.4,
+        "post_delay_sec": 0.8
+      }
+    },
+    {
+      "step_number": 7,
+      "id": "type_message",
+      "title": "Type Message in Chat",
+      "description_te": "చాట్ మెసేజ్ బాక్స్‌లో మెసేజ్ (డైనమిక్: {{MESSAGE_TEXT}}) టైప్ చేయడం",
+      "description_en": "Type message into the active chat input field",
+      "action_type": "type_text",
+      "params": {
+        "text": "{{MESSAGE_TEXT}}",
+        "interval_sec": 0.05,
+        "post_delay_sec": 0.5
+      }
+    },
+    {
+      "step_number": 8,
+      "id": "notify_task_done",
+      "title": "Report Task Done",
+      "description_te": "టాస్క్ పూర్తయినట్లు కన్సోల్ మరియు స్క్రీన్‌పై తెలియజేయడం",
+      "description_en": "Notify that the task has been completed successfully",
+      "action_type": "notify",
+      "params": {
+        "message": "Task Done!",
+        "level": "SUCCESS"
+      }
+    }
+  ]
+}

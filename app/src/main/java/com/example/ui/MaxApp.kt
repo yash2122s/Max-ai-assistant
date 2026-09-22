@@ -2,7 +2,9 @@ package com.example.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material3.*
@@ -93,56 +95,87 @@ fun MaxApp(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     // Drawer Items
-                    MainDrawerItems.forEach { item ->
-                        val selected = currentRoute == item.route
-                        NavigationDrawerItem(
-                            icon = {
-                                Icon(
-                                    imageVector = item.icon,
-                                    contentDescription = item.title,
-                                    tint = if (selected) MaxPrimary else MaxTextMuted
-                                )
-                            },
-                            label = {
-                                Text(
-                                    text = item.title,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (selected) MaxPrimary else MaxTextPrimary,
-                                    fontSize = 14.sp
-                                )
-                            },
-                            selected = selected,
-                            onClick = {
-                                coroutineScope.launch { drawerState.close() }
-                                if (currentRoute != item.route) {
-                                    navController.navigate(item.route) {
-                                        popUpTo(MaxDestinations.HOME) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        MainDrawerItems.forEach { item ->
+                            val selected = currentRoute == item.route
+                            NavigationDrawerItem(
+                                icon = {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(32.dp)
+                                            .clip(RoundedCornerShape(9.dp))
+                                            .background(
+                                                if (selected) item.accentColor.copy(alpha = 0.2f)
+                                                else item.accentColor.copy(alpha = 0.12f)
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = item.icon,
+                                            contentDescription = item.title,
+                                            tint = item.accentColor,
+                                            modifier = Modifier.size(18.dp)
+                                        )
                                     }
-                                }
-                            },
-                            modifier = Modifier
-                                .padding(horizontal = 12.dp, vertical = 2.dp),
-                            shape = RoundedCornerShape(MaxDimensions.radiusMd),
-                            colors = NavigationDrawerItemDefaults.colors(
-                                selectedContainerColor = MaxSurfaceVariant,
-                                unselectedContainerColor = Color.Transparent
+                                },
+                                label = {
+                                    Text(
+                                        text = item.title,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selected) MaxPrimary else MaxTextPrimary,
+                                        fontSize = 13.5.sp
+                                    )
+                                },
+                                selected = selected,
+                                onClick = {
+                                    coroutineScope.launch { drawerState.close() }
+                                    if (currentRoute != item.route) {
+                                        navController.navigate(item.route) {
+                                            popUpTo(MaxDestinations.HOME) {
+                                                saveState = true
+                                            }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .padding(horizontal = 10.dp, vertical = 2.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = NavigationDrawerItemDefaults.colors(
+                                    selectedContainerColor = item.accentColor.copy(alpha = 0.08f),
+                                    unselectedContainerColor = Color.Transparent
+                                )
                             )
-                        )
+                        }
                     }
 
-                    Spacer(modifier = Modifier.weight(1f))
+                    HorizontalDivider(color = BorderDark, thickness = 0.5.dp)
 
-                    // Bottom info
-                    Text(
-                        text = "v1.0 • 100% Kotlin Compose",
-                        fontSize = 11.sp,
-                        color = MaxTextMuted,
-                        modifier = Modifier.padding(20.dp)
-                    )
+                    // Bottom info with Developer Credit
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 14.dp)
+                    ) {
+                        Text(
+                            text = "Created by Yaswanth",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaxPrimary
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "v1.0 • Autonomous AI Companion",
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaxTextMuted
+                        )
+                    }
                 }
             }
         ) {

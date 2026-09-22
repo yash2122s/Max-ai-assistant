@@ -1,14 +1,12 @@
 package com.example.automation.resolver
 
 import android.graphics.Rect
-import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.example.automation.models.TargetResolutionMethod
 import com.example.automation.models.UiTarget
 import com.example.service.JarvisAccessibilityService
 import java.util.Locale
-import kotlin.math.max
 
 /**
  * Result of resolving a UI target query against current screen hierarchy.
@@ -49,18 +47,43 @@ object UiTargetResolver {
         "play" to listOf("play", "play video", "watch", "start playback"),
         "video" to listOf("video", "watch video", "play video", "videos"),
         "send" to listOf("send", "submit"),
-        "search" to listOf("search", "search here", "search or type url", "omnibox", "search_box", "search_button"),
-        "find" to listOf("search", "search here", "search or type url", "omnibox", "search_box", "search_button"),
+        "search" to listOf(
+            "search", "search here", "search or type url", "omnibox", "search_box", "search_button",
+            "search and explore", "explore", "search_tab", "ask meta ai or search", "ask meta ai",
+            "search_edit_text", "action_bar_search_edit_text", "search_src_text", "query"
+        ),
+        "find" to listOf(
+            "search", "search here", "search or type url", "omnibox", "search_box", "search_button",
+            "search and explore", "explore", "search_tab", "ask meta ai or search", "ask meta ai",
+            "search_edit_text", "action_bar_search_edit_text"
+        ),
+        "explore" to listOf("search and explore", "explore", "search_tab", "search"),
+        "reels" to listOf("reels", "clips", "clips_tab", "short videos"),
+        "reel" to listOf("reels", "clips", "clips_tab", "short videos"),
+        "clips" to listOf("clips", "reels", "clips_tab"),
+        "dm" to listOf("message", "messages", "direct", "direct_tab", "inbox", "chats"),
+        "dms" to listOf("message", "messages", "direct", "direct_tab", "inbox", "chats"),
+        "direct" to listOf("direct", "direct_tab", "message", "messages", "inbox", "chats"),
+        "inbox" to listOf("inbox", "messages", "direct", "direct_tab", "chats"),
+        "messages" to listOf("message", "messages", "direct", "direct_tab", "inbox", "chats", "send message"),
         "menu" to listOf("menu", "drawer", "navigation_drawer", "more options", "options"),
         "drawer" to listOf("menu", "drawer", "navigation_drawer", "more options", "options"),
-        "home" to listOf("home", "home_screen", "dashboard"),
+        "home" to listOf("home", "feed_tab", "home_screen", "dashboard"),
         "back" to listOf("back", "navigate up", "arrow_back"),
-        "close" to listOf("close", "cancel", "dismiss", "clear"),
-        "cancel" to listOf("close", "cancel", "dismiss", "clear"),
+        "close" to listOf("close", "cancel", "dismiss", "clear", "not now"),
+        "dismiss" to listOf("dismiss", "not now", "cancel", "close"),
+        "cancel" to listOf("close", "cancel", "dismiss", "clear", "not now"),
         "settings" to listOf("settings", "preferences", "config"),
         "setting" to listOf("settings", "preferences", "config"),
-        "account" to listOf("account", "profile", "user", "username"),
-        "message" to listOf("message", "send message", "chat", "direct_message")
+        "account" to listOf("account", "profile", "user", "username", "row_search_user_container"),
+        "contact" to listOf("contact", "chat", "friend", "conversation"),
+        "chat" to listOf("chat", "contact", "conversation", "friend", "message", "direct_tab", "inbox"),
+        "friend" to listOf("friend", "contact", "chat", "person"),
+        "card" to listOf("card", "action", "shortcut", "item"),
+        "message" to listOf("message", "send message", "chat", "direct_message", "direct_tab", "inbox"),
+        "composer" to listOf("message…", "message", "row_thread_composer_edittext", "type a message", "write a message", "chat_input"),
+        "message composer" to listOf("message…", "message", "row_thread_composer_edittext", "type a message", "write a message", "chat_input"),
+        "search input" to listOf("search", "search here", "search or type url", "search_edit_text", "action_bar_search_edit_text", "search_src_text", "query", "ask meta ai or search")
     )
 
     private val NEGATIVE_SEMANTIC_FILTERS: Map<String, List<String>> = mapOf(
@@ -70,7 +93,11 @@ object UiTargetResolver {
         "navigate" to listOf("street view", "preview", "photo", "photos", "thumbnail", "reviews", "review", "share", "save", "nearby", "options", "preference", "preferences", "settings"),
         "play" to listOf("playlist", "playlists", "play queue", "channel", "comments", "share", "download", "save"),
         "send" to listOf("share", "post", "cancel", "dismiss", "delete", "clear"),
-        "search" to listOf("history", "clear search", "voice search", "recent", "clear", "cancel")
+        "search" to listOf("history", "clear search", "voice search", "recent", "clear", "cancel"),
+        "account" to listOf("avatar", "story", "stories", "ring", "seen_state", "profile_picture", "contact_photo"),
+        "user" to listOf("avatar", "story", "stories", "ring", "seen_state", "profile_picture", "contact_photo"),
+        "profile" to listOf("avatar", "story", "stories", "ring", "seen_state", "profile_picture", "contact_photo"),
+        "contact" to listOf("avatar", "story", "stories", "ring", "seen_state", "profile_picture", "contact_photo")
     )
 
     private data class ScoredCandidate(
@@ -98,7 +125,7 @@ object UiTargetResolver {
         rootNode: AccessibilityNodeInfo? = null
     ): UiTargetResolutionResult {
         val cleanQuery = query.trim()
-        val effectiveRoot = rootNode ?: JarvisAccessibilityService.instance?.rootInActiveWindow
+        val effectiveRoot = rootNode ?: JarvisAccessibilityService.getActiveRoot()
 
         if (effectiveRoot == null) {
             Log.w(TAG, "Cannot resolve target '$cleanQuery': active window root is null")
@@ -450,6 +477,36 @@ object UiTargetResolver {
             finalScore -= 0.35f
         }
 
+        // 5. Navigation Tab Penalty for content actions (Disambiguate Content "Message" vs Bottom direct_tab)
+        val isBottomNavNode = isLikelyNavigationNode(node) || nodeId.endsWith("_tab") ||
+                              node.parent?.viewIdResourceName?.lowercase(Locale.ROOT)?.contains("tab_bar") == true ||
+                              bounds.top >= 2100
+        val isContentActionQuery = q.equals("message", ignoreCase = true) ||
+                                   q.equals("messages", ignoreCase = true) ||
+                                   q.equals("send message", ignoreCase = true) ||
+                                   q.equals("chat", ignoreCase = true) ||
+                                   q.equals("follow", ignoreCase = true) ||
+                                   q.equals("share", ignoreCase = true)
+        val isExplicitTabQuery = q.contains("tab") || q.contains("nav") || q.contains("direct tab") || q.contains("inbox")
+
+        if (isBottomNavNode && isContentActionQuery && !isExplicitTabQuery) {
+            finalScore -= 0.20f
+        }
+
+        // Boost for profile / content action buttons
+        if ((nodeId.contains("button") || nodeId.contains("action") || nodeId.contains("profile") ||
+             nodeText.equals("Message", ignoreCase = true)) && !isBottomNavNode) {
+            finalScore += 0.03f
+        }
+
+        // 6. Generic decorative / avatar / story node penalty:
+        // When user intent is finding or opening an item/account, avoid selecting avatar/story/ring nodes
+        val isExplicitAvatar = q.contains("avatar") || q.contains("story") || q.contains("stories") ||
+                               q.contains("photo") || q.contains("picture") || q.contains("ring")
+        if (isAvatarOrStoryNode(node) && !isExplicitAvatar) {
+            finalScore -= 0.50f
+        }
+
         finalScore = finalScore.coerceIn(0.0f, 1.0f)
 
         return ScoredCandidate(
@@ -562,87 +619,354 @@ object UiTargetResolver {
         allNodes: List<AccessibilityNodeInfo>,
         requireClickable: Boolean
     ): AccessibilityNodeInfo? {
-        val q = query.lowercase(Locale.ROOT)
-        val isAccountTarget = q.contains("account") || q.contains("user") || q.contains("profile") || q.contains("person")
-        val isResultTarget = q.contains("result") || q.contains("item") || q.contains("link") || q.contains("post") || q.contains("video")
+        if (ordinalIndex == 0) return null
 
-        // 1. If targeting accounts/users explicitly (e.g. in Instagram / social search), search for profile/row containers or username elements
+        val q = query.lowercase(Locale.ROOT)
+
+        val isAccountTarget = q.contains("account") ||
+                q.contains("user") ||
+                q.contains("profile") ||
+                q.contains("person") ||
+                q.contains("contact") ||
+                q.contains("chat") ||
+                q.contains("friend")
+
+        val isCardTarget = q.contains("card") ||
+                q.contains("action") ||
+                q.contains("shortcut")
+
+        val isResultTarget = q.contains("result") ||
+                q.contains("item") ||
+                q.contains("link") ||
+                q.contains("post") ||
+                q.contains("video")
+
+        val embeddedFilter = extractEmbeddedFilter(q)
+
+        // ---------------------------------------------------------------------
+        // 1. Account / contact / chat / friend targets
+        // ---------------------------------------------------------------------
         if (isAccountTarget) {
-            val accountNodes = allNodes.filter { node ->
+            val accountCandidates = allNodes
+                .asSequence()
+                .filter { node ->
+                    val b = Rect()
+                    node.getBoundsInScreen(b)
+                    b.width() > 0 && b.height() > 0 && node.isVisibleToUser && node.isEnabled &&
+                            (node.isClickable || findClickableAncestor(node) != null)
+                }
+                .filterNot { isScrollableContainer(it) }
+                .filterNot { isSearchInputNode(it) }
+                .filterNot { isActionBarOrToolbar(it) }
+                .filterNot { isLikelyNavigationNode(it) }
+                .filterNot { isAvatarOrStoryNode(it) }
+                .map { node ->
+                    val clickable = if (node.isClickable) node else (findClickableAncestor(node) ?: node)
+                    clickable to getNodeBounds(clickable)
+                }
+                .filterNot { isSearchInputNode(it.first) }
+                .filterNot { isActionBarOrToolbar(it.first) }
+                .filterNot { isLikelyNavigationNode(it.first) }
+                .filterNot { isAvatarOrStoryNode(it.first) }
+                .filter { (_, b) -> b.width() > 0 && b.height() > 0 }
+                .toList()
+
+            val userRowCandidates = accountCandidates.filter { (node, _) ->
+                val id = (node.viewIdResourceName ?: "").lowercase(Locale.ROOT)
+                val desc = (node.contentDescription?.toString() ?: "").lowercase(Locale.ROOT)
+                (id.contains("row_search_user_container") || id.contains("user_container") || id.contains("row_search") ||
+                 id.contains("user") || id.contains("account") || id.contains("profile") || id.contains("contact") ||
+                 desc.contains("profile") || hasAccountChild(node)) && !isSearchInputNode(node)
+            }
+            val candidatesToUse = if (userRowCandidates.isNotEmpty()) userRowCandidates else accountCandidates
+
+            val deduped = dedupeOrdinalCandidates(candidatesToUse)
+            val filtered = if (embeddedFilter != null) {
+                val matched = deduped.filter { nodeMatchesFilter(it, embeddedFilter) }
+                if (matched.isNotEmpty()) matched else deduped
+            } else deduped
+
+            if (filtered.isNotEmpty()) {
+                val target = selectOrdinalCandidate(filtered, ordinalIndex, requireClickable)
+                return target
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // 2. Generic cards / results / items
+        // ---------------------------------------------------------------------
+        if (isCardTarget || isResultTarget || isAccountTarget) {
+            val candidates = allNodes
+                .asSequence()
+                .filter { node ->
+                    val b = Rect()
+                    node.getBoundsInScreen(b)
+                    b.width() > 0 && b.height() > 0 && node.isVisibleToUser && node.isEnabled && node.isClickable
+                }
+                .filterNot { isScrollableContainer(it) }
+                .filterNot { isLikelyNavigationNode(it) }
+                .filterNot { isSearchInputNode(it) }
+                .filterNot { isActionBarOrToolbar(it) }
+                .filterNot { isAvatarOrStoryNode(it) }
+                .filter { node ->
+                    !isCardTarget || hasMeaningfulContent(node)
+                }
+                .filter { node ->
+                    !isResultTarget || hasMeaningfulContent(node)
+                }
+                .map { it to getNodeBounds(it) }
+                .toList()
+
+            val deduped = dedupeOrdinalCandidates(candidates)
+            val filtered = if (embeddedFilter != null) {
+                val matched = deduped.filter { nodeMatchesFilter(it, embeddedFilter) }
+                if (matched.isNotEmpty()) matched else deduped
+            } else deduped
+
+            if (filtered.isNotEmpty()) {
+                return selectOrdinalCandidate(filtered, ordinalIndex, requireClickable)
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // 3. Final generic fallback: clickable, visible UI elements only.
+        //    Passive containers/text nodes are never ordinal candidates.
+        // ---------------------------------------------------------------------
+        val genericCandidates = allNodes
+            .asSequence()
+            .filter { node ->
                 val b = Rect()
                 node.getBoundsInScreen(b)
-                val id = node.viewIdResourceName?.lowercase(Locale.ROOT) ?: ""
-                val text = node.text?.toString() ?: ""
-                val desc = node.contentDescription?.toString() ?: ""
-                val isAccountRow = id.contains("row_search_user") || id.contains("user_row") || id.contains("search_row") ||
-                                   id.contains("row_user") || id.contains("account") || id.contains("profile") ||
-                                   id.contains("row_inbox") || id.contains("direct_user")
-                val isClickableText = (node.isClickable || node.parent?.isClickable == true) && (text.isNotBlank() || desc.isNotBlank())
-                b.top > 120 && (isAccountRow || isClickableText)
-            }.sortedBy {
-                val b = Rect()
-                it.getBoundsInScreen(b)
-                b.top
+                b.width() > 0 && b.height() > 0 && node.isVisibleToUser && node.isEnabled && node.isClickable
             }
+            .filterNot { isLikelyNavigationNode(it) }
+            .filterNot { isSearchInputNode(it) }
+            .filterNot { isActionBarOrToolbar(it) }
+            .map { it to getNodeBounds(it) }
+            .toList()
 
-            if (accountNodes.isNotEmpty()) {
-                val target = if (ordinalIndex == -1) accountNodes.last() else accountNodes.getOrNull(ordinalIndex - 1) ?: accountNodes.first()
-                return if (target.isClickable) target else (findClickableAncestor(target) ?: target)
-            }
+        val dedupedGeneric = dedupeOrdinalCandidates(genericCandidates)
+        return selectOrdinalCandidate(dedupedGeneric, ordinalIndex, requireClickable)
+    }
+
+    private fun getNodeBounds(node: AccessibilityNodeInfo): Rect {
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        return bounds
+    }
+
+    private fun dedupeOrdinalCandidates(
+        candidates: List<Pair<AccessibilityNodeInfo, Rect>>
+    ): List<AccessibilityNodeInfo> {
+        if (candidates.isEmpty()) return emptyList()
+
+        // Keep one node per identical visual bounds. When multiple clickable
+        // nodes share the same rectangle, prefer the node with more semantic
+        // information and then the larger visual container.
+        val grouped = candidates.groupBy { (_, b) ->
+            "${b.left}:${b.top}:${b.right}:${b.bottom}"
         }
 
-        // 2. Look for explicit collection/list containers, excluding top navigation bar / filter tabs
-        val containers = allNodes.filter { node ->
-            val cls = node.className?.toString() ?: ""
-            val isNavContainer = cls.contains("NavigationView", ignoreCase = true) || cls.contains("TabLayout", ignoreCase = true)
-            (node.isScrollable || cls.contains("RecyclerView", ignoreCase = true) ||
-            cls.contains("ListView", ignoreCase = true) || cls.contains("ScrollView", ignoreCase = true) ||
-            cls.contains("ViewPager", ignoreCase = true)) && !isNavContainer
+        val unique = grouped.values.mapNotNull { group ->
+            group.maxWithOrNull(
+                compareBy<Pair<AccessibilityNodeInfo, Rect>> { semanticWeight(it.first) }
+                    .thenBy { it.second.width() * it.second.height() }
+            )?.first
         }
 
-        val containerCandidates = mutableListOf<AccessibilityNodeInfo>()
-        for (container in containers) {
-            for (i in 0 until container.childCount) {
-                val child = try { container.getChild(i) } catch (_: Throwable) { null } ?: continue
-                containerCandidates.add(child)
+        // Remove nested clickable descendants when an enclosing clickable
+        // container represents the same visual item. This prevents icon/button
+        // descendants from becoming separate ordinal items.
+        return unique
+            .filter { candidate ->
+                val cb = getNodeBounds(candidate)
+                unique.none { other ->
+                    if (other === candidate) return@none false
+                    val ob = getNodeBounds(other)
+                    val otherArea = ob.width().toLong() * ob.height().toLong()
+                    val candidateArea = cb.width().toLong() * cb.height().toLong()
+                    if (otherArea <= candidateArea) return@none false
+                    ob.contains(cb) && otherArea >= (candidateArea * 2L)
+                }
             }
-            if (containerCandidates.isNotEmpty()) break
+            .sortedWith(
+                compareBy<AccessibilityNodeInfo> { getNodeBounds(it).top }
+                    .thenBy { getNodeBounds(it).left }
+            )
+    }
+
+    private fun semanticWeight(node: AccessibilityNodeInfo): Int {
+        var weight = 0
+        if (!node.text.isNullOrBlank()) weight += 2
+        if (!node.contentDescription.isNullOrBlank()) weight += 2
+        if (!node.viewIdResourceName.isNullOrBlank()) weight += 1
+        if (hasMeaningfulContent(node)) weight += 2
+        return weight
+    }
+
+    private fun hasMeaningfulContent(node: AccessibilityNodeInfo): Boolean {
+        if (!node.text.isNullOrBlank() || !node.contentDescription.isNullOrBlank()) {
+            return true
         }
 
-        // 3. If container candidates exist, choose candidate; otherwise filter candidate content nodes on screen
-        val candidateList = if (containerCandidates.isNotEmpty()) {
-            containerCandidates
+        fun scan(current: AccessibilityNodeInfo?, depth: Int): Boolean {
+            if (current == null || depth > 8) return false
+            for (i in 0 until current.childCount) {
+                val child = try { current.getChild(i) } catch (_: Throwable) { null } ?: continue
+                if (!child.text.isNullOrBlank() || !child.contentDescription.isNullOrBlank()) {
+                    return true
+                }
+                if (scan(child, depth + 1)) return true
+            }
+            return false
+        }
+
+        return scan(node, 0)
+    }
+
+    private fun isLikelyNavigationNode(node: AccessibilityNodeInfo): Boolean {
+        val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+        val cls = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        val combined = "$text $desc $id $cls"
+
+        val navigationTerms = listOf(
+            "open drawer",
+            "navigation drawer",
+            "more options",
+            "options",
+            "navigate up",
+            "arrow_back",
+            "toolbar",
+            "top_bar",
+            "status_bar",
+            "navigationbar",
+            "nav_bar",
+            "tab_bar",
+            "bottom_bar",
+            "bottom_nav",
+            "_tab"
+        )
+
+        return navigationTerms.any { combined.contains(it) } || id.endsWith("_tab")
+    }
+
+    private fun isSearchInputNode(node: AccessibilityNodeInfo): Boolean {
+        if (node.isEditable) return true
+        val cls = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        if (cls.contains("edittext")) return true
+        val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        return id.contains("search_edit_text") ||
+               id.contains("action_bar_search") ||
+               id.contains("search_src_text") ||
+               id.contains("search_bar") ||
+               id.contains("search_input") ||
+               id.contains("omnibox") ||
+               desc.contains("search query") ||
+               desc.contains("search edit text")
+    }
+
+    private fun isActionBarOrToolbar(node: AccessibilityNodeInfo): Boolean {
+        val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+        val cls = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        return id.contains("action_bar") || id.contains("toolbar") || cls.contains("toolbar") || cls.contains("actionbar")
+    }
+
+    private fun hasAccountChild(node: AccessibilityNodeInfo): Boolean {
+        for (i in 0 until node.childCount) {
+            val child = try { node.getChild(i) } catch (_: Throwable) { null } ?: continue
+            val id = child.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+            if (id.contains("username") || id.contains("user") || id.contains("account")) return true
+        }
+        return false
+    }
+
+    private fun isAvatarOrStoryNode(node: AccessibilityNodeInfo): Boolean {
+        val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT).orEmpty()
+        val cls = node.className?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        val combined = "$id $desc $cls"
+
+        val avatarSignatures = listOf(
+            "avatar",
+            "story",
+            "stories",
+            "ring",
+            "seen_state",
+            "profile_picture",
+            "contact_photo",
+            "row_search_avatar",
+            "pog_avatar"
+        )
+        return avatarSignatures.any { combined.contains(it) }
+    }
+
+    private fun isScrollableContainer(node: AccessibilityNodeInfo): Boolean {
+        val cls = node.className?.toString().orEmpty()
+        return cls.contains("RecyclerView", ignoreCase = true) ||
+               cls.contains("ListView", ignoreCase = true) ||
+               cls.contains("ScrollView", ignoreCase = true) ||
+               cls.contains("ViewPager", ignoreCase = true) ||
+               cls.contains("AbsListView", ignoreCase = true)
+    }
+
+    private fun extractEmbeddedFilter(query: String): String? {
+        val pattern = Regex("""(?i)match(?:ing)?(?:\s+for|:|\s+)\s*([a-zA-Z0-9._]+)""")
+        val m = pattern.find(query)
+        if (m != null) {
+            val candidate = m.groupValues[1].trim().lowercase(Locale.ROOT)
+            val ignoredWords = setOf("account", "result", "item", "video", "post", "link", "card", "user", "profile", "first", "second", "third", "one", "two")
+            if (candidate.isNotEmpty() && candidate !in ignoredWords) {
+                return candidate
+            }
+        }
+        return null
+    }
+
+    private fun nodeMatchesFilter(node: AccessibilityNodeInfo, filter: String): Boolean {
+        val text = node.text?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT).orEmpty()
+        val id = node.viewIdResourceName?.lowercase(Locale.ROOT).orEmpty()
+        if (text.contains(filter) || desc.contains(filter) || id.contains(filter)) {
+            return true
+        }
+        for (i in 0 until node.childCount) {
+            val child = try { node.getChild(i) } catch (_: Throwable) { null } ?: continue
+            if (nodeMatchesFilter(child, filter)) return true
+        }
+        return false
+    }
+
+    private fun selectOrdinalCandidate(
+        candidates: List<AccessibilityNodeInfo>,
+        ordinalIndex: Int,
+        requireClickable: Boolean
+    ): AccessibilityNodeInfo? {
+        if (candidates.isEmpty()) return null
+
+        // NEVER fall back to the first candidate for an out-of-range ordinal.
+        // This is critical for autonomous UI safety.
+        if (ordinalIndex == -1) {
+            return candidates.lastOrNull()
+        }
+
+        val zeroBased = ordinalIndex - 1
+        if (zeroBased !in candidates.indices) {
+            Log.w(
+                TAG,
+                "Ordinal target out of range: requested=$ordinalIndex available=${candidates.size}"
+            )
+            return null
+        }
+
+        val selected = candidates[zeroBased]
+
+        return if (requireClickable && !selected.isClickable) {
+            findClickableAncestor(selected)
         } else {
-            allNodes.filter { node ->
-                val id = node.viewIdResourceName?.lowercase(Locale.ROOT) ?: ""
-                val cls = node.className?.toString() ?: ""
-                val text = node.text?.toString() ?: ""
-                val desc = node.contentDescription?.toString() ?: ""
-                val isNavTab = cls.contains("NavigationView", ignoreCase = true) || cls.contains("TabLayout", ignoreCase = true) || id.contains("nav_bar") || id.contains("tab_bar")
-                val hasContent = text.isNotBlank() || desc.isNotBlank()
-                val isInteractive = node.isClickable || node.isCheckable || hasContent
-                isInteractive && !isNavTab
-            }.sortedBy {
-                val b = Rect()
-                it.getBoundsInScreen(b)
-                b.top
-            }
-        }
-
-        if (candidateList.isEmpty()) return null
-
-        val targetNode: AccessibilityNodeInfo = (if (ordinalIndex == -1) {
-            candidateList.lastOrNull()
-        } else if (ordinalIndex in 1..candidateList.size) {
-            candidateList[ordinalIndex - 1]
-        } else {
-            candidateList.firstOrNull()
-        }) ?: return null
-
-        return if (requireClickable && !targetNode.isClickable) {
-            findClickableAncestor(targetNode) ?: targetNode
-        } else {
-            if (targetNode.isClickable) targetNode else (findClickableAncestor(targetNode) ?: targetNode)
+            if (selected.isClickable) selected else findClickableAncestor(selected)
         }
     }
 }

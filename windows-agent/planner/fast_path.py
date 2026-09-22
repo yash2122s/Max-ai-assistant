@@ -187,6 +187,97 @@ class FastPathResolver:
                 ]
             )
 
+        # Atomic Filesystem Commands
+        # 1. Create Folder
+        m = re.match(r"^(?:create|make|new)\s+(?:folder|directory)\s+['\"]?([a-zA-Z0-9_\-\.\/\\:]+)['\"]?$", clean_text, re.IGNORECASE)
+        if m:
+            folder_path = m.group(1).strip()
+            return Plan(
+                goal=f"Create folder {folder_path}",
+                steps=[
+                    PlanStep(
+                        id="step_1",
+                        tool="create_folder",
+                        args={"path": folder_path},
+                        description=f"Create folder at {folder_path}",
+                        requires_confirmation=False
+                    )
+                ]
+            )
+
+        # 2. Create File (optional content)
+        m = re.match(r"^(?:create|make|new)\s+(?:file|text file)\s+['\"]?([a-zA-Z0-9_\-\.\/\\:]+)['\"]?(?:\s+(?:with\s+content|with\s+text)\s+['\"](.*)['\"])?$", clean_text, re.IGNORECASE)
+        if m:
+            file_path = m.group(1).strip()
+            content = m.group(2) if m.group(2) is not None else ""
+            args = {"path": file_path}
+            if content:
+                args["content"] = content
+            return Plan(
+                goal=f"Create file {file_path}",
+                steps=[
+                    PlanStep(
+                        id="step_1",
+                        tool="create_file",
+                        args=args,
+                        description=f"Create file at {file_path}",
+                        requires_confirmation=False
+                    )
+                ]
+            )
+
+        # 3. Write File
+        m = re.match(r"^(?:write\s+file|write\s+to)\s+['\"]?([a-zA-Z0-9_\-\.\/\\:]+)['\"]?\s+(?:with\s+content|content)?\s*['\"](.*)['\"]$", clean_text, re.IGNORECASE)
+        if m:
+            file_path = m.group(1).strip()
+            content = m.group(2)
+            return Plan(
+                goal=f"Write to {file_path}",
+                steps=[
+                    PlanStep(
+                        id="step_1",
+                        tool="write_file",
+                        args={"path": file_path, "content": content},
+                        description=f"Write content to {file_path}",
+                        requires_confirmation=False
+                    )
+                ]
+            )
+
+        # 4. Read File
+        m = re.match(r"^(?:read\s+file|read|view\s+file|get\s+content\s+of)\s+['\"]?([a-zA-Z0-9_\-\.\/\\:]+\.[a-zA-Z0-9]+)['\"]?$", clean_text, re.IGNORECASE)
+        if m:
+            file_path = m.group(1).strip()
+            return Plan(
+                goal=f"Read file {file_path}",
+                steps=[
+                    PlanStep(
+                        id="step_1",
+                        tool="read_file",
+                        args={"path": file_path},
+                        description=f"Read contents of {file_path}",
+                        requires_confirmation=False
+                    )
+                ]
+            )
+
+        # 5. Open File
+        m = re.match(r"^(?:open\s+file|open)\s+['\"]?([a-zA-Z0-9_\-\.\/\\:]+\.[a-zA-Z0-9]+)['\"]?$", clean_text, re.IGNORECASE)
+        if m:
+            file_path = m.group(1).strip()
+            return Plan(
+                goal=f"Open file {file_path}",
+                steps=[
+                    PlanStep(
+                        id="step_1",
+                        tool="open_file",
+                        args={"path": file_path},
+                        description=f"Open file {file_path}",
+                        requires_confirmation=False
+                    )
+                ]
+            )
+
         return None
 
 

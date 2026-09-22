@@ -96,10 +96,11 @@ object KeyboardController {
 
         val service = JarvisAccessibilityService.instance
             ?: ServiceRegistry.get<JarvisAccessibilityService>(ServiceType.ACCESSIBILITY)
+        val activeRoot = JarvisAccessibilityService.getActiveRoot()
 
         Log.d(TAG, "typeText() called: text=\"$text\" targetField=\"$targetField\" replace=$replace pressEnterAfter=$pressEnterAfter")
 
-        if (service == null) {
+        if (service == null && activeRoot == null) {
             if (ShizukuExecutor.isSafeCommand("input text $text") && ShizukuExecutor.sendText(text)) {
                 if (pressEnterAfter) {
                     delay(100L)
@@ -125,7 +126,7 @@ object KeyboardController {
         var originalText = ""
 
         while (System.currentTimeMillis() - startTime < 2500L) {
-            val rootNode = service?.rootInActiveWindow
+            val rootNode = JarvisAccessibilityService.getActiveRoot()
             if (rootNode != null) {
                 // Check lockscreen
                 if (isLockScreen(rootNode)) {
@@ -188,15 +189,18 @@ object KeyboardController {
                         targetNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, bundle)
                     } catch (_: Exception) { false }
 
-                    if (actionSetSuccess && service != null) {
-                        val verified = InputVerifier.verifyTextEntered(
-                            expectedText = text,
-                            targetNode = targetNode,
-                            service = service,
-                            replace = replace,
-                            originalText = originalText,
-                            targetHint = targetField
-                        )
+                    if (actionSetSuccess) {
+                        val verified = if (service != null) {
+                            InputVerifier.verifyTextEntered(
+                                expectedText = text,
+                                targetNode = targetNode,
+                                service = service,
+                                replace = replace,
+                                originalText = originalText,
+                                targetHint = targetField
+                            )
+                        } else true
+
                         if (verified) {
                             Log.d(TAG, "Successfully typed \"$text\" via Accessibility ACTION_SET_TEXT")
                             if (pressEnterAfter) {

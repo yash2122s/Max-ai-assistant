@@ -386,26 +386,41 @@ object WhatsAppContactResolver {
     }
 
     /**
-     * Climbs up the hierarchy to find the clickable row container or ancestor.
+     * Climbs up the hierarchy to find the clickable row container or ancestor,
+     * explicitly bypassing avatar / profile picture sub-nodes so the chat opens rather than the DP preview.
      */
     fun findClickableAncestorOrSelf(node: AccessibilityNodeInfo, pkgName: String): AccessibilityNodeInfo? {
-        if (node.isClickable) return node
-
-        var current: AccessibilityNodeInfo? = node
+        val initialId = (node.viewIdResourceName ?: "").lowercase(Locale.ROOT)
+        // If the matched node is an avatar/contact_photo, climb to parent immediately
+        val isAvatar = initialId.contains("contact_photo") || initialId.contains("avatar") ||
+                       initialId.contains("profile_picture") || initialId.contains("picture")
+        var current: AccessibilityNodeInfo? = if (isAvatar) runCatching { node.parent }.getOrNull() else node
         var count = 0
-        while (current != null && count < 6) {
+        var bestRow: AccessibilityNodeInfo? = null
+
+        while (current != null && count < 8) {
             val resId = (current.viewIdResourceName ?: "").lowercase(Locale.ROOT)
             val isRowContainer = ROW_CONTAINER_IDS.any {
                 resId.endsWith(":id/$it") || resId.endsWith("/$it") || resId == it
             }
 
-            if (current.isClickable || isRowContainer) {
+            if (isRowContainer) {
                 return current
+            }
+            if (current.isClickable && bestRow == null && !isAvatarNode(current)) {
+                bestRow = current
             }
             current = runCatching { current.parent }.getOrNull()
             count++
         }
-        return if (node.isClickable) node else runCatching { node.parent }.getOrNull() ?: node
+        return bestRow ?: (if (node.isClickable && !isAvatarNode(node)) node else runCatching { node.parent }.getOrNull() ?: node)
+    }
+
+    private fun isAvatarNode(node: AccessibilityNodeInfo): Boolean {
+        val id = (node.viewIdResourceName ?: "").lowercase(Locale.ROOT)
+        val desc = (node.contentDescription?.toString() ?: "").lowercase(Locale.ROOT)
+        return id.contains("contact_photo") || id.contains("avatar") || id.contains("profile_picture") ||
+               id.contains("picture") || desc.contains("profile photo") || desc.contains("view profile")
     }
 
     /**

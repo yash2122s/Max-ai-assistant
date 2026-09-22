@@ -16,7 +16,7 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.geminilive.abcde"
+    applicationId = "com.maxaiagent.yash"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
@@ -90,7 +90,15 @@ android {
     aidl = true
     buildConfig = true
   }
-  testOptions { unitTests { isIncludeAndroidResources = true } }
+  testOptions {
+    unitTests {
+      isIncludeAndroidResources = true
+      isReturnDefaultValues = true
+      all {
+        it.systemProperty("junit.jupiter.tempdir.cleanup.mode.default", "never")
+      }
+    }
+  }
 }
 
 

@@ -10,11 +10,31 @@ import logging
 import asyncio
 from typing import Dict, Any, List, Optional, Callable
 
+from dataclasses import dataclass, field
 from core.provider_manager import provider_manager
 from context.max_compressor import max_compressor
 from core.state_database import state_db
 
 logger = logging.getLogger("MAX.ExecutionLoop")
+
+
+@dataclass
+class TaskExecutionState:
+    """Durable execution state machine tracking long-task progress and recovery."""
+    goal: str
+    current_subtask: Optional[str] = None
+    current_application: Optional[str] = None
+    current_window: Optional[str] = None
+    observation_generation: int = 0
+    last_successful_action: Optional[Dict[str, Any]] = None
+    expected_next_state: Optional[str] = None
+    retry_count: int = 0
+    recovery_count: int = 0
+    completion_condition: Optional[str] = None
+    progress_fingerprint: str = ""
+    last_progress_timestamp: float = field(default_factory=time.time)
+    no_progress_count: int = 0
+    state: str = "OBSERVE"  # OBSERVE, PLAN, RESOLVE, ACT, VERIFY, PROGRESS_CHECK, RECOVER, COMPLETE, FAILED
 
 
 class AgentExecutionLoop:
@@ -38,6 +58,7 @@ class AgentExecutionLoop:
         """
         start_time = time.time()
         logger.info(f"🚀 Starting MAX Multi-Turn Reasoning for: '{goal}'")
+        task_state = TaskExecutionState(goal=goal)
 
         # 0. Pre-Routing Classification
         from core.intent_router import intent_router, IntentCategory
@@ -79,13 +100,18 @@ class AgentExecutionLoop:
         tools_catalog_text = "\n".join(tools_summary)
 
         sys_prompt = system_instruction or (
-            "You are MAX Agent Engine, the primary autonomous execution engine of MAX AI.\n"
-            "You have full access to Windows automation, browser, coding, skills, MCP, and Android multi-device ecosystem.\n"
-            "When given a user goal, you MUST actively execute each action step-by-step using available tools.\n\n"
-            "RULES:\n"
-            "1. For each step of the goal, invoke the appropriate tool (e.g. open_website, search_whatsapp_contact, create_text_file, click_ui_element, type_ui_element, send_whatsapp_message).\n"
-            "2. Do NOT respond with conversational text describing what to do when an action tool can be executed.\n"
-            "3. When all steps are completely executed and verified, summarize what was completed in plain text.\n\n"
+            "You are MAX Agent Engine, the primary autonomous execution authority of MAX AI.\n"
+            "You have full access to a 3-tier unified tool capability matrix:\n"
+            "1. NATIVE MAX TOOLS: Filesystem (create_file, read_file), app control (open_application, close_application), system settings, and Android devices.\n"
+            "2. COMPUTER USE: Visual desktop interaction (computer_use_click, computer_use_type, computer_use_step, computer_use_observe) for clicking UI elements, typing into fields, and interacting with visible desktop windows.\n"
+            "3. MCP (Model Context Protocol): External tools (mcp_call_tool, mcp_list_tools) for GitHub, databases, and third-party servers.\n\n"
+            "EXECUTION RULES:\n"
+            "- Always select the most direct and capable tool for each step.\n"
+            "- Prefer Native tools when standard OS actions (e.g. creating files, launching apps) are sufficient.\n"
+            "- Use Computer Use when interacting with visible buttons, fields, or GUI controls on screen.\n"
+            "- Use MCP when accessing external services or databases.\n"
+            "- You MUST actively execute each action step using available tools rather than merely describing what to do.\n"
+            "- When all steps are completely executed and verified, summarize what was completed in plain text.\n\n"
             f"<AVAILABLE_TOOLS>\n{tools_catalog_text}\n</AVAILABLE_TOOLS>\n\n"
             f"<PERMANENT_MEMORY>\n{memories_summary}\n</PERMANENT_MEMORY>"
         )
@@ -107,8 +133,23 @@ class AgentExecutionLoop:
                 logger.warning(f"⚠️ Multi-turn reasoning reached timeout ({self.timeout_sec}s)")
                 break
 
+            # Durable state machine: OBSERVE
+            task_state.state = "OBSERVE"
+            task_state.observation_generation = iteration
+            try:
+                from tools.app_control import get_active_window
+                w_info = get_active_window()
+                if isinstance(w_info, dict) and w_info.get("status") == "success":
+                    task_state.current_window = w_info.get("title") or w_info.get("window_title")
+                    task_state.current_application = w_info.get("process_name") or w_info.get("app_name")
+            except Exception:
+                pass
+
             # 2. Compress context if needed
             messages, _ = max_compressor.compress_if_needed(messages)
+
+            # Durable state machine: PLAN
+            task_state.state = "PLAN"
 
             # 3. Request LLM turn completion with full tool declarations
             resp = provider_manager.chat_completion(messages=messages, tools=declarations)
@@ -148,6 +189,9 @@ class AgentExecutionLoop:
                 if not tool_name:
                     continue
 
+                # Durable state machine: RESOLVE
+                task_state.state = "RESOLVE"
+
                 # 5. Repetition / Infinite Loop Guard
                 call_sig = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
                 if call_history.count(call_sig) >= 2:
@@ -161,6 +205,7 @@ class AgentExecutionLoop:
                 call_history.append(call_sig)
 
                 # 6. Execute tool turn via UnifiedToolRegistry
+                task_state.state = "ACT"
                 logger.info(f"⚙️ MAX Turn #{iteration} -> Executing '{tool_name}' with {tool_args}")
                 from server.event_bus import event_bus
                 from protocol.event_types import EventType
@@ -178,6 +223,52 @@ class AgentExecutionLoop:
 
                 tool_dur_ms = int((time.time() - tool_start) * 1000)
 
+                # Durable state machine: VERIFY & PROGRESS_CHECK
+                task_state.state = "VERIFY"
+                is_exec_verified = bool(tool_result.get("action_execution_verified", False))
+                is_goal_verified = bool(tool_result.get("goal_state_verified", False))
+                is_success = tool_result.get("status") in ("success", "partial") or is_exec_verified or is_goal_verified
+
+                task_state.state = "PROGRESS_CHECK"
+                evidence = tool_result.get("execution_evidence") if isinstance(tool_result.get("execution_evidence"), dict) else {}
+                post_el = evidence.get("post_element_count", "")
+                fp = f"{tool_name}:{tool_result.get('status', '')}:{post_el}:{task_state.current_window or ''}"
+
+                if is_success:
+                    if fp != task_state.progress_fingerprint or iteration == 1:
+                        task_state.progress_fingerprint = fp
+                        task_state.last_progress_timestamp = time.time()
+                        task_state.no_progress_count = 0
+                        task_state.last_successful_action = {
+                            "tool": tool_name,
+                            "args": tool_args,
+                            "iteration": iteration,
+                            "action_verified": is_exec_verified,
+                            "goal_verified": is_goal_verified
+                        }
+                else:
+                    task_state.no_progress_count += 1
+
+                if task_state.no_progress_count >= 3:
+                    task_state.recovery_count += 1
+                    task_state.state = "RECOVER"
+                    logger.warning(f"⚠️ No progress detected for {task_state.no_progress_count} turns (recovery #{task_state.recovery_count}).")
+                    if task_state.no_progress_count >= 5:
+                        logger.error("🛑 Task stopped safely: repeated failure and no state progress across 5 consecutive turns.")
+                        messages.append({
+                            "role": "system",
+                            "content": "[System Recovery]: Repeated failure and no state progress detected across 5 consecutive turns. Terminating safely."
+                        })
+                        break
+                    else:
+                        messages.append({
+                            "role": "system",
+                            "content": (
+                                f"[System Recovery Notice]: No observable state progress in the last {task_state.no_progress_count} turns. "
+                                "If the target element or window has changed, use computer_use_observe to re-observe the screen state or adjust your approach."
+                            )
+                        })
+
                 event_bus.publish(EventType.TOOL_COMPLETED, {
                     "tool": tool_name,
                     "action": tool_name,
@@ -190,7 +281,9 @@ class AgentExecutionLoop:
                     "tool": tool_name,
                     "arguments": tool_args,
                     "result": tool_result,
-                    "duration_ms": tool_dur_ms
+                    "duration_ms": tool_dur_ms,
+                    "action_execution_verified": is_exec_verified,
+                    "goal_state_verified": is_goal_verified
                 }
                 executed_steps.append(step_record)
 
@@ -214,6 +307,9 @@ class AgentExecutionLoop:
                     duration_ms=tool_dur_ms
                 )
 
+            if task_state.no_progress_count >= 5:
+                break
+
         if not final_answer:
             final_answer = llm_text or f"Task processed in {iteration} steps."
 
@@ -225,10 +321,12 @@ class AgentExecutionLoop:
         if is_action_goal and len(executed_steps) == 0:
             final_status = "error"
             final_answer = "Failed: No action tools were executed for the requested task."
-        elif has_errors and not any(s.get("result", {}).get("status") == "success" for s in executed_steps):
+        elif has_errors and not any(s.get("result", {}).get("status") in ("success", "partial") or s.get("action_execution_verified") for s in executed_steps):
             final_status = "error"
         else:
             final_status = "success"
+
+        task_state.state = "COMPLETE" if final_status == "success" else "FAILED"
 
         total_time = time.time() - start_time
         logger.info(f"✅ MAX goal completed in {iteration} turns ({total_time:.2f}s) status={final_status}")
@@ -261,7 +359,17 @@ class AgentExecutionLoop:
             "final_answer": final_answer,
             "steps": executed_steps,
             "learning_proposal": learning_proposal,
-            "duration_sec": total_time
+            "duration_sec": total_time,
+            "task_state": {
+                "goal": task_state.goal,
+                "current_window": task_state.current_window,
+                "current_application": task_state.current_application,
+                "observation_generation": task_state.observation_generation,
+                "last_successful_action": task_state.last_successful_action,
+                "recovery_count": task_state.recovery_count,
+                "progress_fingerprint": task_state.progress_fingerprint,
+                "final_state": task_state.state
+            }
         }
 
     def _extract_tool_calls_from_text(self, text: str) -> List[Dict[str, Any]]:

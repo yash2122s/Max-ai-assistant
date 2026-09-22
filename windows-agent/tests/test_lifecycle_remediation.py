@@ -25,7 +25,7 @@ class TestLifecycleRemediation(unittest.IsolatedAsyncioTestCase):
 
     async def test_clean_shutdown(self):
         """Verify async_shutdown stops all services cleanly and idempotently."""
-        mock_voice = Mock()
+        mock_voice = Mock(spec=["stop"])
         mock_voice.stop = Mock()
         mock_ws = AsyncMock()
         mock_http = AsyncMock()

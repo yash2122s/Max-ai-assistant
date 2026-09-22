@@ -3,6 +3,9 @@ import time
 import asyncio
 import os
 import urllib.parse
+import logging
+
+logger = logging.getLogger("MAX.APIRouter")
 from core.settings_manager import settings_manager
 from core.session_manager import session_manager
 from core.connection_manager import connection_manager

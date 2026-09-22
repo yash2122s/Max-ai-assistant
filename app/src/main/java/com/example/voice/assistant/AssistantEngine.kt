@@ -28,6 +28,10 @@ class AssistantEngine(private val context: Context) {
     
     private val audioProcessor = AudioProcessor()
     val audioRecorder = AudioRecorder()
+    val audioStateGuard = AudioStateGuard()
+
+    // Emotion & Personality Engine
+    val emotionEngine = com.example.emotion.engine.EmotionEngine(context)
 
     // Connection manager and Streaming Response Manager as lateinit to resolve circular reference
     lateinit var connectionManager: ConnectionManager
@@ -37,6 +41,7 @@ class AssistantEngine(private val context: Context) {
     init {
         connectionManager = ConnectionManager(
             context = context,
+            emotionEngine = emotionEngine,
             onMessageReceived = { text ->
                 responseTimeoutJob?.cancel()
                 responseTimeoutJob = null
@@ -123,7 +128,7 @@ class AssistantEngine(private val context: Context) {
                         com.example.automation.engine.GoalPlanner.resolveFastPathPlan(effectiveGoal, context)
                     } else null
 
-                    if (normalizedAction == "TASK_INTENT" || functionName == "task_intent") {
+                    val executionResult = if (normalizedAction == "TASK_INTENT" || functionName == "task_intent") {
                         android.util.Log.d("AssistantEngine", "[VOICE_TASK_INTENT] Dispatching task_intent directly to ActionDispatcher for background orchestration.")
                         com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, normalizedJson)
                     } else if (fastPathPlan != null && fastPathPlan.isNotEmpty()) {
@@ -133,6 +138,8 @@ class AssistantEngine(private val context: Context) {
                             android.util.Log.e("AssistantEngine", "[VOICE_PLAN] Fast-path validation failed: $validationError")
                             org.json.JSONObject().apply {
                                 put("status", "error")
+                                put("success", false)
+                                put("executionState", "FAILED")
                                 put("reason", validationError)
                             }.toString()
                         } else {
@@ -141,6 +148,8 @@ class AssistantEngine(private val context: Context) {
                             android.util.Log.d("AssistantEngine", "[VOICE_RESULT] Finished execution for fast-path goal '$effectiveGoal' (success=${planResult.success})")
                             org.json.JSONObject().apply {
                                 put("status", if (planResult.success) "success" else "error")
+                                put("success", planResult.success)
+                                put("executionState", if (planResult.success) "COMPLETED" else "FAILED")
                                 put("reason", planResult.errorMessage ?: (if (planResult.success) "Goal completed successfully." else "Goal execution failed."))
                             }.toString()
                         }
@@ -163,6 +172,8 @@ class AssistantEngine(private val context: Context) {
                             android.util.Log.w("AssistantEngine", "[VOICE_AUTH] Action '$normalizedAction' BLOCKED: ${auth.reason}")
                             org.json.JSONObject().apply {
                                 put("status", "blocked")
+                                put("success", false)
+                                put("executionState", "BLOCKED")
                                 put("reason", auth.reason)
                             }.toString()
                         } else {
@@ -189,6 +200,8 @@ class AssistantEngine(private val context: Context) {
                             } else {
                                 org.json.JSONObject().apply {
                                     put("status", "blocked")
+                                    put("success", false)
+                                    put("executionState", "BLOCKED")
                                     put("reason", auth.reason)
                                 }.toString()
                             }
@@ -219,6 +232,8 @@ class AssistantEngine(private val context: Context) {
                                     )
                                     org.json.JSONObject().apply {
                                         put("status", "blocked")
+                                        put("success", false)
+                                        put("executionState", "BLOCKED")
                                         put("reason", evaluation.reason)
                                     }.toString()
                                 }
@@ -231,6 +246,8 @@ class AssistantEngine(private val context: Context) {
                                     )
                                     org.json.JSONObject().apply {
                                         put("status", "awaiting_approval")
+                                        put("success", false)
+                                        put("executionState", "RUNNING")
                                         put("reason", "Confirmation requested from the user.")
                                     }.toString()
                                 }
@@ -238,10 +255,24 @@ class AssistantEngine(private val context: Context) {
                         }
                     }
 
+                    // Feed automation execution outcome to Emotion Engine
+                    val parsed = runCatching { org.json.JSONObject(executionResult) }.getOrNull()
+                    if (parsed?.optString("status") == "success" || parsed?.optString("executionState") == "COMPLETED") {
+                        emotionEngine.processEvent(com.example.emotion.model.EmotionEvent.TaskSuccess(resolvedAction.ifEmpty { functionName }))
+                    } else if (parsed?.optString("status") == "error" || parsed?.optString("executionState") == "FAILED") {
+                        val reason = parsed?.optString("reason", "Task execution failed") ?: "Task execution failed"
+                        emotionEngine.processEvent(com.example.emotion.model.EmotionEvent.TaskFailure(resolvedAction.ifEmpty { functionName }, reason))
+                    }
+
+                    executionResult
+
                 } catch (e: Exception) {
                     android.util.Log.e("AssistantEngine", "Error executing automation in voice assistant", e)
+                    emotionEngine.processEvent(com.example.emotion.model.EmotionEvent.TaskFailure(jsonStr, e.message ?: "Execution error"))
                     org.json.JSONObject().apply {
                         put("status", "error")
+                        put("success", false)
+                        put("executionState", "FAILED")
                         put("reason", e.message ?: "Unknown error in voice tool execution")
                     }.toString()
                 }
@@ -326,7 +357,26 @@ class AssistantEngine(private val context: Context) {
         conversationManager.addMessage("You", userText)
         AssistantEventBus.emit(AssistantEvent.TextTranscribed("You", userText))
 
-        // 3. Fast-Path / Deterministic Voice Routing (ZERO Gemini)
+        // Check real-time Memory Fact retrieval
+        if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(userText)) {
+            CoroutineScope(Dispatchers.IO).launch {
+                val factResult = com.example.memory.retrieval.MemoryFactResolver.resolve(context, userText)
+                if (factResult != null && factResult.found) {
+                    android.util.Log.i("AssistantEngine", "[MEMORY_DIRECT_RESOLVE] Resolved memory fact for '$userText': ${factResult.responseText}")
+                    streamingResponseManager.stopAllPlayback()
+                    responseTimeoutJob?.cancel()
+                    responseTimeoutJob = null
+                    conversationManager.addMessage("MAX", factResult.responseText)
+                    AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", factResult.responseText))
+                }
+            }
+        }
+
+        // Update Emotion Engine state based on incoming speech
+        val (detectedEmotionEvent, currentEmotion) = emotionEngine.processUserText(userText)
+        if (detectedEmotionEvent != null) {
+            android.util.Log.d("AssistantEngine", "[EMOTION_EVENT] Detected: $detectedEmotionEvent | New state: ${currentEmotion.getDominantTraits()}")
+        }
         if (com.example.automation.engine.SemanticUiCommandParser.isDeterministicPrimitive(userText) ||
             com.example.automation.engine.GoalPlanner.resolveFastPathPlan(userText, context) != null) {
             android.util.Log.i("AssistantEngine", "[DETERMINISTIC_VOICE_ROUTE] User speech is deterministic UI command: '$userText'. Intercepting locally with 0 Gemini calls.")
@@ -444,33 +494,57 @@ class AssistantEngine(private val context: Context) {
             android.util.Log.w("AssistantEngine", "[SECURITY_GATE] Gemini API Key is missing. Cannot start listening.")
             return
         }
-        if (audioRecorder.isRecording()) return
+        if (!audioStateGuard.tryBeginStarting()) {
+            android.util.Log.d("AssistantEngine", "startListening rejected: AudioStateGuard is in state ${audioStateGuard.getState()}")
+            return
+        }
+        if (audioRecorder.isRecording()) {
+            audioStateGuard.markListening()
+            return
+        }
         
         // Interrupt Gemini audio playback if user starts speaking (barge-in)
         streamingResponseManager.handleUserSpeaking()
 
         android.util.Log.d("VoiceLatency", "[VoiceLatency] speech_start ts=${System.currentTimeMillis()}")
         stateMachine.transitionTo(SessionState.LISTENING)
-        audioRecorder.startRecording(
-            audioProcessor = audioProcessor,
-            onAudioChunk = { chunk ->
-                connectionManager.sendAudio(chunk)
-            },
-            onRmsChanged = { rms ->
-                AssistantEventBus.emit(AssistantEvent.AudioRmsChanged(rms))
-            }
-        )
+        try {
+            audioRecorder.startRecording(
+                audioProcessor = audioProcessor,
+                onAudioChunk = { chunk ->
+                    connectionManager.sendAudio(chunk)
+                },
+                onRmsChanged = { rms ->
+                    AssistantEventBus.emit(AssistantEvent.AudioRmsChanged(rms))
+                }
+            )
+            audioStateGuard.markListening()
+        } catch (e: Exception) {
+            android.util.Log.e("AssistantEngine", "Failed to start audio recording", e)
+            audioStateGuard.abortStarting()
+            stateMachine.transitionTo(SessionState.CONNECTED)
+        }
     }
 
-    fun isRecording(): Boolean = audioRecorder.isRecording()
+    fun isRecording(): Boolean = audioRecorder.isRecording() || audioStateGuard.getState() == com.example.voice.audio.AudioGuardState.LISTENING
 
     fun stopListening() {
+        if (!audioStateGuard.tryBeginStopping()) {
+            android.util.Log.d("AssistantEngine", "stopListening rejected: AudioStateGuard is in state ${audioStateGuard.getState()}")
+            return
+        }
         android.util.Log.d("VoiceLatency", "[VoiceLatency] speech_end ts=${System.currentTimeMillis()}")
-        audioRecorder.stopRecording()
-        audioProcessor.reset()
-        streamingResponseManager.stopAllPlayback()
-        if (stateMachine.getState() == SessionState.LISTENING || stateMachine.getState() == SessionState.STREAMING_AUDIO) {
-            stateMachine.transitionTo(SessionState.CONNECTED)
+        try {
+            audioRecorder.stopRecording()
+        } catch (e: Exception) {
+            android.util.Log.e("AssistantEngine", "Error stopping audio recorder", e)
+        } finally {
+            audioProcessor.reset()
+            streamingResponseManager.stopAllPlayback()
+            audioStateGuard.markIdle()
+            if (stateMachine.getState() == SessionState.LISTENING || stateMachine.getState() == SessionState.STREAMING_AUDIO) {
+                stateMachine.transitionTo(SessionState.CONNECTED)
+            }
         }
     }
 
@@ -495,6 +569,34 @@ class AssistantEngine(private val context: Context) {
             return
         }
 
+        // Intercept personal memory queries directly
+        if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(userText)) {
+            CoroutineScope(Dispatchers.IO).launch {
+                val factResult = com.example.memory.retrieval.MemoryFactResolver.resolve(context, userText)
+                if (factResult != null && factResult.found) {
+                    android.util.Log.i("AssistantEngine", "[MEMORY_DIRECT_TEXT_RESOLVE] Resolved memory fact for '$userText': ${factResult.responseText}")
+                    conversationManager.addMessage("You", userText)
+                    AssistantEventBus.emit(AssistantEvent.TextTranscribed("You", userText))
+                    conversationManager.addMessage("MAX", factResult.responseText)
+                    AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", factResult.responseText))
+                    return@launch
+                }
+                // If not found in direct resolver, send to model with dynamic RAG
+                sendTextMessageToModel(userText, promptText)
+            }
+            return
+        }
+
+        // Update Emotion Engine state based on incoming text message
+        val (detectedEmotionEvent, currentEmotion) = emotionEngine.processUserText(userText)
+        if (detectedEmotionEvent != null) {
+            android.util.Log.d("AssistantEngine", "[EMOTION_EVENT_TEXT] Detected: $detectedEmotionEvent | New state: ${currentEmotion.getDominantTraits()}")
+        }
+
+        sendTextMessageToModel(userText, promptText)
+    }
+
+    private fun sendTextMessageToModel(userText: String, promptText: String) {
         val settings = com.example.data.preferences.SettingsManager(context)
         val keyPresent = settings.hasValidGeminiApiKey()
         android.util.Log.d("GeminiFlow", "[GeminiFlow] key_present=$keyPresent")
@@ -520,8 +622,20 @@ class AssistantEngine(private val context: Context) {
             }
         }
 
-        if (isVisionQuery(userText)) {
-            CoroutineScope(Dispatchers.IO).launch {
+        CoroutineScope(Dispatchers.IO).launch {
+            val relevantMemories = try {
+                com.example.memory.data.MemoryRepository.getInstance(context).getRelevantMemories(userText)
+            } catch (e: Exception) {
+                emptyList()
+            }
+            val effectivePrompt = if (relevantMemories.isNotEmpty() && promptText == userText) {
+                val snippet = com.example.memory.retrieval.MemoryFormatter.formatForPrompt(relevantMemories)
+                "<MAX_RETRIEVED_MEMORY>\n$snippet\n</MAX_RETRIEVED_MEMORY>\n\n$promptText"
+            } else {
+                promptText
+            }
+
+            if (isVisionQuery(userText)) {
                 android.util.Log.d("AssistantEngine", "Vision query detected in text prompt: '$userText'. Capturing fresh screen...")
                 val jpeg = ScreenCaptureProvider.captureCompressedJpeg()
                 if (jpeg != null && jpeg.isNotEmpty()) {
@@ -530,10 +644,8 @@ class AssistantEngine(private val context: Context) {
                 } else {
                     android.util.Log.w("AssistantEngine", "Fresh screen capture returned null for text prompt")
                 }
-                connectionManager.sendText(promptText)
             }
-        } else {
-            connectionManager.sendText(promptText)
+            connectionManager.sendText(effectivePrompt)
         }
     }
 

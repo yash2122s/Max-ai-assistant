@@ -12,13 +12,17 @@ from typing import Tuple, List, Optional, Set
 
 logger = logging.getLogger("MAXWindowsAgent.Security")
 
-# Allowed root paths for filesystem operations (User profile and Project root)
+# Allowed root paths for filesystem operations (User profile, Project root, and Temp directories)
 USER_PROFILE = os.path.abspath(os.path.realpath(os.path.expanduser("~")))
 PROJECT_ROOT = os.path.abspath(os.path.realpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+TEMP_ROOT = os.path.abspath(os.path.realpath(os.environ.get("TEMP", "C:\\Temp")))
+C_TEMP_ROOT = os.path.abspath(os.path.realpath("C:\\Temp"))
 
 ALLOWED_ROOTS = [
     USER_PROFILE,
-    PROJECT_ROOT
+    PROJECT_ROOT,
+    TEMP_ROOT,
+    C_TEMP_ROOT
 ]
 
 # Sensitive patterns that must never be exposed in logs or command outputs
@@ -62,8 +66,26 @@ DEV_COMMANDS = frozenset({
 })
 
 
+# Forbidden Windows device names (cannot be created or written to safely)
+WINDOWS_RESERVED_DEVICE_NAMES = frozenset({
+    "con", "prn", "aux", "nul",
+    "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9",
+    "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9"
+})
+
+# Dangerous Windows utilities/LOLBins that must never be launched or targeted as safe executables
+BLOCKED_SYSTEM_EXECUTABLES = frozenset({
+    "cmd.exe", "powershell.exe", "powershell_ise.exe", "pwsh.exe",
+    "wscript.exe", "cscript.exe", "mshta.exe", "rundll32.exe",
+    "regsvr32.exe", "certutil.exe", "bitsadmin.exe", "vssadmin.exe",
+    "wbadmin.exe", "bcdedit.exe", "format.com", "diskpart.exe",
+    "bash.exe", "wsl.exe", "wslhost.exe", "schtasks.exe", "at.exe"
+})
+
+
 class RiskLevel:
     SAFE = "SAFE"
+    LOW_RISK = "LOW_RISK"
     DEV = "DEV"
     CONFIRM_REQUIRED = "CONFIRM_REQUIRED"
     CRITICAL_BLOCKED = "CRITICAL_BLOCKED"
@@ -81,23 +103,71 @@ class SecurityGuard:
         Classifies risk level for tool/agent action name.
         """
         act = (action_name or "").lower()
-        if any(d in act for d in ("shutdown", "restart", "delete", "format", "rmdir", "erase", "wipe")):
+        if any(d in act for d in ("shutdown", "restart", "delete", "format", "rmdir", "erase", "wipe", "batch_rename")):
             return RiskLevel.DANGEROUS
         return RiskLevel.SAFE
 
+    @staticmethod
+    def classify_fs_risk(operation: str, path: str = "") -> str:
+        """
+        Classifies filesystem operation risk level.
+        """
+        op = (operation or "").lower().strip()
+        if op in ("delete", "delete_file", "delete_folder", "delete_directory", "rmdir", "erase", "wipe"):
+            return RiskLevel.DANGEROUS
+        if op in ("batch_rename", "organize_desktop", "mass_move"):
+            return RiskLevel.DANGEROUS
+        if op in ("write", "write_file", "overwrite", "append", "move", "rename"):
+            return RiskLevel.LOW_RISK
+        if op in ("read", "read_file", "list", "get_folder_contents", "info", "get_file_info", "hash", "get_file_hash", "search", "search_files", "disk_storage", "get_disk_storage", "duplicates", "find_duplicate_files"):
+            return RiskLevel.SAFE
+        return RiskLevel.LOW_RISK
 
+    @staticmethod
+    def is_protected_system_path(path: str) -> bool:
+        """
+        Checks if a path resides within protected OS directories (e.g. C:\\Windows, C:\\Program Files).
+        """
+        if not path or not isinstance(path, str):
+            return False
+        try:
+            expanded = os.path.abspath(os.path.realpath(os.path.expandvars(os.path.expanduser(path)))).lower()
+            system_roots = [
+                os.environ.get("SystemRoot", r"C:\Windows").lower(),
+                os.environ.get("ProgramFiles", r"C:\Program Files").lower(),
+                os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)").lower(),
+                os.environ.get("ProgramData", r"C:\ProgramData").lower()
+            ]
+            for s_root in system_roots:
+                if expanded == s_root or expanded.startswith(s_root + os.sep):
+                    return True
+            return False
+        except Exception:
+            return True
 
     @staticmethod
     def is_safe_path(path: str, allow_system_executables: bool = False) -> bool:
         """
         Validates whether a path is safely within the allowed user/workspace sandbox.
-        Prevents relative traversal, UNC paths, and symlink escapes.
+        Prevents relative traversal, UNC paths, device names, and symlink escapes.
         """
         if not path or not isinstance(path, str):
             return False
 
         # Reject dangerous UNC paths (e.g. \\attacker\share)
         if path.startswith(r"\\") or path.startswith("//"):
+            return False
+
+        # Reject NTFS alternate data streams (e.g. file.txt:stream)
+        # Note: Drive letters like C:\ are valid, but colons in filenames after position 1 are streams
+        raw_norm = path.replace("\\", "/")
+        drive_rest = raw_norm[2:] if len(raw_norm) >= 2 and raw_norm[1] == ":" else raw_norm
+        if ":" in drive_rest:
+            return False
+
+        # Check reserved DOS device names
+        base_name_check = os.path.basename(path).split(".")[0].lower()
+        if base_name_check in WINDOWS_RESERVED_DEVICE_NAMES:
             return False
 
         try:
@@ -124,9 +194,8 @@ class SecurityGuard:
 
             # Optional: Allow reading/launching standard system executables in Windows/Program Files
             if allow_system_executables and abs_path_lower.endswith(".exe"):
-                # Disallow raw shell binaries as target 'executables'
                 base_name = os.path.basename(abs_path_lower)
-                if base_name in ("cmd.exe", "powershell.exe", "powershell_ise.exe", "wscript.exe", "cscript.exe"):
+                if base_name in BLOCKED_SYSTEM_EXECUTABLES:
                     return False
 
                 allowed_system_roots = [

@@ -18,14 +18,32 @@ for _stream in (_sys.stdout, _sys.stderr):
     except Exception:
         pass
 
-__all__ = ["main", "async_shutdown", "run_shutdown", "is_shutdown_requested"]
+__all__ = ["main", "async_shutdown", "run_shutdown", "is_shutdown_requested", "trigger_shutdown"]
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 import threading
 from typing import Any, Callable, Optional
+
+from core.startup_profiler import StartupProfiler, profiler
+from core.readiness import readiness
+
+
+def safe_print(*args, **kwargs):
+    """Print helper that safely handles Windows console encoding errors."""
+    try:
+        print(*args, flush=True, **kwargs)
+    except UnicodeEncodeError:
+        safe_args = []
+        for a in args:
+            if isinstance(a, str):
+                safe_args.append(a.encode("ascii", errors="replace").decode("ascii"))
+            else:
+                safe_args.append(a)
+        print(*safe_args, flush=True, **kwargs)
 
 
 # ─── Configuration Constants ──────────────────────────────────────────────────
@@ -95,16 +113,16 @@ def _print_startup_banner(local_ip: str, ws_port: int, http_port: int, pairing_c
 
 
 def _check_dependencies() -> None:
-    """Verify required dependencies at startup; exit with code 2 if missing."""
+    """Verify required dependencies at startup using fast spec lookup; exit with code 2 if missing."""
+    from importlib.util import find_spec
+    required = {
+        "websockets": "websockets",
+        "google-genai": "google.genai",
+    }
     missing = []
-    try:
-        import websockets
-    except ImportError:
-        missing.append("websockets")
-    try:
-        from google import genai
-    except ImportError:
-        missing.append("google-genai")
+    for package_name, module_name in required.items():
+        if find_spec(module_name) is None:
+            missing.append(package_name)
     if missing:
         _sys.stderr.write(
             f"❌ Missing required dependencies: {', '.join(missing)}\n"
@@ -148,37 +166,68 @@ async def _stop_quietly(name: str, stop_callable: Any) -> None:
 
 
 async def async_shutdown() -> None:
-    """Asynchronous shutdown coordinator: stops services in deterministic order."""
+    """Asynchronous shutdown coordinator: stops services in deterministic order (producers before consumers)."""
     global _shutdown_called
     with _shutdown_lock:
         if _shutdown_called:
             return
         _shutdown_called = True
 
-    # 0. Stop Desktop Overlay process & UI Bridge
     try:
-        from core.overlay_process_manager import overlay_manager
-        overlay_manager.stop_overlay()
+        from core.memory_diagnostics import memory_diagnostics
+        memory_diagnostics.record_checkpoint("before shutdown")
     except Exception:
         pass
 
+    # 1. Stop voice session loops & await Live/Gemini async client cleanup
+    if _voice_session is not None:
+        if hasattr(_voice_session, "aclose"):
+            await _stop_quietly("voice session async", _voice_session.aclose)
+        else:
+            await _stop_quietly("voice session", lambda: asyncio.to_thread(_voice_session.stop))
+
+    # 2. Stop MCP background workers asynchronously (never block main loop)
+    try:
+        from core.mcp_client import mcp_client
+        await _stop_quietly("mcp client", mcp_client.stop_async)
+    except Exception:
+        pass
+
+    # 3. Stop Desktop Overlay UI Bridge event forwarding
     try:
         from server.ui_bridge import ui_bridge
         await _stop_quietly("ui bridge", ui_bridge.stop)
     except Exception:
         pass
 
-    # 1. Stop voice session
-    if _voice_session is not None:
-        await _stop_quietly("voice session", lambda: asyncio.to_thread(_voice_session.stop))
-
-    # 2. Stop WebSocket companion server & mDNS advertiser
+    # 4. Stop WebSocket companion server & mDNS advertiser
     if _ws_server is not None:
         await _stop_quietly("websocket server", _ws_server.stop)
 
-    # 3. Stop HTTP companion server
+    # 5. Stop HTTP companion server
     if _http_server is not None:
         await _stop_quietly("http server", _http_server.stop)
+
+    # 6. Stop Desktop Overlay native process
+    try:
+        from core.overlay_process_manager import overlay_manager
+        overlay_manager.stop_overlay()
+    except Exception:
+        pass
+
+    # 7. Cleanly unload shared Vosk models and recognizers
+    try:
+        from core.vosk_manager import vosk_manager
+        vosk_manager.release_models()
+    except Exception:
+        pass
+
+    # 8. Terminate shared PyAudio singleton
+    try:
+        from core.audio_handler import terminate_shared_pyaudio
+        terminate_shared_pyaudio()
+    except Exception:
+        pass
 
 
 def run_shutdown() -> None:
@@ -201,6 +250,16 @@ def run_shutdown() -> None:
             _voice_session.stop()
         except Exception:
             logger.exception("Voice session sync shutdown failed")
+    try:
+        from core.vosk_manager import vosk_manager
+        vosk_manager.release_models()
+    except Exception:
+        pass
+    try:
+        from core.audio_handler import terminate_shared_pyaudio
+        terminate_shared_pyaudio()
+    except Exception:
+        pass
 
 
 # ─── Service Runners ─────────────────────────────────────────────────────────
@@ -228,6 +287,29 @@ async def run_companion_servers(ws_server: Any, http_server: Any) -> None:
         await _stop_quietly("http server", http_server.stop)
 
 
+def trigger_shutdown() -> None:
+    """Threadsafe trigger for graceful application shutdown."""
+    global _shutdown_event
+    event = _shutdown_event
+    if event is None:
+        main_mod = sys.modules.get("__main__")
+        if main_mod:
+            event = getattr(main_mod, "_shutdown_event", None)
+    if event is not None:
+        try:
+            loop = getattr(event, "_loop", None)
+            if loop and loop.is_running():
+                loop.call_soon_threadsafe(event.set)
+            else:
+                event.set()
+        except Exception:
+            event.set()
+    else:
+        logger = logging.getLogger("jarvis.main")
+        logger.warning("trigger_shutdown called but _shutdown_event is None")
+
+
+
 # ─── Main Composition Root ───────────────────────────────────────────────────
 
 async def main() -> None:
@@ -236,17 +318,31 @@ async def main() -> None:
     _shutdown_event = asyncio.Event()
 
     setup_logging()
+    profiler.mark("MAIN_ENTER")
     logger = logging.getLogger("jarvis.main")
     _check_dependencies()
+    profiler.mark("CHECK_DEPS_DONE")
+
+    try:
+        from core.memory_diagnostics import memory_diagnostics
+        memory_diagnostics.record_checkpoint("MAX startup")
+    except Exception:
+        pass
+    profiler.mark("MEM_DIAGNOSTICS_DONE")
     
     from config import GEMINI_API_KEY, GEMINI_MODEL, JARVIS_NAME, USER_NAME
+    profiler.mark("CONFIG_LOADED")
+
     from server.websocket_server import WebSocketServer
     from server.http_server import HTTPServer
     from server.api_router import handle_request as http_handler, get_local_ip
     from core.task_group import TaskGroup
+    profiler.mark("SERVERS_MODULES_LOADED")
     
     # Ensure tools package is imported to trigger auto-registration
+    profiler.mark("PRE_TOOLS_IMPORT")
     import tools
+    profiler.mark("POST_TOOLS_IMPORT")
 
     # Startup reconciliation for persistent reminders
     try:
@@ -269,21 +365,44 @@ async def main() -> None:
     _print_startup_banner(local_ip, WS_PORT, HTTP_PORT, pairing_code)
     logger.info("Companion servers configured on %s (WS: %d, HTTP: %d)", HOST, WS_PORT, HTTP_PORT)
 
+    # Core and companion servers are fully ready
+    profiler.mark("MAX_ONLINE")
+    readiness.set("core", "READY")
+    readiness.set("servers", "READY")
+
+    safe_print("""
+╔══════════════════════════════╗
+║          MAX CORE            ║
+║          ONLINE              ║
+╚══════════════════════════════╝
+
+Core       ✓ READY
+Servers    ✓ READY
+Voice      ◌ INITIALIZING
+Gemini     ◌ CONNECTING
+Overlay    ◌ STARTING
+""")
+
     # Realtime Voice session setup if API key is provided
     _voice_session = None
     if GEMINI_API_KEY and GEMINI_API_KEY != PLACEHOLDER_KEY:
         try:
+            profiler.mark("PRE_VOICE_SESSION_INIT")
             from core.tool_executor import ToolRegistry as VoiceToolRegistry
             from core.realtime_voice import RealtimeVoiceSession
             voice_tool_registry = VoiceToolRegistry()
             _voice_session = RealtimeVoiceSession(voice_tool_registry)
-            logger.info("🎤 Realtime Voice Session Enabled (model: %s)", GEMINI_MODEL)
-            print(f"  🎤 Realtime Voice Session Enabled ({GEMINI_MODEL})")
+            profiler.mark("VOICE_SESSION_INIT_DONE")
+            logger.info("🎤 Realtime Voice Session configured (model: %s)", GEMINI_MODEL)
         except Exception as e:
-            logger.exception(f"Voice session initialization failed: {e}")
+            logger.exception("Voice session initialization failed: %s", e)
+            readiness.set("voice", "ERROR", error=str(e))
+            readiness.set("gemini", "ERROR", error=str(e))
     else:
         logger.info("Realtime Voice API key not configured — running Companion Server in standalone mode.")
-        print("  ℹ️  Realtime Voice API key not configured — running Companion Server in standalone mode.")
+        safe_print("  ℹ️  Realtime Voice API key not configured — running Companion Server in standalone mode.")
+        readiness.set("voice", "DISABLED")
+        readiness.set("gemini", "DISABLED")
 
     # Desktop Overlay UI Bridge setup
     _ui_bridge = None
@@ -308,11 +427,11 @@ async def main() -> None:
                     gate.register_ui_listener(_push_confirmation_to_eventbus)
                     logger.info("🛡️  ConfirmationGate linked to UI Bridge via EventBus")
         except Exception as cg_err:
-            logger.debug(f"ConfirmationGate linkage skipped: {cg_err}")
+            logger.debug("ConfirmationGate linkage skipped: %s", cg_err)
         logger.info("🖥️  Desktop Overlay UI Bridge configured (ws://127.0.0.1:9002)")
-        print("  🖥️  Desktop Overlay UI Bridge Enabled (ws://127.0.0.1:9002)")
     except Exception as ub_err:
-        logger.warning(f"UI Bridge initialization skipped: {ub_err}")
+        logger.warning("UI Bridge initialization skipped: %s", ub_err)
+        readiness.set("overlay", "DISABLED")
 
     # Register OS signal handlers for clean event-driven shutdown
     loop = asyncio.get_running_loop()
@@ -330,14 +449,62 @@ async def main() -> None:
         except asyncio.CancelledError:
             pass
         except Exception as ve:
-            logger.warning(f"Voice session ended: {ve}")
-        print("  ℹ️  Voice session stopped. Companion Server remaining active.")
+            logger.exception("Voice session ended with error: %s", ve)
+            readiness.set("gemini", "ERROR", error=str(ve))
+        safe_print("  ℹ️  Voice session stopped. Companion Server remaining active.")
+
+    async def _init_vosk_managed():
+        if _voice_session is None:
+            return
+        try:
+            await _voice_session.initialize_vosk_background()
+        except asyncio.CancelledError:
+            pass
+        except Exception as ve:
+            logger.exception("Vosk background initialization failed: %s", ve)
+            readiness.set("voice", "ERROR", error=str(ve))
+
+    async def _run_ui_bridge():
+        if _ui_bridge is None:
+            return
+        try:
+            await _ui_bridge.start()
+            # Automatically launch and manage MAXOverlay.exe in background thread
+            try:
+                from core.overlay_process_manager import overlay_manager
+                overlay_manager.set_shutdown_callback(trigger_shutdown)
+                await asyncio.to_thread(overlay_manager.start_overlay)
+                readiness.set("overlay", "READY")
+                profiler.mark("OVERLAY_READY")
+                safe_print("  🖥️  Desktop Overlay: READY")
+            except Exception as op_err:
+                logger.warning("Failed to start overlay process: %s", op_err)
+                readiness.set("overlay", "ERROR", error=str(op_err))
+
+            # Keep alive until cancelled
+            while True:
+                await asyncio.sleep(1.0)
+        except asyncio.CancelledError:
+            pass
+        except Exception as ube:
+            logger.warning("UI Bridge error: %s", ube)
+            readiness.set("overlay", "ERROR", error=str(ube))
 
     managed_tasks: list[asyncio.Task] = []
 
     async def _wait_for_shutdown():
         await _shutdown_event.wait()
         logger.info("Shutdown event received — stopping active services...")
+        if _voice_session is not None:
+            try:
+                _voice_session.stop()
+            except Exception as e:
+                logger.debug(f"Voice session stop error: {e}")
+        try:
+            from core.overlay_process_manager import overlay_manager
+            overlay_manager.stop_overlay()
+        except Exception:
+            pass
         for task in managed_tasks:
             if not task.done():
                 task.cancel()
@@ -350,31 +517,68 @@ async def main() -> None:
             )
             managed_tasks.append(server_task)
 
+            # Background Task 1: Vosk initial model load
             if _voice_session is not None:
+                vosk_task = tg.create_task(_init_vosk_managed(), name="vosk_init")
+                managed_tasks.append(vosk_task)
+
+                # Background Task 2: Realtime Voice Session (Gemini connection)
                 voice_task = tg.create_task(_run_voice_managed(), name="voice_session")
                 managed_tasks.append(voice_task)
 
-            # Start Desktop Overlay UI Bridge & Process Manager
+            # Background Task 3: Desktop Overlay UI Bridge & Process Manager
             if _ui_bridge is not None:
-                async def _run_ui_bridge():
-                    try:
-                        await _ui_bridge.start()
-                        # Automatically launch and manage MAXOverlay.exe after UIBridge is ready
-                        try:
-                            from core.overlay_process_manager import overlay_manager
-                            overlay_manager.start_overlay()
-                        except Exception as op_err:
-                            logger.warning(f"Failed to start overlay process: {op_err}")
-
-                        # Keep alive until cancelled
-                        while True:
-                            await asyncio.sleep(1.0)
-                    except asyncio.CancelledError:
-                        pass
-                    except Exception as ube:
-                        logger.warning(f"UI Bridge error: {ube}")
                 ui_task = tg.create_task(_run_ui_bridge(), name="ui_bridge")
                 managed_tasks.append(ui_task)
+
+            # Background Task 4: Readiness Monitor
+            async def _monitor_readiness():
+                try:
+                    await asyncio.gather(
+                        readiness.wait_for("voice"),
+                        readiness.wait_for("gemini"),
+                        readiness.wait_for("overlay"),
+                    )
+                    health = readiness.get_system_health()
+                    profiler.mark(f"SYSTEM_{health}")
+                    snap = readiness.snapshot()
+
+                    def _fmt(comp: str) -> str:
+                        val = snap.get(comp, "NOT_STARTED")
+                        if val == "READY":
+                            return f"✓ {val}"
+                        elif val == "DISABLED":
+                            return f"— {val}"
+                        elif "ERROR" in val:
+                            return f"✗ {val}"
+                        return f"◌ {val}"
+
+                    safe_print("\n" + "=" * 55)
+                    if health == "FULLY_OPERATIONAL":
+                        safe_print("  ✓ MAX SYSTEM FULLY OPERATIONAL")
+                    elif health == "DEGRADED":
+                        safe_print("  ⚠ MAX SYSTEM DEGRADED")
+                    else:
+                        safe_print("  MAX SYSTEM READY")
+
+                    safe_print(f"     Core:    {_fmt('core')}")
+                    safe_print(f"     Servers: {_fmt('servers')}")
+                    safe_print(f"     Voice:   {_fmt('voice')}")
+                    safe_print(f"     Gemini:  {_fmt('gemini')}")
+                    safe_print(f"     Overlay: {_fmt('overlay')}")
+                    safe_print("=" * 55 + "\n")
+                    logger.info("System health %s: %s", health, snap)
+                    profiler.report()
+                    if os.environ.get("MAX_EXIT_AFTER_READY"):
+                        logger.info("MAX_EXIT_AFTER_READY requested — triggering shutdown")
+                        trigger_shutdown()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as err:
+                    logger.exception("Readiness monitor error: %s", err)
+
+            monitor_task = tg.create_task(_monitor_readiness(), name="readiness_monitor")
+            managed_tasks.append(monitor_task)
 
             # Await shutdown signal event
             await _wait_for_shutdown()
@@ -384,13 +588,19 @@ async def main() -> None:
         logger.exception(f"Service task error: {eg}")
     finally:
         await async_shutdown()
-
-    print(f"\n👋 MAX offline. Bye {USER_NAME}!\n")
+        print(f"\n👋 MAX offline. Bye {USER_NAME}!\n", flush=True)
+        os._exit(0)
 
 
 if __name__ == "__main__":
+    import sys
+    sys.modules["main"] = sys.modules["__main__"]
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         run_shutdown()
-        sys.exit(0)
+    finally:
+        import os
+        os._exit(0)
+
+

@@ -200,6 +200,65 @@ fun AboutScreen(
     }
 }
 
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun AboutScreenPreview() {
+    MaxTheme {
+        AboutScreen(
+            onNavigateBack = {},
+            onNavigateToPrivacy = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview
+@Composable
+fun EdgeLightingPreview() {
+    MaxTheme {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaxBgDark),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "⚡ MAX Voice Live Active ⚡\n(Fluid Edge Lighting Effect)",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                )
+            }
+            androidx.compose.foundation.Canvas(
+                modifier = Modifier.fillMaxSize()
+            ) {
+                val stroke = 16f
+                drawRoundRect(
+                    brush = Brush.sweepGradient(
+                        listOf(
+                            Color(0xFF00A8FF), // Electric Blue
+                            Color(0xFF7C4DFF), // Vivid Purple
+                            Color(0xFF00E5FF), // Cyan
+                            Color(0xFFFF2A6D), // Hot Magenta
+                            Color(0xFF00E676), // Emerald
+                            Color(0xFF00A8FF)  // Loop
+                        )
+                    ),
+                    size = size,
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(40f),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun FeatureCard(
     icon: ImageVector,

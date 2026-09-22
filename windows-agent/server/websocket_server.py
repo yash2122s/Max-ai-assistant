@@ -2,11 +2,12 @@ import asyncio
 import json
 import logging
 import time
-from typing import Optional, Dict, Any, List
+from typing import TYPE_CHECKING, Optional, Dict, Any, List
 import websockets
 from config import LOG_PATH
 from .pairing_manager import PairingManager
-from tools.tool_registry import ToolRegistry
+if TYPE_CHECKING:
+    from tools.tool_registry import ToolRegistry
 from protocol import PacketValidator, PacketFactory, PacketType, CloseCode, EventType
 
 # Configure logging
@@ -92,7 +93,15 @@ class WebSocketServer:
         self.active_device_sockets = {}  # device_id -> websocket
         self.last_connect_time = {}      # device_id -> timestamp
         self.MIN_RECONNECT_INTERVAL = 5.0  # seconds
+        self._tool_registry = None
         logger.info(f"Initialized server. Current pairing code: {self.pairing_manager.get_pairing_code()}")
+
+    @property
+    def tool_registry(self):
+        if self._tool_registry is None:
+            from tools.tool_registry import ToolRegistry
+            self._tool_registry = ToolRegistry
+        return self._tool_registry
 
     async def start(self):
         import ssl
@@ -289,7 +298,7 @@ class WebSocketServer:
                     return
 
                 # Send hello response
-                caps = ToolRegistry.get_capabilities()
+                caps = self.tool_registry.get_capabilities()
                 hello_payload = {
                     "device_name": "Yaswanth Laptop",
                     "platform": "windows",
@@ -533,7 +542,7 @@ class WebSocketServer:
                     return
 
 
-                tool = ToolRegistry.get_tool(tool_name)
+                tool = self.tool_registry.get_tool(tool_name)
                 if not tool:
                     logger.warning(f"Requested tool '{tool_name}' not found in registry")
                     err_payload = {"status": "error", "output": f"Tool '{tool_name}' is not registered on this Windows Agent."}

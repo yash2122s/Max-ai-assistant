@@ -31,7 +31,9 @@ data class SettingsUiState(
     val ragChunksIndexed: Int = 0,
     val ragStatus: String = "READY",
     val isSaved: Boolean = false,
-    val saveMessage: String? = null
+    val saveMessage: String? = null,
+    val isDefaultAssistant: Boolean = false,
+    val wakeWordStatus: String = "Requires system support"
 )
 
 sealed interface SettingsUiEvent {

@@ -151,7 +151,7 @@ private fun WelcomeStepView(
                 modifier = Modifier.padding(MaxDimensions.spaceMd),
                 verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
             ) {
-                FeatureBullet("Real-time Gemini Live Voice", "Low latency, full-duplex conversational audio synthesis.")
+                FeatureBullet("Real-time Voice Intelligence", "Low latency, conversational audio interactions.")
                 FeatureBullet("Deep Device Automation", "Click, scroll, answer calls, schedule tasks, and control settings.")
                 FeatureBullet("Encrypted Local Memory", "Persistent Room vector memory stored strictly on your device.")
             }
@@ -195,6 +195,57 @@ private fun PermissionsStepView(
     onRequestBattery: () -> Unit,
     onContinue: () -> Unit
 ) {
+    var showA11yDisclosureDialog by remember { mutableStateOf(false) }
+
+    if (showA11yDisclosureDialog) {
+        AlertDialog(
+            onDismissRequest = { showA11yDisclosureDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Icon(Icons.Default.Accessibility, contentDescription = null, tint = MaxPrimary)
+                    Text("Accessibility Service Disclosure", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaxTextPrimary)
+                }
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "MAX uses the Accessibility Service API strictly to execute your voice commands and autonomous tasks on your behalf.",
+                        fontSize = 13.sp,
+                        color = MaxTextPrimary
+                    )
+                    Text(
+                        text = "• Click on UI elements & navigate apps\n• Type text into search and chat inputs\n• Answer/reject calls via voice\n• Scroll and interact with screens",
+                        fontSize = 12.sp,
+                        color = MaxTextSecondary
+                    )
+                    Text(
+                        text = "Privacy Guarantee: MAX does NOT monitor your personal data, does NOT collect keystrokes, and does NOT share screen contents.",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaxPrimary
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showA11yDisclosureDialog = false
+                        onRequestAccessibility()
+                    }
+                ) {
+                    Text("Agree & Enable", fontWeight = FontWeight.Bold, color = MaxPrimary)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showA11yDisclosureDialog = false }) {
+                    Text("Cancel", color = MaxTextMuted)
+                }
+            },
+            containerColor = MaxSurface,
+            shape = RoundedCornerShape(MaxDimensions.radiusLg)
+        )
+    }
+
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -223,18 +274,21 @@ private fun PermissionsStepView(
             ) {
                 OnboardingPermissionRow(
                     title = "Accessibility Service",
+                    subtitle = "Required for autonomous clicking, typing & UI control",
                     isGranted = uiState.isAccessibilityGranted,
-                    onGrant = onRequestAccessibility
+                    onGrant = { showA11yDisclosureDialog = true }
                 )
                 HorizontalDivider(color = MaxBorder, thickness = 0.5.dp)
                 OnboardingPermissionRow(
                     title = "Display Over Other Apps",
+                    subtitle = "Required for dynamic floating HUD capsule",
                     isGranted = uiState.isOverlayGranted,
                     onGrant = onRequestOverlay
                 )
                 HorizontalDivider(color = MaxBorder, thickness = 0.5.dp)
                 OnboardingPermissionRow(
                     title = "Ignore Battery Optimizations",
+                    subtitle = "Prevents Android from killing AI background tasks",
                     isGranted = uiState.isBatteryOptimizationsIgnored,
                     onGrant = onRequestBattery
                 )
@@ -255,6 +309,7 @@ private fun PermissionsStepView(
 @Composable
 private fun OnboardingPermissionRow(
     title: String,
+    subtitle: String? = null,
     isGranted: Boolean,
     onGrant: () -> Unit
 ) {
@@ -263,12 +318,23 @@ private fun OnboardingPermissionRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            text = title,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = MaxTextPrimary
-        )
+        Column(modifier = Modifier.weight(1f).padding(end = MaxDimensions.spaceSm)) {
+            Text(
+                text = title,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = MaxTextPrimary
+            )
+            if (subtitle != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    fontSize = 11.sp,
+                    color = MaxTextMuted,
+                    lineHeight = 14.sp
+                )
+            }
+        }
         if (isGranted) {
             Icon(
                 imageVector = Icons.Default.CheckCircle,
@@ -309,7 +375,7 @@ private fun AiConfigStepView(
         Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
 
         Text(
-            text = "Connect your Google Gemini Live API Key",
+            text = "Enter your Gemini API Key to enable MAX intelligence",
             fontSize = 13.sp,
             color = MaxTextMuted
         )
@@ -327,43 +393,6 @@ private fun AiConfigStepView(
                     leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, tint = MaxTextMuted) },
                     modifier = Modifier.fillMaxWidth()
                 )
-
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
-
-                Text(
-                    text = "Preferred Voice Persona",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaxTextMuted
-                )
-
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceXs))
-
-                val voices = listOf("Aoede", "Kore", "Fenrir", "Puck", "Charon")
-                FlowRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    voices.forEach { voice ->
-                        val isSelected = uiState.liveVoiceName.equals(voice, ignoreCase = true)
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-                                .background(if (isSelected) MaxPrimary else MaxSurfaceVariant)
-                                .clickable { onVoiceSelected(voice) }
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = voice,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) MaxBgDark else MaxTextSecondary
-                            )
-                        }
-                    }
-                }
             }
         }
 

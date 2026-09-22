@@ -10,9 +10,10 @@ import time
 import math
 import struct
 import logging
+import threading
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Callable, List, Tuple
+from typing import Optional, Callable, List, Tuple, Any
 
 logger = logging.getLogger("MAX.VoiceGate")
 
@@ -43,6 +44,8 @@ class VoiceState(str, Enum):
 
 
 VOICE_INACTIVITY_TIMEOUT: float = 180.0
+
+voice_gate: Optional["VoiceInputGate"] = None
 
 
 class VoiceInputGate:
@@ -106,6 +109,7 @@ class VoiceInputGate:
         command_timeout_sec: Optional[float] = None,
         on_state_change: Optional[Callable[[VoiceState], None]] = None,
         vosk_model_path: Optional[str] = None,
+        defer_model_load: bool = False,
         **kwargs,
     ):
         self.state = VoiceState.WAKE_WORD_LISTENING
@@ -143,22 +147,78 @@ class VoiceInputGate:
         self.vosk_model_path = vosk_model_path
         self._vosk_model = None
         self._vosk_rec = None
-        self._init_vosk(self.vosk_model_path)
+        self._vosk_init_lock = threading.Lock()
+        global voice_gate
+        voice_gate = self
+
+        if not defer_model_load:
+            self._init_vosk(self.vosk_model_path)
+
+    def ensure_model_loaded(self):
+        """Thread-safe acquisition of the Vosk model and recognizer."""
+        with self._vosk_init_lock:
+            if self._vosk_rec is None:
+                self._init_vosk(self.vosk_model_path)
 
     def _init_vosk(self, model_path: str):
         try:
             if os.path.exists(model_path):
-                from vosk import Model, KaldiRecognizer
-                self._vosk_model = Model(model_path)
-                self._vosk_rec = KaldiRecognizer(self._vosk_model, 16000)
-                logger.info(f"👂 Vosk local wake-word detector READY from '{model_path}'")
-                safe_print(f"👂 Local Wake-Word Engine (Vosk): READY [model: {os.path.basename(model_path)}]")
+                from core.vosk_manager import vosk_manager
+                self._vosk_model = vosk_manager.acquire_model(model_path, consumer_id="VoiceGate")
+                self._vosk_rec = vosk_manager.create_recognizer(model_path, consumer_id="VoiceGate", sample_rate=16000)
+                if self._vosk_rec is not None:
+                    logger.info(f"👂 Vosk local wake-word detector READY from '{model_path}'")
+                    safe_print(f"👂 Local Wake-Word Engine (Vosk): READY [model: {os.path.basename(model_path)}]")
+                    try:
+                        from core.readiness import readiness
+                        readiness.set_voice_ready()
+                    except Exception:
+                        pass
+                    try:
+                        from core.startup_profiler import profiler
+                        profiler.mark("VOSK_READY")
+                    except Exception:
+                        pass
+                else:
+                    logger.warning(f"⚠️ Vosk recognizer creation failed for '{model_path}'.")
+                    try:
+                        from core.readiness import readiness
+                        readiness.set_voice_error("Recognizer creation failed")
+                    except Exception:
+                        pass
             else:
                 logger.warning(f"⚠️ Vosk model not found at '{model_path}'. Local wake detection offline.")
                 safe_print(f"⚠️ Local Wake-Word Engine: Model not found at '{model_path}'")
+                try:
+                    from core.readiness import readiness
+                    readiness.set_voice_error("Model not found")
+                except Exception:
+                    pass
         except Exception as e:
             logger.error(f"❌ Vosk initialization failed: {e}")
             safe_print(f"❌ Local Wake-Word Engine error: {e}")
+            try:
+                from core.readiness import readiness
+                readiness.set_voice_error(str(e))
+            except Exception:
+                pass
+
+    def close(self):
+        """Clean up Vosk recognizer and model reference."""
+        if self._vosk_rec is not None:
+            try:
+                from core.vosk_manager import vosk_manager
+                vosk_manager.destroy_recognizer(self._vosk_rec, consumer_id="VoiceGate")
+            except Exception:
+                pass
+            self._vosk_rec = None
+        if self._vosk_model is not None:
+            try:
+                from core.vosk_manager import vosk_manager
+                vosk_manager.release_model(self.vosk_model_path, consumer_id="VoiceGate")
+            except Exception:
+                pass
+            self._vosk_model = None
 
     def transition_to(self, new_state: VoiceState):
         """Transitions the voice state machine."""
@@ -204,6 +264,64 @@ class VoiceInputGate:
                 self.on_state_change(new_state)
             except Exception as e:
                 logger.debug(f"Error in on_state_change callback: {e}")
+
+        if new_state in (VoiceState.LIVE_CONVERSATION, VoiceState.COMMAND_LISTENING):
+            self.verify_live_conversation_invariant()
+
+    def verify_live_conversation_invariant(self, realtime_session: Optional[Any] = None) -> bool:
+        """
+        Enforces the explicit invariant:
+        WHEN state == LIVE_CONVERSATION:
+            wake_word_detection == disabled
+            microphone == active
+            realtime_audio_send_loop == running
+            realtime_receive_loop == running
+            user_turn_input == enabled
+
+        Any violation logs a diagnostic error.
+        """
+        if self.state not in (VoiceState.LIVE_CONVERSATION, VoiceState.COMMAND_LISTENING):
+            return True
+
+        violations: List[str] = []
+
+        # Wake-word detection must be disabled during active live conversation
+        # (Implicitly verified because process_audio_chunk does not feed Vosk when state == LIVE_CONVERSATION)
+
+        # Check session components if provided
+        if realtime_session is not None:
+            mic_active = (
+                getattr(realtime_session.audio_capture, "has_active_stream", False)
+                or getattr(realtime_session.audio_capture, "is_running", False)
+            )
+            if not mic_active:
+                violations.append("microphone is inactive")
+
+            send_loop = getattr(realtime_session, "_is_send_audio_running", True)
+            if not send_loop:
+                violations.append("realtime_audio_send_loop is not running")
+
+            recv_loop = getattr(realtime_session, "_is_receive_loop_running", True)
+            if not recv_loop:
+                violations.append("realtime_receive_loop is not running")
+
+            ws_alive = getattr(realtime_session, "_session_active", True)
+            if not ws_alive:
+                violations.append("websocket session is inactive")
+
+        if violations:
+            logger.error(
+                "[REALTIME_VOICE_INVARIANT_VIOLATION] state=%s violations: %s",
+                self.state.value,
+                ", ".join(violations),
+            )
+            return False
+
+        logger.debug(
+            "[REALTIME_VOICE_INVARIANT_OK] state=%s wake_word=disabled mic=active send_loop=running recv_loop=running input=enabled",
+            self.state.value
+        )
+        return True
 
     @staticmethod
     def calculate_rms(audio_bytes: bytes) -> float:
@@ -368,8 +486,8 @@ class VoiceInputGate:
 
         # 2. COOLDOWN: Short grace period after MAX stops speaking, then return to LIVE_CONVERSATION
         if self.state == VoiceState.COOLDOWN:
-            self.check_cooldown()
-            return False
+            if not self.check_cooldown():
+                return False
 
         # 3. WAKE_WORD_LISTENING: Local wake-word evaluation via Vosk
         if self.state in (VoiceState.WAKE_WORD_LISTENING, VoiceState.IDLE):

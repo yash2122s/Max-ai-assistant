@@ -117,11 +117,157 @@ class VerificationEngine:
         }
 
     def _verify_file_operation(self, envelope: TaskEnvelope, res: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
-        target_path = res.get("path", envelope.metadata.get("path"))
-        expected_op = res.get("operation", envelope.metadata.get("operation", "create"))
+        # Resolve target path from result or envelope metadata
+        target_path = res.get("path") or envelope.metadata.get("path")
+        if not target_path and res.get("artifacts"):
+            target_path = res["artifacts"][0]
 
-        if target_path and expected_op in ("create", "write", "exist"):
+        # Rule: If required target path cannot be resolved for a file operation, verification fails
+        if not target_path:
+            return False, {
+                "verified": False,
+                "reason": "Filesystem target path unavailable for verification.",
+                "policy": "file_operation"
+            }
+
+        # Determine operation type from result, metadata, action, or goal
+        expected_op = str(res.get("operation") or res.get("action") or envelope.metadata.get("operation") or "").lower().strip()
+        if not expected_op:
+            low_g = (envelope.goal or "").lower()
+            if "write" in low_g or "save" in low_g:
+                expected_op = "write"
+            elif "folder" in low_g or "directory" in low_g:
+                expected_op = "create_folder"
+            elif "open" in low_g:
+                expected_op = "open"
+            elif "delete" in low_g or "remove" in low_g:
+                expected_op = "delete"
+            else:
+                expected_op = "create"
+
+        expected_content = res.get("expected_content", envelope.metadata.get("expected_content", res.get("content", envelope.metadata.get("content"))))
+
+        if expected_op in ("create", "create_file", "create_text_file"):
             exists = os.path.exists(target_path)
+            is_file = os.path.isfile(target_path) if exists else False
+            content_ok = self.verifier.verify_file_content_sync(target_path, expected_content) if (expected_content is not None and exists and is_file) else (expected_content is None)
+            verified = exists and is_file and content_ok
+
+            if not exists:
+                reason = f"File not found on disk: {target_path}."
+            elif not is_file:
+                reason = f"Target is not a regular file: {target_path}."
+            elif expected_content is not None and not content_ok:
+                reason = f"Content mismatch: Expected content does not match actual disk content for {target_path}."
+            else:
+                reason = "File created and verified."
+
+            return verified, {
+                "verified": verified,
+                "target_path": target_path,
+                "exists": exists,
+                "is_file": is_file,
+                "content_verified": content_ok,
+                "policy": "file_operation",
+                "reason": reason
+            }
+
+        elif expected_op in ("write", "write_file"):
+            exists = os.path.exists(target_path)
+            is_file = os.path.isfile(target_path) if exists else False
+            if expected_content is not None:
+                content_ok = self.verifier.verify_file_content_sync(target_path, expected_content) if (exists and is_file) else False
+                verified = exists and is_file and content_ok
+                if not exists:
+                    reason = f"File not found on disk: {target_path}."
+                elif not is_file:
+                    reason = f"Target is not a regular file: {target_path}."
+                elif not content_ok:
+                    reason = f"Content mismatch: Expected content does not match actual disk content for {target_path}."
+                else:
+                    reason = "File content verified."
+
+                return verified, {
+                    "verified": verified,
+                    "target_path": target_path,
+                    "exists": exists,
+                    "is_file": is_file,
+                    "content_verified": content_ok,
+                    "policy": "file_operation",
+                    "reason": reason
+                }
+            else:
+                verified = exists and is_file
+                return verified, {
+                    "verified": verified,
+                    "target_path": target_path,
+                    "exists": exists,
+                    "is_file": is_file,
+                    "content_verified": False,
+                    "policy": "file_operation",
+                    "reason": "File exists on disk." if verified else f"File not found: {target_path}."
+                }
+
+        elif expected_op in ("create_folder", "create_directory", "folder"):
+            verified = self.verifier.verify_folder_created_sync(target_path)
+            return verified, {
+                "verified": verified,
+                "target_path": target_path,
+                "exists": os.path.exists(target_path),
+                "is_dir": os.path.isdir(target_path) if os.path.exists(target_path) else False,
+                "policy": "file_operation",
+                "reason": "Folder created and verified." if verified else "Folder creation verification failed."
+            }
+
+        elif expected_op in ("delete", "delete_file", "delete_folder"):
+            verified = self.verifier.verify_path_deleted_sync(target_path)
+            return verified, {
+                "verified": verified,
+                "target_path": target_path,
+                "deleted": verified,
+                "policy": "file_operation",
+                "reason": "Path deleted and verified." if verified else "Path still exists."
+            }
+
+        elif expected_op in ("move", "move_file"):
+            source_path = res.get("source") or envelope.metadata.get("source")
+            verified = self.verifier.verify_file_moved_sync(source_path, target_path) if source_path else os.path.exists(target_path)
+            return verified, {
+                "verified": verified,
+                "source": source_path,
+                "target_path": target_path,
+                "policy": "file_operation"
+            }
+
+        elif expected_op in ("copy", "copy_file"):
+            source_path = res.get("source") or envelope.metadata.get("source")
+            verified = self.verifier.verify_file_copied_sync(source_path, target_path) if source_path else os.path.exists(target_path)
+            return verified, {
+                "verified": verified,
+                "source": source_path,
+                "target_path": target_path,
+                "policy": "file_operation"
+            }
+
+        elif expected_op in ("open", "open_file", "open_folder"):
+            exists = os.path.exists(target_path)
+            if not exists:
+                return False, {
+                    "verified": False,
+                    "target_path": target_path,
+                    "exists": False,
+                    "reason": "Cannot open non-existent path.",
+                    "policy": "file_operation"
+                }
+            return True, {
+                "verified": True,
+                "target_path": target_path,
+                "exists": True,
+                "policy": "file_operation"
+            }
+
+        elif expected_op == "exist":
+            exists = self.verifier.verify_path_exists_sync(target_path)
             return exists, {
                 "verified": exists,
                 "target_path": target_path,
@@ -129,8 +275,16 @@ class VerificationEngine:
                 "policy": "file_operation"
             }
 
-        verified = not bool(res.get("error"))
-        return verified, {"verified": verified, "policy": "file_operation"}
+        # Fallback for other file ops: require path exists and no errors
+        exists = os.path.exists(target_path)
+        has_error = bool(res.get("error"))
+        verified = exists and not has_error
+        return verified, {
+            "verified": verified,
+            "target_path": target_path,
+            "exists": exists,
+            "policy": "file_operation"
+        }
 
     def _verify_process_action(self, envelope: TaskEnvelope, res: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         app_name = res.get("app_name", envelope.metadata.get("app_name"))

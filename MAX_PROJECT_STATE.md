@@ -8,7 +8,7 @@
 
 **Build**: Gradle 8.x / AGP 8.x / Kotlin 2.x / compileSdk 36 (API 36.1)  
 **Target Device**: Redmi K20 Pro — Android 16 (API 36) — Root + Shizuku  
-**App ID**: `com.aistudio.geminilive.abcde`  
+**App ID**: `com.maxaiagent.yash`  
 **Package**: `com.example`  
 **DB**: Room v14 (`jarvis_database`)
 

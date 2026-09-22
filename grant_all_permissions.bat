@@ -45,7 +45,7 @@ if %errorlevel% equ 0 (
 )
 del temp_devices.txt
 
-set PACKAGE=com.aistudio.geminilive.abcde
+set PACKAGE=com.maxaiagent.yash
 
 echo.
 echo Granting all permissions for %PACKAGE%...

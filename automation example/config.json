@@ -1,0 +1,9 @@
+﻿{
+  "target_contact": "yaswanth",
+  "message_text": "hello",
+  "send_message": false,
+  "app_name": "WhatsApp",
+  "launch_wait_seconds": 6.0,
+  "search_wait_seconds": 2.0,
+  "typing_interval": 0.06
+}

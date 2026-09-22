@@ -18,16 +18,20 @@ namespace MAXOverlay
 {
     public partial class MainWindow : Window
     {
-        // Win32 interop for click-through and TOOLWINDOW
+        // Win32 interop for click-through, TOOLWINDOW, and capture exclusion
         [DllImport("user32.dll")]
         private static extern int GetWindowLong(IntPtr hwnd, int index);
 
         [DllImport("user32.dll")]
         private static extern int SetWindowLong(IntPtr hwnd, int index, int newStyle);
 
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetWindowDisplayAffinity(IntPtr hwnd, uint affinity);
+
         private const int GWL_EXSTYLE = -20;
         private const int WS_EX_TRANSPARENT = 0x00000020;
         private const int WS_EX_TOOLWINDOW = 0x00000080;
+        private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
 
         private readonly MaxWebSocketClient _wsClient;
         private readonly StateManager _state;
@@ -85,6 +89,16 @@ namespace MAXOverlay
             // Apply TOOLWINDOW style (hide from Alt+Tab)
             int exStyle = GetWindowLong(_hwnd, GWL_EXSTYLE);
             SetWindowLong(_hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW);
+
+            // Exclude MAX Overlay from screenshots
+            try
+            {
+                SetWindowDisplayAffinity(_hwnd, WDA_EXCLUDEFROMCAPTURE);
+            }
+            catch (Exception ex)
+            {
+                App.Log($"Could not set WDA_EXCLUDEFROMCAPTURE: {ex.Message}");
+            }
 
             // Set initial click-through for idle capsule
             SetClickThrough(true);

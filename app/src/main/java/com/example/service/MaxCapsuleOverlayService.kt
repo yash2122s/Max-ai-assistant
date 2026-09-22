@@ -47,6 +47,11 @@ class MaxCapsuleOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Creating MaxCapsuleOverlayService...")
+        if (!Settings.canDrawOverlays(this)) {
+            Log.w(TAG, "SYSTEM_ALERT_WINDOW permission missing — stopping overlay service")
+            stopSelf()
+            return
+        }
         ServiceRegistry.register(ServiceType.OVERLAY, this)
         startForegroundNotification()
         setupOverlayWindow()
@@ -55,8 +60,9 @@ class MaxCapsuleOverlayService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!Settings.canDrawOverlays(this)) {
-            Log.w(TAG, "SYSTEM_ALERT_WINDOW permission missing — overlay suspended")
-            return START_STICKY
+            Log.w(TAG, "SYSTEM_ALERT_WINDOW permission missing — stopping overlay service")
+            stopSelf()
+            return START_NOT_STICKY
         }
         if (capsuleView == null) {
             setupOverlayWindow()

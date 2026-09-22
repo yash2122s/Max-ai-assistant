@@ -105,22 +105,34 @@ async def test_task_engine_parallel_dag_execution():
 
     engine = TaskEngine.get_instance()
     timestamps = {}
+    barrier = asyncio.Event()
+    started_count = 0
 
     async def async_worker_a(**kwargs):
+        nonlocal started_count
         timestamps["a_start"] = time.time()
-        await asyncio.sleep(0.1)
+        started_count += 1
+        if started_count == 2:
+            barrier.set()
+        await asyncio.wait_for(barrier.wait(), timeout=3.0)
+        await asyncio.sleep(0.05)
         timestamps["a_end"] = time.time()
         return {"status": "success", "data": "result_a"}
 
     async def async_worker_b(**kwargs):
+        nonlocal started_count
         timestamps["b_start"] = time.time()
-        await asyncio.sleep(0.1)
+        started_count += 1
+        if started_count == 2:
+            barrier.set()
+        await asyncio.wait_for(barrier.wait(), timeout=3.0)
+        await asyncio.sleep(0.05)
         timestamps["b_end"] = time.time()
         return {"status": "success", "data": "result_b"}
 
     async def async_combiner(**kwargs):
         timestamps["c_start"] = time.time()
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0.02)
         timestamps["c_end"] = time.time()
         return {"status": "success", "data": "combined"}
 
@@ -156,26 +168,22 @@ async def test_task_engine_parallel_dag_execution():
         steps=[step_a, step_b, step_c]
     )
 
-    t0 = time.time()
     completed_task = await engine.execute_task(task)
-    total_duration = time.time() - t0
 
     assert completed_task.status == TaskState.COMPLETED
     assert completed_task.steps[0].status == StepState.SUCCEEDED
     assert completed_task.steps[1].status == StepState.SUCCEEDED
     assert completed_task.steps[2].status == StepState.SUCCEEDED
 
-    # Verify parallel overlap between step_a and step_b
-    overlap = max(timestamps["a_start"], timestamps["b_start"]) < min(timestamps["a_end"], timestamps["b_end"])
-    assert overlap is True, "Step A and Step B must execute concurrently in parallel!"
-
-    # Verify step_c only started AFTER both step_a and step_b finished
+    # Deterministic concurrency proofs:
+    # 1. Both workers reached running state concurrently before barrier release
+    assert started_count == 2
+    # 2. Parallel intervals overlapped
+    assert timestamps["a_start"] < timestamps["b_end"]
+    assert timestamps["b_start"] < timestamps["a_end"]
+    # 3. Combiner step only started AFTER both parallel steps completed
     assert timestamps["c_start"] >= timestamps["a_end"] - 0.01
     assert timestamps["c_start"] >= timestamps["b_end"] - 0.01
-
-    # Verify stage 0 span is ~0.1s (parallel) instead of ~0.2s (sequential)
-    parallel_stage_span = max(timestamps["a_end"], timestamps["b_end"]) - min(timestamps["a_start"], timestamps["b_start"])
-    assert parallel_stage_span < 0.16, f"Expected parallel span < 0.16s, got {parallel_stage_span}s"
 
 
 @pytest.mark.asyncio

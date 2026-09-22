@@ -9,7 +9,7 @@
 ```
 com.example
 Workspace: d:\max app testing\gemini-live\
-App ID:    com.aistudio.geminilive.abcde
+App ID:    com.maxaiagent.yash
 Package:   com.example
 DB name:   jarvis_database  (Room v14)
 ```

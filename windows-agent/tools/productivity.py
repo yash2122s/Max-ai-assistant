@@ -221,6 +221,456 @@ def type_text(text: str, **kwargs) -> dict:
         return {"status": "error", "message": str(e)}
 
 
+def clear_field(**kwargs) -> dict:
+    """
+    Clears the active input field or text box in the focused window by selecting all and deleting.
+    Simulates Ctrl+A followed by Delete.
+    """
+    try:
+        pyautogui.FAILSAFE = False
+        pyautogui.hotkey('ctrl', 'a')
+        time.sleep(0.08)
+        pyautogui.press('delete')
+        return {"status": "success", "message": "Active field cleared", "verified": True}
+    except Exception as e:
+        logger.error(f"Error in clear_field: {e}")
+        return {"status": "error", "message": str(e), "verified": False}
+
+
+def smart_type(text: str = "", clear_first: bool = True, **kwargs) -> dict:
+    """
+    Smart type into the currently active input field.
+    If clear_first is True (default), it selects all existing text and deletes it before typing.
+    Uses clipboard paste for fast, 100% reliable Unicode and multi-language typing.
+    
+    Args:
+        text: The text to type into the field.
+        clear_first: Whether to clear existing content before typing (default: True).
+    """
+    try:
+        pyautogui.FAILSAFE = False
+        target_text = str(text if text is not None else kwargs.get("content", ""))
+        
+        if clear_first:
+            clear_field()
+            time.sleep(0.08)
+
+        clipboard_helper.set_text(target_text)
+        time.sleep(0.12)
+        pyautogui.hotkey('ctrl', 'v')
+        
+        preview = target_text[:60] + ('...' if len(target_text) > 60 else '')
+        return {
+            "status": "success",
+            "message": f"Smart-typed: {preview}",
+            "text": target_text,
+            "cleared_first": clear_first,
+            "verified": True
+        }
+    except Exception as e:
+        logger.error(f"Error in smart_type: {e}")
+        return {"status": "error", "message": str(e), "verified": False}
+
+
+# ─── Synthetic Test Data Generation ─────────────────────────────────────────
+
+_FIRST_NAMES = [
+    "Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Drew", "Quinn",
+    "Avery", "Blake", "Cameron", "Dakota", "Emerson", "Finley", "Harper",
+    "Yaswanth", "Rahul", "Priya", "Ananya", "Vikram", "Suresh", "Kavya"
+]
+_LAST_NAMES = [
+    "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
+    "Davis", "Wilson", "Moore", "Taylor", "Anderson", "Thomas", "Jackson",
+    "Sharma", "Reddy", "Verma", "Rao", "Patel", "Nair", "Chowdhury"
+]
+_DOMAINS = ["gmail.com", "yahoo.com", "outlook.com", "proton.me", "mail.com", "icloud.com"]
+
+
+def generate_random_data(data_type: str = "name", **kwargs) -> dict:
+    """
+    Generate synthetic test data for form filling, testing, and dummy registrations.
+    
+    Supported types:
+      - 'name', 'first_name', 'last_name'
+      - 'email', 'username', 'password'
+      - 'phone', 'birthday', 'address', 'city', 'zip_code'
+    
+    Args:
+        data_type: The type of synthetic data to generate.
+    """
+    import random
+    import string
+    
+    dt = str(data_type or kwargs.get("type", "name")).lower().strip()
+    val = ""
+    
+    if dt == "first_name":
+        val = random.choice(_FIRST_NAMES)
+    elif dt == "last_name":
+        val = random.choice(_LAST_NAMES)
+    elif dt == "name":
+        val = f"{random.choice(_FIRST_NAMES)} {random.choice(_LAST_NAMES)}"
+    elif dt == "email":
+        first = random.choice(_FIRST_NAMES).lower()
+        last = random.choice(_LAST_NAMES).lower()
+        num = random.randint(10, 999)
+        val = f"{first}.{last}{num}@{random.choice(_DOMAINS)}"
+    elif dt == "username":
+        val = f"{random.choice(_FIRST_NAMES).lower()}{random.randint(100, 9999)}"
+    elif dt == "password":
+        chars = string.ascii_letters + string.digits + "!@#$%"
+        raw = (
+            random.choice(string.ascii_uppercase)
+            + random.choice(string.digits)
+            + random.choice("!@#$%")
+            + "".join(random.choices(chars, k=9))
+        )
+        val = "".join(random.sample(raw, len(raw)))
+    elif dt == "phone":
+        val = f"+91{random.randint(6, 9)}{random.randint(100000000, 999999999)}"
+    elif dt == "birthday":
+        y = random.randint(1985, 2003)
+        m = random.randint(1, 12)
+        d = random.randint(1, 28)
+        val = f"{m:02d}/{d:02d}/{y}"
+    elif dt == "address":
+        num = random.randint(100, 9999)
+        street = random.choice(["Main Road", "Gandhi Nagar", "Park Avenue", "Oak Street", "MG Road"])
+        val = f"{num}, {street}"
+    elif dt == "zip_code":
+        val = str(random.randint(500001, 534201))
+    elif dt == "city":
+        val = random.choice(["Hyderabad", "Bhimavaram", "Bengaluru", "Chennai", "Mumbai", "Visakhapatnam"])
+    else:
+        val = f"mock_{dt}_{random.randint(1000, 9999)}"
+
+    return {
+        "status": "success",
+        "data_type": dt,
+        "value": val,
+        "message": f"Generated synthetic {dt}: {val}",
+        "verified": True
+    }
+
+
+def get_user_or_random_data(field: str = "name", **kwargs) -> dict:
+    """
+    Retrieves user profile data from MAX long-term memory.
+    If the field is not present in memory, automatically generates synthetic fallback data.
+    
+    Args:
+        field: Field name to retrieve (e.g. 'name', 'email', 'phone', 'city', 'address').
+    """
+    f_clean = str(field or kwargs.get("key", "name")).lower().strip()
+    
+    try:
+        from core.memory import recall_fact
+        fact_res = recall_fact(f_clean)
+        if fact_res and fact_res.get("status") == "success":
+            val = None
+            if "value" in fact_res and fact_res["value"]:
+                val = fact_res["value"]
+            elif "results" in fact_res and fact_res["results"]:
+                first_match = fact_res["results"][0]
+                val = first_match.get("value") if isinstance(first_match, dict) else str(first_match)
+            if val:
+                return {
+                    "status": "success",
+                    "field": f_clean,
+                    "value": val,
+                    "source": "memory",
+                    "message": f"Retrieved '{f_clean}' from user memory: {val}",
+                    "verified": True
+                }
+    except Exception as me:
+        logger.debug(f"Memory lookup for {f_clean} skipped: {me}")
+
+    gen_res = generate_random_data(data_type=f_clean)
+    gen_res["source"] = "synthetic_fallback"
+    return gen_res
+
+
+# ─── Fast Multimodal Vision Grounder ───────────────────────────────────────
+
+def _get_gemini_vision_client():
+    """Returns a client for Gemini Vision model calls."""
+    api_key = os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        from google import genai
+        return genai.Client(api_key=api_key)
+    except Exception as e:
+        logger.warning(f"Could not initialize google.genai: {e}")
+        return None
+
+
+def screen_find(description: str, timeout: int = 20, **kwargs) -> dict:
+    """
+    Locates a visual element on the screen using 1-shot Multimodal Vision (Gemini 2.5 Flash).
+    Returns the exact center coordinates (x, y) of the requested element.
+    Useful as a reliable visual fallback when UIA or DOM tree is unavailable (Canvas, games, custom widgets).
+    
+    Args:
+        description: Natural language description of the visual element (e.g., 'Sign In button', 'Search bar', 'Close icon').
+    """
+    if not description or not str(description).strip():
+        return {"status": "error", "message": "Element description is required.", "verified": False}
+
+    client = _get_gemini_vision_client()
+    if not client:
+        return {"status": "error", "message": "Gemini API key not configured for screen vision.", "verified": False}
+
+    try:
+        import io
+        import re
+        from google.genai import types as gtypes
+        
+        pyautogui.FAILSAFE = False
+        w, h = pyautogui.size()
+        img = pyautogui.screenshot()
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        image_bytes = buf.getvalue()
+
+        prompt = (
+            f"This is a screenshot of a {w}x{h} pixel screen. "
+            f"Locate the UI element described as: '{description}'. "
+            f"Reply with ONLY the center coordinates in the exact format: x,y "
+            f"Example: 450,320 "
+            f"If the element is not visible or cannot be found, reply: NOT_FOUND"
+        )
+
+        resp = None
+        for model_name in ("gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"):
+            try:
+                resp = client.models.generate_content(
+                    model=model_name,
+                    contents=[
+                        gtypes.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                        prompt
+                    ]
+                )
+                if resp and resp.text:
+                    break
+            except Exception as me:
+                logger.debug(f"Model {model_name} failed: {me}")
+
+        if not resp or not resp.text:
+            return {"status": "not_found", "message": f"Vision model failed to analyze screen for '{description}'.", "verified": False}
+
+        text = resp.text.strip()
+        if "NOT_FOUND" in text.upper():
+            return {"status": "not_found", "message": f"Element '{description}' not found on screen.", "verified": False}
+
+        match = re.search(r"(\d+)\s*,\s*(\d+)", text)
+        if match:
+            x, y = int(match.group(1)), int(match.group(2))
+            x = max(0, min(w - 1, x))
+            y = max(0, min(h - 1, y))
+            return {
+                "status": "success",
+                "x": x,
+                "y": y,
+                "screen_width": w,
+                "screen_height": h,
+                "description": description,
+                "message": f"Found '{description}' at ({x}, {y})",
+                "verified": True
+            }
+
+        return {"status": "not_found", "message": f"Could not parse coordinates from vision output: '{text}'", "verified": False}
+
+    except Exception as e:
+        logger.error(f"Error in screen_find: {e}")
+        return {"status": "error", "message": str(e), "verified": False}
+
+
+def screen_click(description: str, button: str = "left", clicks: int = 1, timeout: int = 20, **kwargs) -> dict:
+    """
+    Locates a UI element on screen using Gemini Vision and clicks it directly.
+    
+    Args:
+        description: Description of the element to click (e.g. 'Submit button', 'Settings icon').
+        button: Mouse button ('left', 'right', 'middle').
+        clicks: Number of clicks (1 for single, 2 for double).
+    """
+    try:
+        find_res = screen_find(description=description, timeout=timeout, **kwargs)
+        if find_res.get("status") != "success" or "x" not in find_res:
+            return find_res
+
+        x = find_res["x"]
+        y = find_res["y"]
+        
+        pyautogui.FAILSAFE = False
+        time.sleep(0.15)
+        pyautogui.click(x, y, button=button, clicks=clicks)
+        
+        return {
+            "status": "success",
+            "operation": "screen_click",
+            "x": x,
+            "y": y,
+            "description": description,
+            "button": button,
+            "clicks": clicks,
+            "message": f"{'Double-c' if clicks == 2 else 'C'}licked '{description}' at ({x}, {y})",
+            "verified": True
+        }
+    except Exception as e:
+        logger.error(f"Error in screen_click: {e}")
+        return {"status": "error", "message": str(e), "verified": False}
+
+
+# ─── Master Computer Control Dispatcher ─────────────────────────────────────
+
+def computer_control(action: str = "smart_type", **kwargs) -> dict:
+    """
+    Master unified computer control dispatcher.
+    Routes and coordinates all input, keyboard, mouse, visual element finding,
+    and synthetic data operations under a single canonical interface.
+    
+    Supported Actions:
+      - 'type' / 'smart_type': Type text (with auto-clearing and clipboard acceleration).
+      - 'clear_field': Clear active input field.
+      - 'click' / 'left_click' / 'double_click' / 'right_click': Mouse clicking.
+      - 'move' / 'drag': Mouse movement and drag-and-drop.
+      - 'hotkey' / 'press': Simulate key combination or single key.
+      - 'scroll': Scroll wheel up/down/left/right.
+      - 'copy' / 'paste': Clipboard operations.
+      - 'screen_find': Locate visual element coordinates via Gemini Vision.
+      - 'screen_click': Locate and click visual element via Gemini Vision.
+      - 'random_data': Generate synthetic form data.
+      - 'user_data': Retrieve user data with synthetic fallback.
+      - 'screenshot': Capture full screen screenshot.
+      - 'focus_window': Focus application window by title or name.
+      - 'wait': Sleep for specified duration.
+    """
+    act = str(action or kwargs.get("op", "smart_type")).lower().strip()
+    
+    try:
+        if act in ("smart_type", "type"):
+            text = kwargs.get("text", kwargs.get("content", ""))
+            clear_first = kwargs.get("clear_first", act == "smart_type")
+            return smart_type(text=text, clear_first=clear_first)
+            
+        elif act in ("clear_field", "clear"):
+            return clear_field()
+            
+        elif act in ("click", "left_click"):
+            x = kwargs.get("x")
+            y = kwargs.get("y")
+            button = kwargs.get("button", "left")
+            clicks = int(kwargs.get("clicks", 1))
+            pyautogui.FAILSAFE = False
+            if x is not None and y is not None:
+                pyautogui.click(int(x), int(y), button=button, clicks=clicks)
+                return {"status": "success", "message": f"Clicked at ({x}, {y})", "verified": True}
+            pyautogui.click(button=button, clicks=clicks)
+            return {"status": "success", "message": "Clicked at current position", "verified": True}
+            
+        elif act == "double_click":
+            x = kwargs.get("x")
+            y = kwargs.get("y")
+            pyautogui.FAILSAFE = False
+            if x is not None and y is not None:
+                pyautogui.click(int(x), int(y), button="left", clicks=2)
+                return {"status": "success", "message": f"Double-clicked at ({x}, {y})", "verified": True}
+            pyautogui.click(button="left", clicks=2)
+            return {"status": "success", "message": "Double-clicked at current position", "verified": True}
+            
+        elif act == "right_click":
+            x = kwargs.get("x")
+            y = kwargs.get("y")
+            pyautogui.FAILSAFE = False
+            if x is not None and y is not None:
+                pyautogui.click(int(x), int(y), button="right", clicks=1)
+                return {"status": "success", "message": f"Right-clicked at ({x}, {y})", "verified": True}
+            pyautogui.click(button="right", clicks=1)
+            return {"status": "success", "message": "Right-clicked at current position", "verified": True}
+            
+        elif act == "move":
+            x = int(kwargs.get("x", 0))
+            y = int(kwargs.get("y", 0))
+            dur = float(kwargs.get("duration", kwargs.get("seconds", 0.2)))
+            pyautogui.FAILSAFE = False
+            pyautogui.moveTo(x, y, duration=dur)
+            return {"status": "success", "message": f"Moved mouse to ({x}, {y})", "verified": True}
+            
+        elif act == "drag":
+            x1 = int(kwargs.get("x1", kwargs.get("start_x", 0)))
+            y1 = int(kwargs.get("y1", kwargs.get("start_y", 0)))
+            x2 = int(kwargs.get("x2", kwargs.get("end_x", 0)))
+            y2 = int(kwargs.get("y2", kwargs.get("end_y", 0)))
+            dur = float(kwargs.get("duration", kwargs.get("seconds", 0.4)))
+            pyautogui.FAILSAFE = False
+            pyautogui.moveTo(x1, y1, duration=0.15)
+            pyautogui.dragTo(x2, y2, duration=dur, button="left")
+            return {"status": "success", "message": f"Dragged from ({x1}, {y1}) to ({x2}, {y2})", "verified": True}
+            
+        elif act in ("hotkey", "press"):
+            keys = kwargs.get("keys") or kwargs.get("key_combo") or kwargs.get("key") or "enter"
+            return press_key(key_combo=str(keys))
+            
+        elif act == "scroll":
+            direction = kwargs.get("direction", "down").lower()
+            amount = int(kwargs.get("amount", 3))
+            pyautogui.FAILSAFE = False
+            clicks = amount if direction in ("up", "right") else -amount
+            if direction in ("up", "down"):
+                pyautogui.scroll(clicks)
+            else:
+                pyautogui.hscroll(clicks)
+            return {"status": "success", "message": f"Scrolled {direction} by {amount}", "verified": True}
+            
+        elif act == "copy":
+            return copy_selection()
+            
+        elif act == "paste":
+            return paste_text(text=kwargs.get("text"))
+            
+        elif act in ("screen_find", "find_element"):
+            desc = kwargs.get("description") or kwargs.get("query") or kwargs.get("target") or ""
+            return screen_find(description=desc)
+            
+        elif act in ("screen_click", "click_element"):
+            desc = kwargs.get("description") or kwargs.get("query") or kwargs.get("target") or ""
+            button = kwargs.get("button", "left")
+            clicks = int(kwargs.get("clicks", 1))
+            return screen_click(description=desc, button=button, clicks=clicks)
+            
+        elif act in ("random_data", "fake_data", "mock_data"):
+            dt = kwargs.get("type") or kwargs.get("data_type") or "name"
+            return generate_random_data(data_type=dt)
+            
+        elif act in ("user_data", "profile_data"):
+            field = kwargs.get("field") or kwargs.get("key") or "name"
+            return get_user_or_random_data(field=field)
+            
+        elif act == "screenshot":
+            from tools.app_control import take_screenshot
+            return take_screenshot(filename=kwargs.get("path") or kwargs.get("filename"))
+            
+        elif act == "focus_window":
+            title = kwargs.get("title") or kwargs.get("app_name") or ""
+            from tools.app_control import switch_to_app
+            return switch_to_app(app_name=title)
+            
+        elif act == "wait":
+            secs = min(30.0, max(0.1, float(kwargs.get("seconds", 1.0))))
+            time.sleep(secs)
+            return {"status": "success", "message": f"Waited {secs} seconds", "verified": True}
+            
+        else:
+            return {"status": "error", "message": f"Unknown computer_control action: '{action}'", "verified": False}
+
+    except Exception as e:
+        logger.error(f"Error executing computer_control action '{action}': {e}")
+        return {"status": "error", "message": str(e), "verified": False}
+
+
 def press_key(key_combo: str, **kwargs) -> dict:
     """
     Simulate a keyboard key press or hotkey combination.
@@ -673,6 +1123,123 @@ TOOL_DECLARATIONS = [
             "required": ["reminder_id"],
         },
     },
+    {
+        "name": "clear_field",
+        "description": "Clear all text in the active input field or text box (Ctrl+A -> Delete).",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+    {
+        "name": "smart_type",
+        "description": "Smart type text into the active field, optionally clearing existing text first (Ctrl+A -> Delete) and using fast clipboard paste.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": "Text to type into the field.",
+                },
+                "clear_first": {
+                    "type": "boolean",
+                    "description": "Whether to select all and clear the field before typing (default: true).",
+                }
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "generate_random_data",
+        "description": "Generate synthetic fake form data for testing/dummy registration (e.g. 'first_name', 'last_name', 'name', 'email', 'username', 'password', 'phone', 'birthday', 'address', 'city', 'zip_code').",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "data_type": {
+                    "type": "string",
+                    "description": "Type of synthetic data to generate (e.g. 'name', 'email', 'password', 'phone', 'city', 'address', 'birthday').",
+                }
+            },
+        },
+    },
+    {
+        "name": "get_user_or_random_data",
+        "description": "Retrieve user profile data from MAX long-term memory; if missing, automatically falls back to generating realistic synthetic data.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string",
+                    "description": "Field name to retrieve (e.g. 'name', 'email', 'phone', 'city', 'address').",
+                }
+            },
+        },
+    },
+    {
+        "name": "screen_find",
+        "description": "Locate a UI/visual element on the screen using 1-shot Multimodal Vision (Gemini 2.5 Flash). Returns exact center (x, y) coordinates. Useful visual fallback when UIA is unavailable (Canvas, games, custom widgets).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "Natural language description of the visual element (e.g. 'Sign In button', 'Search bar', 'Download icon').",
+                }
+            },
+            "required": ["description"],
+        },
+    },
+    {
+        "name": "screen_click",
+        "description": "Locate a UI/visual element on the screen using Gemini Vision and click it directly at its center coordinates.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string",
+                    "description": "Natural language description of the visual element to click (e.g. 'Sign In button', 'Close icon').",
+                },
+                "button": {
+                    "type": "string",
+                    "enum": ["left", "right", "middle"],
+                    "description": "Mouse button to click (default: 'left').",
+                },
+                "clicks": {
+                    "type": "integer",
+                    "description": "Number of clicks (1 for single, 2 for double click).",
+                }
+            },
+            "required": ["description"],
+        },
+    },
+    {
+        "name": "computer_control",
+        "description": "Master unified computer control dispatcher for keyboard, mouse, visual element finding, and synthetic data generation.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": [
+                        "type", "smart_type", "clear_field", "click", "double_click", "right_click",
+                        "move", "drag", "hotkey", "press", "scroll", "copy", "paste",
+                        "screen_find", "screen_click", "random_data", "user_data", "screenshot", "focus_window", "wait"
+                    ],
+                    "description": "Action to perform.",
+                },
+                "text": {"type": "string", "description": "Text to type or paste."},
+                "x": {"type": "integer", "description": "Target X screen coordinate."},
+                "y": {"type": "integer", "description": "Target Y screen coordinate."},
+                "description": {"type": "string", "description": "Description of element for screen_find/screen_click."},
+                "keys": {"type": "string", "description": "Key combination for hotkey/press (e.g. 'ctrl+c', 'enter')."},
+                "clear_first": {"type": "boolean", "description": "Clear field before typing in smart_type."},
+                "type": {"type": "string", "description": "Data type for random_data."},
+                "field": {"type": "string", "description": "Field name for user_data."},
+                "seconds": {"type": "number", "description": "Seconds to wait."},
+            },
+            "required": ["action"],
+        },
+    },
 ]
 
 TOOL_FUNCTIONS = {
@@ -697,6 +1264,15 @@ TOOL_FUNCTIONS = {
     "paste_text": paste_text,
     "copy_selection": copy_selection,
     "type_text": type_text,
+    "clear_field": clear_field,
+    "smart_type": smart_type,
+    "generate_random_data": generate_random_data,
+    "random_data": generate_random_data,
+    "get_user_or_random_data": get_user_or_random_data,
+    "user_data": get_user_or_random_data,
+    "screen_find": screen_find,
+    "screen_click": screen_click,
+    "computer_control": computer_control,
     "press_key": press_key,
     "run_command": run_command,
     "send_whatsapp_message": send_whatsapp_message,

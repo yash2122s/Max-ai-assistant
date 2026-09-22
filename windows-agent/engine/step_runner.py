@@ -170,25 +170,84 @@ class StepRunner:
         Runs the specified verification policy using ActionVerifier.
         """
         # First check execution status
-        status = exec_result.get("status", "").lower()
+        status = str(exec_result.get("status", "")).lower()
         if status in ("error", "failed", "cancelled"):
             return False
 
         policy = step.verification
-        if not policy or policy.type == VerificationType.NONE:
+        vtype = policy.type if policy else VerificationType.NONE
+
+        # Auto-detect filesystem verification policy if policy was NONE but action is filesystem-related
+        if vtype == VerificationType.NONE:
+            action_name = (step.action or "").lower()
+            if action_name in ("create_file", "create_text_file"):
+                vtype = VerificationType.FILE_CREATED
+            elif action_name == "write_file":
+                vtype = VerificationType.FILE_WRITTEN
+            elif action_name in ("create_folder", "create_directory"):
+                vtype = VerificationType.FOLDER_CREATED
+            elif action_name == "open_file":
+                vtype = VerificationType.FILE_OPENED
+            elif action_name in ("read_file", "open_folder"):
+                vtype = VerificationType.PATH_EXISTS
+            elif action_name in ("delete_file", "delete_folder"):
+                vtype = VerificationType.PATH_DELETED
+
+        if vtype == VerificationType.NONE:
             return status in ("success", "ok", "info")
 
-        if policy.type == VerificationType.APP_LAUNCHED:
-            target = policy.target or step.arguments.get("app_name") or step.arguments.get("application") or ""
+        if vtype == VerificationType.APP_LAUNCHED:
+            target = (policy.target if policy and policy.target else None) or step.arguments.get("app_name") or step.arguments.get("application") or ""
             if not target:
                 return status in ("success", "ok")
-            return await action_verifier.verify_app_launched(target, timeout_seconds=policy.timeout_seconds)
+            return await action_verifier.verify_app_launched(target, timeout_seconds=policy.timeout_seconds if policy else 3.0)
 
-        if policy.type == VerificationType.WINDOW_CLOSED:
-            target = policy.target or step.arguments.get("app_name") or step.arguments.get("window_title") or ""
+        if vtype == VerificationType.WINDOW_CLOSED:
+            target = (policy.target if policy and policy.target else None) or step.arguments.get("app_name") or step.arguments.get("window_title") or ""
             if not target:
                 return status in ("success", "ok")
-            return await action_verifier.verify_window_closed(target, timeout_seconds=policy.timeout_seconds)
+            return await action_verifier.verify_window_closed(target, timeout_seconds=policy.timeout_seconds if policy else 3.0)
 
-        # Default fallback
+        # Filesystem Authoritative Verifications
+        target_path = (policy.target if policy and policy.target else None) or step.arguments.get("path") or step.arguments.get("file_path") or step.arguments.get("folder_path") or exec_result.get("path")
+        
+        if not target_path:
+            logger.warning(f"Step '{step.step_id}' requires filesystem verification ({vtype}) but no target path was provided.")
+            return False
+
+        # Resolve path to canonical if needed
+        from tools.file_manager import _resolve_user_path
+        try:
+            resolved_path = _resolve_user_path(str(target_path))
+        except Exception:
+            resolved_path = str(target_path)
+
+        if vtype == VerificationType.FILE_CREATED:
+            expected_content = step.arguments.get("content")
+            return action_verifier.verify_file_created_sync(resolved_path, expected_content=expected_content)
+
+        if vtype == VerificationType.FILE_WRITTEN:
+            expected_content = step.arguments.get("content")
+            if expected_content is None:
+                expected_content = exec_result.get("content")
+            if expected_content is None:
+                return False
+            return action_verifier.verify_file_content_sync(resolved_path, expected_content)
+
+        if vtype == VerificationType.FOLDER_CREATED:
+            return action_verifier.verify_folder_created_sync(resolved_path)
+
+        if vtype == VerificationType.PATH_EXISTS:
+            return action_verifier.verify_path_exists_sync(resolved_path)
+
+        if vtype == VerificationType.PATH_DELETED:
+            return action_verifier.verify_path_deleted_sync(resolved_path)
+
+        if vtype == VerificationType.FILE_OPENED:
+            if not action_verifier.verify_path_exists_sync(resolved_path):
+                return False
+            if exec_result.get("verified") is True:
+                return True
+            return status in ("success", "ok")
+
         return status in ("success", "ok")

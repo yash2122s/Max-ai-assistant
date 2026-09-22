@@ -65,7 +65,7 @@ data class DeviceContext(
             val nodes = mutableListOf<UiNode>()
             var pkgName = ""
             val service = com.example.service.JarvisAccessibilityService.instance
-            val effectiveRoot = rootNode ?: service?.rootInActiveWindow
+            val effectiveRoot = rootNode ?: com.example.service.JarvisAccessibilityService.getActiveRoot()
 
             if (effectiveRoot != null) {
                 pkgName = effectiveRoot.packageName?.toString().orEmpty()

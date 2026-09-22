@@ -1,0 +1,28 @@
+{
+  "skill_id": "com.max.test.cyclic",
+  "name": "Invalid Cyclic Skill",
+  "description": "Demonstrates circular dependency detection in DAG validator.",
+  "version": "1.0.0",
+  "schema_version": "1.0.0",
+  "supported_platforms": ["android"],
+  "requirements": {
+    "common": { "capabilities": [], "permissions": [] },
+    "android": { "capabilities": [], "permissions": [] },
+    "windows": { "capabilities": [], "permissions": [] }
+  },
+  "allowed_capabilities": ["ui.click"],
+  "steps": [
+    {
+      "step_id": "step_a",
+      "action": "ui.click",
+      "target": "Button A",
+      "depends_on": ["step_b"]
+    },
+    {
+      "step_id": "step_b",
+      "action": "ui.click",
+      "target": "Button B",
+      "depends_on": ["step_a"]
+    }
+  ]
+}

@@ -116,19 +116,62 @@ class TaskRecoveryEngine {
         if (service == null) return false
         val root = service.rootInActiveWindow ?: return false
 
+        if (!isModalOrDialogPresent(root)) {
+            return false
+        }
+
         val dismissKeywords = listOf("Not now", "Dismiss", "Cancel", "Skip", "Close", "No thanks", "Later")
         for (keyword in dismissKeywords) {
             val nodes = root.findAccessibilityNodeInfosByText(keyword)
             for (node in nodes) {
-                if (node.isClickable) {
-                    val clicked = node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                val clickable = if (node.isClickable) node else findClickableAncestor(node)
+                if (clickable != null) {
+                    val clicked = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK)
                     if (clicked) {
-                        Log.i(TAG, "Dismissed dialog via '$keyword' button")
+                        Log.i(TAG, "Dismissed unexpected modal/dialog via '$keyword' button")
                         return true
                     }
                 }
             }
         }
         return false
+    }
+
+    private fun isModalOrDialogPresent(root: AccessibilityNodeInfo): Boolean {
+        fun scan(node: AccessibilityNodeInfo?, depth: Int): Boolean {
+            if (node == null || depth > 25) return false
+            val cls = node.className?.toString()?.lowercase(java.util.Locale.ROOT).orEmpty()
+            val id = node.viewIdResourceName?.lowercase(java.util.Locale.ROOT).orEmpty()
+            if (cls.contains("dialog") || cls.contains("popup") || cls.contains("alert") ||
+                id.contains("dialog") || id.contains("modal") || id.contains("bottom_sheet") ||
+                id.contains("popup") || id.contains("interstitial") || id.contains("sheet_container") ||
+                id.contains("promo") || id.contains("action_sheet")) {
+                return true
+            }
+            for (i in 0 until node.childCount) {
+                val child = try { node.getChild(i) } catch (_: Throwable) { null } ?: continue
+                if (scan(child, depth + 1)) return true
+            }
+            return false
+        }
+
+        if (scan(root, 0)) return true
+
+        val affirmativeKeywords = listOf("Try it", "Continue", "OK", "Turn on", "Learn more", "Get started", "Accept", "Allow")
+        val hasAffirmative = affirmativeKeywords.any { root.findAccessibilityNodeInfosByText(it).isNotEmpty() }
+        val dismissKeywords = listOf("Not now", "Dismiss", "Cancel", "Skip", "Close", "No thanks", "Later")
+        val hasDismiss = dismissKeywords.any { root.findAccessibilityNodeInfosByText(it).isNotEmpty() }
+        return hasAffirmative && hasDismiss
+    }
+
+    private fun findClickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        var current: AccessibilityNodeInfo? = node
+        var depth = 0
+        while (current != null && depth < 6) {
+            if (current.isClickable) return current
+            current = current.parent
+            depth++
+        }
+        return null
     }
 }

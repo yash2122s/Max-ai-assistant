@@ -1,0 +1,22 @@
+{
+  "skill_id": "com.max.test.unregistered",
+  "name": "Invalid Unregistered Action Skill",
+  "description": "Demonstrates rejection of unregistered action verbs.",
+  "version": "1.0.0",
+  "schema_version": "1.0.0",
+  "supported_platforms": ["android"],
+  "requirements": {
+    "common": { "capabilities": [], "permissions": [] },
+    "android": { "capabilities": [], "permissions": [] },
+    "windows": { "capabilities": [], "permissions": [] }
+  },
+  "allowed_capabilities": ["system.dangerous_shell"],
+  "steps": [
+    {
+      "step_id": "step_danger",
+      "action": "system.dangerous_shell",
+      "target": "Terminal",
+      "depends_on": []
+    }
+  ]
+}

@@ -46,14 +46,16 @@ object ActionArgumentBoundaryNormalizer {
         "search", "find",
         "enter", "submit", "done",
         "directions", "navigate", "route",
+        "wait", "pause", "stay", "verify",
         // Telugu / Tanglish action directives
-        "ఓపెన్", "ట్యాప్", "నొక్కు", "క్లిక్", "ప్లే", "డైరెక్షన్స్", "వెళ్లు", "చూడు"
+        "ఓపెన్", "ట్యాప్", "నొక్కు", "క్లిక్", "ప్లే", "డైరెక్షన్స్", "వెళ్లు", "చూడు", "ఆగు"
     )
 
     private val ORDINAL_PATTERNS = listOf(
-        Regex("^(?:the\\s+)?(?:first|second|third|1st|2nd|3rd|top|last)\\s+(?:result|video|link|post|song|item|entry)\\b", RegexOption.IGNORE_CASE),
+        Regex("^(?:the\\s+)?(?:first|second|third|1st|2nd|3rd|top|last)\\s+(?:result|video|link|post|song|item|entry|account|user|profile|contact)\\b", RegexOption.IGNORE_CASE),
         Regex("^(?:the\\s+)?directions\\b", RegexOption.IGNORE_CASE),
-        Regex("^(?:play|watch)(?:\\s+(?:the\\s+)?(?:video|it|song|media))?$", RegexOption.IGNORE_CASE)
+        Regex("^(?:play|watch)(?:\\s+(?:the\\s+)?(?:video|it|song|media))?$", RegexOption.IGNORE_CASE),
+        Regex("^(?:wait|stay|pause)(?:\\s+for\\s+(?:the\\s+)?(?:ui|screen|chat|composer|message|page|result|results|it))?$", RegexOption.IGNORE_CASE)
     )
 
     private val DELIMITER_REGEX = Regex(
@@ -88,7 +90,7 @@ object ActionArgumentBoundaryNormalizer {
         val trimmed = text.trim()
         if (trimmed.isBlank()) return false
 
-        // Check ordinal patterns first ("the first result", "directions", "play the video")
+        // Check ordinal patterns first ("the first result", "directions", "play the video", "wait")
         if (ORDINAL_PATTERNS.any { it.containsMatchIn(trimmed) }) {
             return true
         }
@@ -179,68 +181,113 @@ object ActionArgumentBoundaryNormalizer {
     }
 
     /**
-     * Converts a single trailing action clause into a structured [ParsedAction].
+     * Converts a single trailing action clause into a structured [ParsedAction] (or compound list).
      */
     fun parseTrailingActionClause(clause: String): ParsedAction? {
+        val list = parseTrailingActionClauses(clause)
+        return list.firstOrNull()
+    }
+
+    /**
+     * Decomposes a single trailing clause into one or more [ParsedAction] items.
+     * E.g. "open Message and wait" -> [CLICK("Message"), WAIT("Message composer")]
+     */
+    fun parseTrailingActionClauses(clause: String): List<ParsedAction> {
         val trimmed = clause.trim()
-        if (trimmed.isBlank()) return null
+        if (trimmed.isBlank()) return emptyList()
+
+        // 0. Wait / Pause actions ("wait", "wait for UI", "wait for screen", "pause", "stay")
+        val waitMatch = Regex("^(?:wait|stay|pause)(?:\\s+for\\s+(?:the\\s+)?(.+))?$", RegexOption.IGNORE_CASE).find(trimmed)
+        if (waitMatch != null) {
+            val target = waitMatch.groupValues[1].trim().ifBlank { "composer" }
+            return listOf(ParsedAction("WAIT", target = target))
+        }
+
+        // 0b. Compound "Action X and wait" ("open Message and wait", "tap Message then wait", "click Message and wait")
+        val actionAndWaitMatch = Regex("^(?:open|launch|click|tap|press|select)\\s+(?:the\\s+)?(.+?)\\s+(?:and then|then|and|,)\\s*(?:wait|pause|stay)(?:\\s+for\\s+(?:the\\s+)?(.+))?$", RegexOption.IGNORE_CASE).find(trimmed)
+        if (actionAndWaitMatch != null) {
+            val target = actionAndWaitMatch.groupValues[1].trim()
+                .replace(Regex("(?i)\\s+button$"), "")
+                .trim()
+            val waitTarget = actionAndWaitMatch.groupValues[2].trim().ifBlank {
+                if (target.equals("Message", ignoreCase = true) || target.equals("chat", ignoreCase = true)) "Message composer" else target
+            }
+            return listOf(
+                ParsedAction("CLICK", target = target),
+                ParsedAction("WAIT", target = waitTarget)
+            )
+        }
 
         // 1. Play actions ("play the video", "play it", "play", "watch the video")
         val playMatch = Regex("^(?:play|watch)(?:\\s+(?:the\\s+)?(?:video|it|song|media|first\\s+video))?$", RegexOption.IGNORE_CASE).find(trimmed)
         if (playMatch != null) {
-            return ParsedAction("CLICK", target = "Play")
+            return listOf(ParsedAction("CLICK", target = "Play"))
         }
 
         // 2. Directions actions ("open directions", "get directions", "directions", "show directions")
         val directionsMatch = Regex("^(?:open|get|show|start)?\\s*(?:the\\s+)?directions$", RegexOption.IGNORE_CASE).find(trimmed)
         if (directionsMatch != null) {
-            return ParsedAction("CLICK", target = "Directions")
+            return listOf(ParsedAction("CLICK", target = "Directions"))
         }
 
-        // 3. Ordinal targets ("open the first result", "click first result", "tap first result", "first result")
-        val ordinalMatch = Regex("^(?:open|launch|click|tap|press|select)?\\s*(?:the\\s+)?((?:first|second|third|1st|2nd|3rd|top|last)\\s+(?:result|video|link|post|song|item|entry))$", RegexOption.IGNORE_CASE).find(trimmed)
+        // 3. Ordinal targets ("open the first result", "click first result", "tap first result", "first result", "first account")
+        val ordinalMatch = Regex("^(?:open|launch|click|tap|press|select)?\\s*(?:the\\s+)?((?:first|second|third|1st|2nd|3rd|top|last)\\s+(?:result|video|link|post|song|item|entry|account|user|profile|contact))$", RegexOption.IGNORE_CASE).find(trimmed)
         if (ordinalMatch != null) {
             val target = ordinalMatch.groupValues[1].trim()
-            return ParsedAction("CLICK", target = target)
+            return listOf(ParsedAction("CLICK", target = target))
         }
 
         // 4. Generic Click / Tap ("tap Search", "click submit", "press Done")
         val clickMatch = Regex("^(?:tap|click|press|select|hit|touch|నొక్కు|ట్యాప్|క్లిక్)\\s+(?:on\\s+|for\\s+|the\\s+|in\\s+|to\\s+)?(.+)$", RegexOption.IGNORE_CASE).find(trimmed)
         if (clickMatch != null) {
-            val target = clickMatch.groupValues[1].trim()
-            if (target.equals("enter", ignoreCase = true)) {
-                return ParsedAction("PRESS_ENTER", target = "enter")
+            val rawTarget = clickMatch.groupValues[1].trim()
+            if (rawTarget.equals("enter", ignoreCase = true)) {
+                return listOf(ParsedAction("PRESS_ENTER", target = "enter"))
             }
-            return ParsedAction("CLICK", target = target)
+            // Check for sub-wait inside click clause: e.g. "Message and wait"
+            if (rawTarget.contains(Regex("(?i)\\s+(?:and then|then|and)\\s+(?:wait|stay|pause)$"))) {
+                val cleanTarget = rawTarget.replace(Regex("(?i)\\s+(?:and then|then|and)\\s+(?:wait|stay|pause)$"), "").trim()
+                return listOf(
+                    ParsedAction("CLICK", target = cleanTarget),
+                    ParsedAction("WAIT", target = if (cleanTarget.equals("Message", ignoreCase = true)) "Message composer" else cleanTarget)
+                )
+            }
+            return listOf(ParsedAction("CLICK", target = rawTarget))
         }
 
-        // 5. In-App Open on element / tab / button ("open first video", "open first result", "open profile")
+        // 5. In-App Open on element / tab / button ("open first video", "open first result", "open profile", "open Message")
         val openInAppMatch = Regex("^(?:open|go to|ఓపెన్|వెళ్లు)\\s+(?:the\\s+)?(.+)$", RegexOption.IGNORE_CASE).find(trimmed)
         if (openInAppMatch != null) {
-            val target = openInAppMatch.groupValues[1].trim()
-            // If target looks like a UI entity or ordinal rather than a standalone app name
-            return ParsedAction("CLICK", target = target)
+            val rawTarget = openInAppMatch.groupValues[1].trim()
+            if (rawTarget.contains(Regex("(?i)\\s+(?:and then|then|and)\\s+(?:wait|stay|pause)$"))) {
+                val cleanTarget = rawTarget.replace(Regex("(?i)\\s+(?:and then|then|and)\\s+(?:wait|stay|pause)$"), "").trim()
+                return listOf(
+                    ParsedAction("CLICK", target = cleanTarget),
+                    ParsedAction("WAIT", target = if (cleanTarget.equals("Message", ignoreCase = true)) "Message composer" else cleanTarget)
+                )
+            }
+            return listOf(ParsedAction("CLICK", target = rawTarget))
         }
 
         // 6. Scroll
         if (trimmed.equals("scroll down", ignoreCase = true) || trimmed.equals("swipe up", ignoreCase = true)) {
-            return ParsedAction("SCROLL", target = "DOWN")
+            return listOf(ParsedAction("SCROLL", target = "DOWN"))
         }
         if (trimmed.equals("scroll up", ignoreCase = true) || trimmed.equals("swipe down", ignoreCase = true)) {
-            return ParsedAction("SCROLL", target = "UP")
+            return listOf(ParsedAction("SCROLL", target = "UP"))
         }
 
         // 7. System back
         if (trimmed.equals("go back", ignoreCase = true) || trimmed.equals("back", ignoreCase = true)) {
-            return ParsedAction("SYSTEM", target = "back")
+            return listOf(ParsedAction("SYSTEM", target = "back"))
         }
 
         // 8. Press enter
         if (trimmed.equals("enter", ignoreCase = true) || trimmed.equals("press enter", ignoreCase = true) || trimmed.equals("submit", ignoreCase = true)) {
-            return ParsedAction("PRESS_ENTER", target = "enter")
+            return listOf(ParsedAction("PRESS_ENTER", target = "enter"))
         }
 
-        return null
+        return emptyList()
     }
 
     /**
@@ -295,25 +342,42 @@ object ActionArgumentBoundaryNormalizer {
                     normalizedSteps.add(enterStep)
                     previousStepId = enterStepId
 
-                    // 3. Decompose trailing clauses into discrete TAP / CLICK_TEXT steps
+                    // 3. Decompose trailing clauses into discrete TAP / CLICK_TEXT / WAIT steps
                     for (clause in split.trailingClauses) {
-                        val parsedAct = parseTrailingActionClause(clause)
-                        val clauseStepId = "step_${stepCounter++}"
-                        val target = parsedAct?.target ?: clause.replace(Regex("^(?:open|tap|click|press|select)\\s+(?:the\\s+)?", RegexOption.IGNORE_CASE), "").trim()
-                        val actionType = when (parsedAct?.action) {
-                            "SCROLL" -> "SCROLL_SCREEN"
-                            "SYSTEM" -> "SYSTEM_ACTION"
-                            "PRESS_ENTER" -> "PRESS_ENTER"
-                            else -> "TAP"
+                        val parsedActs = parseTrailingActionClauses(clause)
+                        if (parsedActs.isNotEmpty()) {
+                            for (parsedAct in parsedActs) {
+                                val clauseStepId = "step_${stepCounter++}"
+                                val target = parsedAct.target ?: clause.replace(Regex("^(?:open|tap|click|press|select)\\s+(?:the\\s+)?", RegexOption.IGNORE_CASE), "").trim()
+                                val actionType = when (parsedAct.action) {
+                                    "SCROLL" -> "SCROLL_SCREEN"
+                                    "SYSTEM" -> "SYSTEM_ACTION"
+                                    "PRESS_ENTER" -> "PRESS_ENTER"
+                                    "WAIT", "WAIT_FOR_UI" -> "WAIT_FOR_UI"
+                                    else -> "TAP"
+                                }
+                                val trailingStep = ActionStep(
+                                    stepId = clauseStepId,
+                                    actionType = actionType,
+                                    targetText = target,
+                                    params = if (actionType == "WAIT_FOR_UI") mapOf("timeout" to "5000") else emptyMap(),
+                                    dependsOn = listOfNotNull(previousStepId)
+                                )
+                                normalizedSteps.add(trailingStep)
+                                previousStepId = clauseStepId
+                            }
+                        } else {
+                            val clauseStepId = "step_${stepCounter++}"
+                            val target = clause.replace(Regex("^(?:open|tap|click|press|select)\\s+(?:the\\s+)?", RegexOption.IGNORE_CASE), "").trim()
+                            val trailingStep = ActionStep(
+                                stepId = clauseStepId,
+                                actionType = "TAP",
+                                targetText = target,
+                                dependsOn = listOfNotNull(previousStepId)
+                            )
+                            normalizedSteps.add(trailingStep)
+                            previousStepId = clauseStepId
                         }
-                        val trailingStep = ActionStep(
-                            stepId = clauseStepId,
-                            actionType = actionType,
-                            targetText = target,
-                            dependsOn = listOfNotNull(previousStepId)
-                        )
-                        normalizedSteps.add(trailingStep)
-                        previousStepId = clauseStepId
                     }
 
                     continue

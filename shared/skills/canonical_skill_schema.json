@@ -1,0 +1,305 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://max.ai/schemas/canonical_skill_schema.json",
+  "title": "MaxSkillDefinition",
+  "description": "Canonical schema definition for MAX runtime-importable automation skills.",
+  "type": "object",
+  "required": [
+    "skill_id",
+    "name",
+    "description",
+    "version",
+    "schema_version",
+    "supported_platforms",
+    "requirements",
+    "allowed_capabilities",
+    "steps"
+  ],
+  "properties": {
+    "skill_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$",
+      "description": "Unique reverse-domain or slug identifier for the skill (e.g. com.max.automation.instagram.chat)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Human-readable display name of the skill."
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "description": "Clear functional summary of what this skill accomplishes."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-zA-Z0-9.]+)?$",
+      "description": "Semantic versioning string (e.g. 1.0.0)."
+    },
+    "schema_version": {
+      "type": "string",
+      "enum": ["1.0.0"],
+      "description": "Version of the canonical skill specification."
+    },
+    "author": {
+      "type": "string",
+      "default": "user",
+      "description": "Author or organization creating the skill."
+    },
+    "trust_level": {
+      "type": "string",
+      "enum": ["BUILTIN", "LOCAL_USER", "VERIFIED_COMMUNITY", "UNTRUSTED"],
+      "default": "LOCAL_USER",
+      "description": "Security trust level of the skill package."
+    },
+    "checksum": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA-256 hex digest of the canonicalized payload minus checksum/signature."
+    },
+    "signature": {
+      "type": "string",
+      "description": "Optional cryptographic signature for authenticity verification."
+    },
+    "supported_platforms": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["android", "windows"]
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Target operating systems supported by this skill."
+    },
+    "requirements": {
+      "type": "object",
+      "required": ["common", "android", "windows"],
+      "properties": {
+        "common": {
+          "$ref": "#/$defs/PlatformRequirementBlock"
+        },
+        "android": {
+          "$ref": "#/$defs/PlatformRequirementBlock"
+        },
+        "windows": {
+          "$ref": "#/$defs/PlatformRequirementBlock"
+        }
+      },
+      "additionalProperties": false
+    },
+    "allowed_capabilities": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "app.open",
+          "app.close",
+          "ui.click",
+          "ui.type_text",
+          "ui.clear_text",
+          "ui.scroll",
+          "ui.wait",
+          "system.press_key",
+          "system.action",
+          "system.setting"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Explicit whitelist of canonical capability verbs invoked by this skill."
+    },
+    "intents": {
+      "type": "object",
+      "properties": {
+        "exact_phrases": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "trigger_keywords": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "category": {
+          "type": "string",
+          "default": "general"
+        }
+      },
+      "additionalProperties": false
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "type"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["string", "number", "boolean"]
+          },
+          "required": {
+            "type": "boolean",
+            "default": false
+          },
+          "default_value": {},
+          "description": {
+            "type": "string",
+            "default": ""
+          }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "preconditions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "app_identifier": { "type": "string" },
+          "window_state": { "type": "string", "enum": ["foreground", "any"], "default": "any" }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SkillStep"
+      },
+      "minItems": 1,
+      "description": "Ordered DAG list of declarative interaction steps."
+    },
+    "failure_policy": {
+      "type": "string",
+      "enum": ["ABORT", "CONTINUE", "ASK_USER"],
+      "default": "ABORT"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "PlatformRequirementBlock": {
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        },
+        "permissions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    },
+    "SkillStep": {
+      "type": "object",
+      "required": ["step_id", "action", "target", "depends_on"],
+      "properties": {
+        "step_id": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_-]+$",
+          "description": "Unique identifier for this step within the skill DAG."
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "app.open",
+            "app.close",
+            "ui.click",
+            "ui.type_text",
+            "ui.clear_text",
+            "ui.scroll",
+            "ui.wait",
+            "system.press_key",
+            "system.action",
+            "system.setting"
+          ],
+          "description": "Canonical capability verb."
+        },
+        "target": {
+          "type": "string",
+          "description": "Semantic target description."
+        },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Prerequisite step IDs that must succeed before this step runs."
+        },
+        "arguments": {
+          "type": "object",
+          "default": {},
+          "description": "Key-value parameters for the action."
+        },
+        "platform_overrides": {
+          "type": "object",
+          "properties": {
+            "android": {
+              "type": "object",
+              "properties": {
+                "package_name": { "type": "string" },
+                "resource_id": { "type": "string" },
+                "content_description": { "type": "string" },
+                "bounds": {
+                  "type": "array",
+                  "items": { "type": "integer" },
+                  "minItems": 4,
+                  "maxItems": 4
+                }
+              },
+              "additionalProperties": false
+            },
+            "windows": {
+              "type": "object",
+              "properties": {
+                "process_name": { "type": "string" },
+                "window_title": { "type": "string" },
+                "automation_id": { "type": "string" },
+                "control_type": { "type": "string" }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 60000,
+          "default": 10000
+        },
+        "retry_policy": {
+          "type": "object",
+          "properties": {
+            "max_retries": { "type": "integer", "minimum": 0, "maximum": 5, "default": 0 },
+            "delay_ms": { "type": "integer", "minimum": 0, "maximum": 10000, "default": 500 }
+          },
+          "additionalProperties": false
+        },
+        "verification": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": ["ELEMENT_VISIBLE", "APP_FOREGROUND", "TEXT_MATCH", "NONE"],
+              "default": "NONE"
+            },
+            "expected_value": { "type": "string" },
+            "timeout_ms": { "type": "integer", "default": 3000 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

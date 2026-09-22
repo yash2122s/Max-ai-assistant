@@ -42,7 +42,12 @@ class NotificationTool : Tool {
 
             when (action) {
                 "GET_NOTIFICATIONS" -> {
-                    val activeNotifs = service.activeNotifications ?: emptyArray()
+                    val activeNotifs = try {
+                        service.activeNotifications ?: emptyArray()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error accessing activeNotifications (DeadObjectException)", e)
+                        emptyArray()
+                    }
                     val resultList = JSONArray()
                     
                     val systemPackages = setOf("android", "com.android.systemui")
@@ -88,7 +93,12 @@ class NotificationTool : Tool {
                         )
                     }
 
-                    val activeNotifs = service.activeNotifications ?: emptyArray()
+                    val activeNotifs = try {
+                        service.activeNotifications ?: emptyArray()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error accessing activeNotifications (DeadObjectException)", e)
+                        emptyArray()
+                    }
                     
                     val sbn = activeNotifs.firstOrNull { s ->
                         val extras = s.notification.extras ?: return@firstOrNull false

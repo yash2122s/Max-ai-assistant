@@ -3,13 +3,19 @@ JARVIS System Control Tools
 Volume, brightness, battery, system info, lock, standby/sleep mode, shutdown, WiFi/Bluetooth.
 """
 
+import os
+import sys
+import ctypes
 import subprocess
 import platform
 import datetime
 import logging
 import psutil
 
+from core.security import security_guard
+from core.verifier import action_verifier
 from core.undo_manager import undo_manager
+from tools.file_manager import _resolve_user_path, SPECIAL_FOLDERS
 
 logger = logging.getLogger("MAXWindowsAgent.SystemControl")
 
@@ -348,6 +354,191 @@ def get_wifi_status() -> dict:
         return {"status": "error", "message": str(e)}
 
 
+# ─── Wallpaper & Desktop Customization ──────────────────────────────────────
+
+def get_wallpaper(**kwargs) -> dict:
+    """
+    Get the currently active desktop wallpaper file path from the Windows registry.
+    """
+    try:
+        if sys.platform == "win32":
+            import winreg
+            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Control Panel\Desktop")
+            val, _ = winreg.QueryValueEx(key, "Wallpaper")
+            winreg.CloseKey(key)
+            val_str = str(val).strip()
+            exists = os.path.exists(val_str) if val_str else False
+            return {
+                "status": "success",
+                "operation": "get_wallpaper",
+                "wallpaper_path": val_str,
+                "exists": exists,
+                "message": f"Current desktop wallpaper: {val_str}" if val_str else "No wallpaper set.",
+            }
+        return {"status": "error", "message": "Wallpaper retrieval is only supported on Windows."}
+    except Exception as e:
+        logger.error(f"Error getting wallpaper: {e}")
+        return {"status": "error", "message": str(e)}
+
+
+def set_wallpaper(path: str, **kwargs) -> dict:
+    """
+    Set the Windows desktop background wallpaper to a specified local image file.
+    Supports JPG, JPEG, PNG, BMP, and WEBP formats.
+    Automatically captures the previous wallpaper for self-validating undo/rollback.
+    
+    Args:
+        path: Path or filename of the image (e.g. 'Pictures/wallpaper.jpg', 'Desktop/nature.png').
+    """
+    if not path or not str(path).strip():
+        return {"status": "error", "message": "No wallpaper image path provided."}
+
+    if sys.platform != "win32":
+        return {"status": "error", "message": "Wallpaper setting is only supported on Windows."}
+
+    try:
+        raw_path = str(path or kwargs.get("file", kwargs.get("image_path", ""))).strip()
+        resolved_path = _resolve_user_path(raw_path)
+
+        if not os.path.exists(resolved_path):
+            return {
+                "status": "error",
+                "message": f"Wallpaper image file not found: {resolved_path}",
+                "verified": False,
+            }
+
+        if not os.path.isfile(resolved_path):
+            return {
+                "status": "error",
+                "message": f"Target path is a directory, not an image file: {resolved_path}",
+                "verified": False,
+            }
+
+        ext = os.path.splitext(resolved_path)[1].lower()
+        if ext not in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}:
+            return {
+                "status": "error",
+                "message": f"Unsupported image format '{ext}'. Supported: .jpg, .png, .bmp, .webp",
+                "verified": False,
+            }
+
+        if not security_guard.is_safe_path(resolved_path):
+            return {
+                "status": "error",
+                "message": f"Access denied: Path '{resolved_path}' is outside sandbox.",
+                "verified": False,
+            }
+
+        # Read current wallpaper for undo
+        prev_res = get_wallpaper()
+        prev_wall = prev_res.get("wallpaper_path", "")
+
+        effective_path = resolved_path
+        # If webp, convert to a cached BMP/JPG for guaranteed Win32 compatibility
+        if ext == ".webp":
+            try:
+                import PIL.Image
+                cached_dir = os.path.join(SPECIAL_FOLDERS.get("pictures", os.path.expanduser("~/Pictures")), "Wallpapers")
+                os.makedirs(cached_dir, exist_ok=True)
+                cached_bmp = os.path.join(cached_dir, f"converted_{os.path.splitext(os.path.basename(resolved_path))[0]}.bmp")
+                with PIL.Image.open(resolved_path) as img:
+                    img.convert("RGB").save(cached_bmp, "BMP")
+                effective_path = cached_bmp
+            except Exception as pe:
+                logger.debug(f"PIL WEBP conversion notice: {pe}")
+
+        # Set desktop wallpaper via Win32 SystemParametersInfoW:
+        # SPI_SETDESKWALLPAPER = 20, SPIF_UPDATEINIFILE = 0x01, SPIF_SENDCHANGE = 0x02 -> flags = 3
+        ret = ctypes.windll.user32.SystemParametersInfoW(20, 0, str(effective_path), 3)
+        if ret == 0:
+            return {
+                "status": "error",
+                "message": f"Windows SystemParametersInfoW failed to set wallpaper to '{effective_path}'.",
+                "verified": False,
+            }
+
+        # Push self-validating undo if previous wallpaper is valid
+        if prev_wall and os.path.exists(prev_wall) and os.path.abspath(prev_wall).lower() != os.path.abspath(resolved_path).lower():
+            def _rollback_wallpaper(p=prev_wall, t=resolved_path):
+                try:
+                    res = ctypes.windll.user32.SystemParametersInfoW(20, 0, str(p), 3)
+                    if res != 0:
+                        return True, f"Desktop wallpaper restored to '{os.path.basename(p)}'."
+                    return False, f"Failed to restore wallpaper to '{p}'."
+                except Exception as ex:
+                    return False, f"Could not restore wallpaper: {ex}"
+
+            undo_manager.push_undo(
+                description=f"Change wallpaper to '{os.path.basename(resolved_path)}' (previous: '{os.path.basename(prev_wall)}')",
+                undo_fn=_rollback_wallpaper,
+                metadata={"type": "wallpaper", "previous": prev_wall, "target": resolved_path},
+            )
+
+        return {
+            "status": "success",
+            "operation": "set_wallpaper",
+            "wallpaper_path": resolved_path,
+            "filename": os.path.basename(resolved_path),
+            "message": f"Desktop wallpaper successfully changed to: {os.path.basename(resolved_path)}",
+            "verified": True,
+        }
+
+    except Exception as e:
+        logger.error(f"Error in set_wallpaper: {e}")
+        return {"status": "error", "message": f"Could not set wallpaper: {str(e)}", "verified": False}
+
+
+def set_wallpaper_from_url(url: str, **kwargs) -> dict:
+    """
+    Download an image from a URL, save it to Pictures/Wallpapers, and set it as the desktop wallpaper.
+    
+    Args:
+        url: Direct image URL (http/https).
+    """
+    raw_url = str(url or kwargs.get("image_url", "")).strip()
+    if not raw_url or not (raw_url.startswith("http://") or raw_url.startswith("https://")):
+        return {"status": "error", "message": "Invalid URL. URL must start with http:// or https://"}
+
+    try:
+        import urllib.parse
+        import urllib.request
+
+        parsed = urllib.parse.urlparse(raw_url)
+        clean_path = parsed.path.split("?")[0]
+        ext = os.path.splitext(clean_path)[1].lower()
+        if ext not in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}:
+            ext = ".jpg"
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        pictures_dir = SPECIAL_FOLDERS.get("pictures", os.path.expanduser("~/Pictures"))
+        wallpapers_dir = os.path.join(pictures_dir, "Wallpapers")
+        os.makedirs(wallpapers_dir, exist_ok=True)
+        dest_path = os.path.join(wallpapers_dir, f"wallpaper_{timestamp}{ext}")
+
+        # Download with timeout and user-agent
+        req = urllib.request.Request(
+            raw_url,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) MAX/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=15) as response, open(dest_path, "wb") as out_file:
+            data = response.read()
+            if len(data) == 0:
+                return {"status": "error", "message": "Downloaded wallpaper file was empty."}
+            out_file.write(data)
+
+        # Set as wallpaper
+        set_res = set_wallpaper(dest_path)
+        if set_res.get("status") == "success":
+            set_res["source_url"] = raw_url
+            set_res["downloaded_file"] = dest_path
+            set_res["message"] = f"Downloaded and set wallpaper from URL: {os.path.basename(dest_path)}"
+        return set_res
+
+    except Exception as e:
+        logger.error(f"Error in set_wallpaper_from_url: {e}")
+        return {"status": "error", "message": f"Could not download and set wallpaper: {str(e)}", "verified": False}
+
+
 # ─── Tool Declarations ──────────────────────────────────────────────────────
 
 TOOL_DECLARATIONS = [
@@ -447,6 +638,39 @@ TOOL_DECLARATIONS = [
         "description": "Get WiFi connection status, SSID network name, and signal strength.",
         "parameters": {"type": "object", "properties": {}},
     },
+    {
+        "name": "get_wallpaper",
+        "description": "Get the currently set desktop wallpaper path on Windows.",
+        "parameters": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "set_wallpaper",
+        "description": "Set the desktop background wallpaper to an image file (JPG, PNG, BMP, WEBP). Supports undo.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Local path or filename of the wallpaper image (e.g. 'Pictures/wallpaper.jpg', 'Desktop/nature.png')",
+                }
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "set_wallpaper_from_url",
+        "description": "Download an image from a URL, save to Pictures/Wallpapers, and set it as desktop wallpaper.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Direct image URL (http or https)",
+                }
+            },
+            "required": ["url"],
+        },
+    },
 ]
 
 TOOL_FUNCTIONS = {
@@ -465,6 +689,13 @@ TOOL_FUNCTIONS = {
     "shutdown_restart": shutdown_restart,
     "toggle_wifi": toggle_wifi,
     "get_wifi_status": get_wifi_status,
+    "get_wallpaper": get_wallpaper,
+    "current_wallpaper": get_wallpaper,
+    "set_wallpaper": set_wallpaper,
+    "set_desktop_wallpaper": set_wallpaper,
+    "change_wallpaper": set_wallpaper,
+    "set_wallpaper_from_url": set_wallpaper_from_url,
+    "wallpaper_url": set_wallpaper_from_url,
 }
 
 

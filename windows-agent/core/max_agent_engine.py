@@ -77,11 +77,21 @@ class MaxAgentEngine:
             try:
                 from core.skills_engine import skills_engine
                 logger.info(f"📚 MAX Progressive Skills Engine: ACTIVE ({skills_engine.list_skills().get('count', 0)} skills loaded)")
+                try:
+                    from core.startup_profiler import profiler
+                    profiler.mark("SKILLS_READY")
+                except Exception:
+                    pass
             except Exception as e:
                 logger.error(f"Failed to initialize Skills Engine: {e}")
 
         self._is_initialized = True
         logger.info("✨ MAX Primary Agent Engine initialized successfully.")
+        try:
+            from core.startup_profiler import profiler
+            profiler.mark("AGENT_ENGINE_READY")
+        except Exception:
+            pass
 
     def register_all_max_agent_tools(self, registry):
         """

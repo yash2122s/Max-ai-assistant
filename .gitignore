@@ -8,6 +8,7 @@
 /.idea/workspace.xml
 /.idea/navEditor.xml
 /.idea/assetWizardSettings.xml
+/.idea/inspectionProfiles/
 .DS_Store
 /build
 /captures
@@ -55,7 +56,11 @@ audit_notes/
 *.db-wal
 windows-agent/storage/*.db*
 windows-agent/storage/*.json
+windows-agent/storage/*.jsonl
 windows-agent/storage/worktrees/
+/scratch/
+windows-agent/scratch/*.json
+windows-agent/scratch/test_drag_dest/
 
 # Node & Frontend
 node_modules/

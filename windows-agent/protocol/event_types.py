@@ -45,6 +45,25 @@ class EventType(Enum):
     DEVICE_CONTROL = "device_control"
     CONFIRMATION_REQUIRED = "confirmation_required"
     CONFIRMATION_RESPONSE = "confirmation_response"
+    TOOL_SELECTING = "tool_selecting"
+    TOOL_EXECUTING = "tool_executing"
+    COMPUTER_USE = "computer_use"
+    MCP_EXECUTING = "mcp_executing"
+    VERIFYING = "verifying"
+    RECOVERING = "recovering"
+    SUCCESS = "success"
+    ERROR = "error"
 
 
-
+try:
+    from core.voice_gate import VoiceState
+except Exception:
+    class VoiceState(str, Enum):  # type: ignore
+        IDLE = "idle"
+        WAKE_WORD_LISTENING = "wake_word_listening"
+        WAKE_DETECTED = "wake_detected"
+        LIVE_CONVERSATION = "live_conversation"
+        COMMAND_LISTENING = "live_conversation"
+        PROCESSING = "processing"
+        ASSISTANT_SPEAKING = "assistant_speaking"
+        COOLDOWN = "cooldown"

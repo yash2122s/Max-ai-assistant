@@ -18,3 +18,5 @@ pywinpty>=3.0.0
 pyyaml>=6.0.0
 pydantic>=2.10.0
 rich>=14.0.0
+PyQt6>=6.6.0
+numpy>=1.24.0

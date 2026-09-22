@@ -25,9 +25,19 @@ Verifies all 19 requirements from the Final Implementation Directive:
 import os
 import sys
 import time
-import pytest
 import asyncio
 from unittest.mock import patch, MagicMock
+try:
+    import pytest
+except ImportError:
+    class _DummyMark:
+        def __getattr__(self, name):
+            def decorator(func):
+                return func
+            return decorator
+    class _DummyPytest:
+        mark = _DummyMark()
+    pytest = _DummyPytest()
 
 from core.task_classifier import task_classifier, TaskTier
 from core.direct_action_resolver import direct_action_resolver, DirectActionResolver
@@ -144,7 +154,7 @@ def test_uia_click_fallback():
          patch("tools.input_tool.input_helper.left_click") as mock_left_click:
         res = uia_engine.click_element_by_selector("Brush")
         assert res["status"] == "success"
-        assert res["method"] == "Multi_Layer_Physical_and_UIA"
+        assert res["method"] == "Physical_Click_left_count_1"
         mock_left_click.assert_called_with(x=150, y=250, clicks=1)
 
 

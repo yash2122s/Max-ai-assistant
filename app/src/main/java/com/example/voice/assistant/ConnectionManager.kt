@@ -22,7 +22,8 @@ class ConnectionManager(
     private val onConnectionStateChanged: (ConnectionState) -> Unit,
     private val onExecuteAutomation: suspend (String) -> String,
     private val onUserTranscription: ((String) -> Unit)? = null,
-    private val onTurnComplete: (() -> Unit)? = null
+    private val onTurnComplete: (() -> Unit)? = null,
+    private val emotionEngine: com.example.emotion.engine.EmotionEngine? = null
 ) {
     private var webSocketClient: GeminiWebSocketClient? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -61,8 +62,11 @@ class ConnectionManager(
     }
 
     init {
-        // Dynamic RAG injects relevant memories dynamically on every query.
-        // We do not disconnect/reconnect the live WebSocket session when memories change.
+        scope.launch {
+            memoryRepository.memoriesMarkdownFlow.collect { freshMarkdown ->
+                currentMemoriesMarkdown = freshMarkdown
+            }
+        }
     }
 
     private var isNewSession = true
@@ -113,6 +117,7 @@ class ConnectionManager(
                 if (webSocketClient != null) return@launch
 
                 val currentGen = ++connectionGeneration
+                val currentEmotion = emotionEngine?.getCurrentState()
                 webSocketClient = GeminiWebSocketClient(
                     apiKey = apiKey,
                     voiceName = savedVoice,
@@ -120,6 +125,7 @@ class ConnectionManager(
                     preferredModel = savedModel,
                     memoriesMarkdown = markdown,
                     isNewSession = isNew,
+                    emotionState = currentEmotion,
                     onMessageReceived = { msg -> 
                         synchronized(this@ConnectionManager) {
                             if (currentGen == connectionGeneration) {

@@ -35,6 +35,14 @@ OVERLAY_EVENT_TYPES = {
     "overlay_task_state",
     "device_control",
     "confirmation_required",
+    "tool_selecting",
+    "tool_executing",
+    "computer_use",
+    "mcp_executing",
+    "verifying",
+    "recovering",
+    "success",
+    "error",
     # Also forward task engine events for progress
     "task_created",
     "task_started",
@@ -63,10 +71,11 @@ class UIBridge:
         self.host = host
         self.port = port
         self._event_bus = event_bus
-        self._clients: Set[websockets.WebSocketServerProtocol] = set()
+        self._clients: Set[Any] = set()
         self._server = None
         self._running = False
         self._event_queue: Optional[asyncio.Queue] = None
+        self._forward_task: Optional[asyncio.Task] = None
         self._confirmation_gate = None
 
     def set_confirmation_gate(self, gate) -> None:
@@ -102,11 +111,19 @@ class UIBridge:
             return
 
         # Start the event forwarding loop
-        asyncio.ensure_future(self._forward_events())
+        self._forward_task = asyncio.create_task(self._forward_events())
 
     async def stop(self):
         """Gracefully shut down the UI Bridge."""
         self._running = False
+
+        if self._forward_task and not self._forward_task.done():
+            self._forward_task.cancel()
+            try:
+                await self._forward_task
+            except asyncio.CancelledError:
+                pass
+            self._forward_task = None
 
         if self._event_queue and self._event_bus:
             self._event_bus.unsubscribe(self._event_queue)
@@ -127,7 +144,7 @@ class UIBridge:
 
         logger.info("🖥️  UI Bridge stopped")
 
-    async def _handle_client(self, websocket: websockets.WebSocketServerProtocol):
+    async def _handle_client(self, websocket: Any):
         """Handle a connected overlay client."""
         client_address = websocket.remote_address
         logger.info(f"🖥️  Overlay client connected from {client_address}")
@@ -172,6 +189,29 @@ class UIBridge:
 
             if msg_type == "confirmation_response":
                 await self._handle_confirmation_response(msg)
+            elif msg_type == "interrupt":
+                logger.info("🛑 [INTERRUPT] Received interrupt signal from UI (Esc key)")
+                await self._handle_interrupt()
+            elif msg_type in ("shutdown_request", "app_exit"):
+                logger.info("🛑 Shutdown requested from Desktop UI.")
+                try:
+                    import sys
+                    main_mod = sys.modules.get("__main__")
+                    trigger = getattr(main_mod, "trigger_shutdown", None)
+                    if trigger is None:
+                        from main import trigger_shutdown as trigger
+                    if trigger:
+                        trigger()
+                except Exception as e:
+                    logger.debug(f"Trigger shutdown error: {e}")
+            elif msg_type == "computer_use_observe":
+                asyncio.create_task(self._handle_computer_use_observe(msg))
+            elif msg_type == "computer_use_resolve":
+                asyncio.create_task(self._handle_computer_use_resolve(msg))
+            elif msg_type == "computer_use_step":
+                asyncio.create_task(self._handle_computer_use_step(msg))
+            elif msg_type == "chat_message":
+                asyncio.create_task(self._handle_chat_message(msg))
             elif msg_type == "ping":
                 await websocket.send(json.dumps({"type": "pong", "timestamp": time.time()}))
             else:
@@ -181,6 +221,123 @@ class UIBridge:
             logger.warning("Received malformed JSON from overlay client")
         except Exception as e:
             logger.error(f"Error processing overlay message: {e}")
+
+    async def _handle_computer_use_observe(self, msg: Dict[str, Any]):
+        """Runs screen observation on background thread and broadcasts UI map to overlay."""
+        try:
+            from core.computer_use.computer_use_engine import computer_use_engine
+            include_ocr = bool(msg.get("include_ocr", True))
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, computer_use_engine.observe_screen, include_ocr)
+        except Exception as e:
+            logger.error(f"Error handling computer_use_observe: {e}")
+
+    async def _handle_computer_use_resolve(self, msg: Dict[str, Any]):
+        """Runs target resolution on background thread and broadcasts match."""
+        try:
+            from core.computer_use.computer_use_engine import computer_use_engine
+            query = msg.get("query", "")
+            if not query:
+                return
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, computer_use_engine.resolve_target, query)
+        except Exception as e:
+            logger.error(f"Error handling computer_use_resolve: {e}")
+
+    async def _handle_computer_use_step(self, msg: Dict[str, Any]):
+        """Runs single computer-use step on background thread and broadcasts result."""
+        try:
+            from core.computer_use.computer_use_engine import computer_use_engine
+            action_type = msg.get("action_type", "click")
+            target_query = msg.get("target_query")
+            target_ref = msg.get("target_ref")
+            text = msg.get("text")
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None,
+                lambda: computer_use_engine.step(
+                    action_type=action_type,
+                    target_query=target_query,
+                    target_ref=target_ref,
+                    text=text,
+                )
+            )
+        except Exception as e:
+            logger.error(f"Error handling computer_use_step: {e}")
+
+    async def _handle_chat_message(self, msg: Dict[str, Any]):
+        """Process chat command from desktop UI."""
+        text = str(msg.get("text", "")).strip()
+        if not text:
+            return
+        logger.info(f"💬 Chat message received from UI: {text}")
+        self.publish_transcript("user", text)
+        try:
+            import secrets
+            from core.max_orchestrator import max_orchestrator, MaxAgentRequest
+            req = MaxAgentRequest(
+                request_id=f"chat_{secrets.token_hex(4)}",
+                user_text=text,
+                tool_name="execute_goal",
+                arguments={"goal": text},
+            )
+            result = await max_orchestrator.handle_request(req)
+            reply = getattr(result, "output", None) or getattr(result, "message", None) or "Command executed."
+            self.publish_transcript("assistant", str(reply))
+        except Exception as e:
+            logger.error(f"Error handling chat message: {e}")
+            self.publish_transcript("assistant", f"Notice: {e}")
+
+    async def _handle_interrupt(self):
+        """Immediately interrupts speaker audio, active tasks, voice gate, and pending confirmation tickets."""
+        # 1. Stop speaker audio playback (barge-in queue flush)
+        try:
+            from core.audio_handler import _live_players, _live_players_lock
+            with _live_players_lock:
+                for pl in list(_live_players):
+                    pl.interrupt()
+            logger.info("🔇 Speaker audio playback stopped.")
+        except Exception as e:
+            logger.debug(f"Audio interrupt error: {e}")
+
+        # 2. Cancel any running active task via MaxTaskAuthority
+        try:
+            from orchestrator.max_task_authority import max_task_authority
+            max_task_authority.cancel_active_task(reason="Interrupted by user (Esc key)")
+        except Exception as e:
+            logger.debug(f"Task authority cancel error: {e}")
+
+        # 3. Reset voice gate to IDLE
+        try:
+            from core.voice_gate import VoiceState, voice_gate
+            if voice_gate is not None:
+                voice_gate.transition_to(VoiceState.IDLE)
+        except Exception as e:
+            logger.debug(f"VoiceGate transition error: {e}")
+
+        # 4. Reject any pending ConfirmationGate tickets
+        if self._confirmation_gate:
+            try:
+                for ticket_id in list(getattr(self._confirmation_gate, "_pending_requests", {}).keys()):
+                    self._confirmation_gate.reject(ticket_id, reason="Interrupted by user (Esc)")
+            except Exception as e:
+                logger.debug(f"Confirmation gate reject error: {e}")
+
+        # 5. Broadcast TASK_INTERRUPTED event across EventBus
+        try:
+            from protocol.event_types import EventType
+            bus = self._event_bus
+            if bus is None:
+                from server.event_bus import event_bus
+                bus = event_bus
+            if bus is not None:
+                bus.publish(EventType.TASK_INTERRUPTED, {
+                    "source": "escape_key",
+                    "timestamp": time.time(),
+                    "status": "interrupted"
+                })
+        except Exception as e:
+            logger.debug(f"EventBus publish error: {e}")
 
     async def _handle_confirmation_response(self, msg: Dict[str, Any]):
         """Route a confirmation approve/reject from the overlay to the ConfirmationGate."""
@@ -209,6 +366,9 @@ class UIBridge:
         """Consume events from EventBus queue and broadcast overlay-relevant ones."""
         while self._running:
             try:
+                if self._event_queue is None:
+                    await asyncio.sleep(0.1)
+                    continue
                 event = await asyncio.wait_for(self._event_queue.get(), timeout=1.0)
                 event_type = event.get("type", "")
 

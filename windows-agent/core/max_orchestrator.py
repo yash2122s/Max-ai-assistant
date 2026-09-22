@@ -369,6 +369,38 @@ class MaxOrchestrator:
 
         name = tool_name.lower().strip()
 
+        # Computer Use Actions
+        if name.startswith("computer_use_") or name.startswith("cu_"):
+            if result.get("status") == "error" or result.get("status") == "verification_failed" or result.get("verified") is False:
+                return False, "UNVERIFIED"
+            if result.get("goal_state_verified") is True:
+                return True, "VERIFIED"
+            if result.get("action_execution_verified") is True:
+                return True, "PARTIALLY_VERIFIED"
+            if result.get("status") == "success" or result.get("verified") is True:
+                return True, "VERIFIED"
+            return True, "PARTIALLY_VERIFIED"
+
+        # Form Understanding & Filling Tools
+        if name.startswith("form_"):
+            if result.get("status") == "awaiting_confirmation":
+                return False, "WAITING_CONFIRMATION"
+            if result.get("status") in ("error", "failed"):
+                return False, "UNVERIFIED"
+            if result.get("verified") is True or result.get("status") in ("success", "partial", "needs_input", "captcha_detected"):
+                return True, "VERIFIED"
+            return True, "PARTIALLY_VERIFIED"
+
+        # MCP Tool Actions
+        if name.startswith("mcp_") or name.startswith("mcp__"):
+            if result.get("status") == "error" or result.get("is_error") is True:
+                return False, "UNVERIFIED"
+            if result.get("status") == "awaiting_confirmation":
+                return False, "WAITING_CONFIRMATION"
+            if result.get("status") == "success":
+                return True, "VERIFIED"
+            return False, "UNVERIFIED"
+
         # Remote Android Actions
         if name in ("execute_device_action", "execute_multi_device_action"):
             if result.get("status") == "success" or result.get("success") is True:
@@ -416,7 +448,7 @@ class MaxOrchestrator:
             return verified, "VERIFIED" if verified else "UNVERIFIED"
 
         if name in ("read_file", "read_text_file"):
-            verified = result.get("status") == "success" and "content" in result
+            verified = result.get("status") == "success" and ("content" in result or "data" in result)
             return verified, "VERIFIED" if verified else "UNVERIFIED"
 
         # Clipboard
@@ -431,7 +463,36 @@ class MaxOrchestrator:
         adapted = dict(args)
         name = tool_name.lower().strip()
 
-        if name == "click_ui_element":
+        # Computer Use Adaptation & Recovery
+        if name in ("computer_use_click", "computer_use_type", "computer_use_step", "cu_click", "cu_type", "cu_step"):
+            target = adapted.get("target") or adapted.get("target_query")
+            if isinstance(target, str):
+                t = target.strip()
+                if attempt == 1:
+                    # Strip descriptive suffixes and punctuation
+                    for suffix in (" button", " icon", " link", " tab", " menu", " bar", " box", " field"):
+                        if t.lower().endswith(suffix):
+                            t = t[:-len(suffix)].strip()
+                            break
+                    t = re.sub(r'["\?\!\:]', '', t).strip()
+                    if "target" in adapted:
+                        adapted["target"] = t
+                    if "target_query" in adapted:
+                        adapted["target_query"] = t
+                elif attempt == 2:
+                    # Force fresh perception & UI map refresh before second retry
+                    try:
+                        from core.computer_use.computer_use_engine import computer_use_engine
+                        computer_use_engine.observe_screen(include_ocr=True)
+                    except Exception as ce:
+                        logger.debug(f"Pre-retry observe notice: {ce}")
+
+        elif name in ("mcp_call_tool", "mcp_execute"):
+            if attempt == 1:
+                # Extend timeout if timed out
+                adapted["timeout_sec"] = min(60.0, float(args.get("timeout_sec", 15.0)) + 15.0)
+
+        elif name == "click_ui_element":
             target = args.get("target")
             if not isinstance(target, str):
                 if "name" in args and isinstance(args["name"], str):

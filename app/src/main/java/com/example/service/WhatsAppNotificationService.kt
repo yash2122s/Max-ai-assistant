@@ -20,6 +20,9 @@ class WhatsAppNotificationService : NotificationListenerService() {
 
     override fun onListenerConnected() {
         super.onListenerConnected()
+        if (instance != null && instance != this) {
+            Log.w("WhatsAppNotifService", "onListenerConnected called on an already connected service!")
+        }
         instance = this
         Log.d("WhatsAppNotifService", "Notification Listener Connected!")
     }

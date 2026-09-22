@@ -79,29 +79,32 @@ object InputTargetResolver {
             return ResolvedInput(single, target, isFocused)
         }
 
-        // 4. Search bar / query input heuristic matching
+        // 4. Search bar / query / composer input heuristic matching
         val searchKeywords = listOf(
             "search", "search_box", "search_bar", "search_src_text",
-            "search_omnibox_text_box", "query", "find", "search here", "వెతుకు", "శోధించు"
+            "search_omnibox_text_box", "query", "find", "search here", "action_bar_search_edit_text",
+            "search_edit_text", "meta ai", "ask meta ai", "row_thread_composer_edittext",
+            "search_row", "ig_text", "entry", "message", "వెతుకు", "శోధించు"
         )
         for (editable in editables) {
             val id = try { editable.viewIdResourceName?.lowercase(Locale.ROOT) ?: "" } catch (_: Exception) { "" }
             val desc = try { editable.contentDescription?.toString()?.lowercase(Locale.ROOT) ?: "" } catch (_: Exception) { "" }
+            val text = try { editable.text?.toString()?.lowercase(Locale.ROOT) ?: "" } catch (_: Exception) { "" }
             val hint = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 try { editable.hintText?.toString()?.lowercase(Locale.ROOT) ?: "" } catch (_: Exception) { "" }
             } else ""
 
-            if (searchKeywords.any { id.contains(it) || desc.contains(it) || hint.contains(it) }) {
+            if (searchKeywords.any { id.contains(it) || desc.contains(it) || hint.contains(it) || text.contains(it) }) {
                 val target = UiTarget(
                     resourceId = try { editable.viewIdResourceName } catch (_: Exception) { null },
                     text = try { editable.text?.toString() } catch (_: Exception) { null },
                     contentDescription = try { editable.contentDescription?.toString() } catch (_: Exception) { null },
-                    role = "search_field",
+                    role = "search_or_composer_field",
                     confidence = 0.95f,
                     method = TargetResolutionMethod.SEMANTIC
                 )
                 val isFocused = try { editable.isFocused } catch (_: Exception) { false }
-                Log.d(TAG, "Resolved input as semantic search field: id=$id")
+                Log.d(TAG, "Resolved input as semantic search/composer field: id=$id")
                 return ResolvedInput(editable, target, isFocused)
             }
         }

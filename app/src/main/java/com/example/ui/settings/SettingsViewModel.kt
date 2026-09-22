@@ -63,8 +63,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             ragMinRelevance = settingsManager.ragMinRelevance,
             ragMaxContextCharacters = settingsManager.ragMaxContextCharacters,
             ragEmbeddingProvider = settingsManager.ragEmbeddingProvider,
-            isAutoIndexMemoriesEnabled = settingsManager.isAutoIndexMemoriesEnabled
+            isAutoIndexMemoriesEnabled = settingsManager.isAutoIndexMemoriesEnabled,
+            isDefaultAssistant = com.example.voice.assistant.SystemAssistantManager.isDefaultAssistant(getApplication()),
+            wakeWordStatus = com.example.voice.assistant.SystemAssistantManager.getWakeWordStatusDescription()
         )
+    }
+
+    fun checkDefaultAssistantStatus() {
+        val isDefault = com.example.voice.assistant.SystemAssistantManager.isDefaultAssistant(getApplication())
+        _uiState.update { it.copy(isDefaultAssistant = isDefault) }
     }
 
     fun updateGeminiApiKey(key: String) {

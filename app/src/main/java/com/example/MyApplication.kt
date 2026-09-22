@@ -135,8 +135,10 @@ class MyApplication : Application() {
         VerificationRegistry.register(com.example.automation.verification.ClickUiVerifier())
         VerificationRegistry.register(com.example.automation.verification.PressEnterVerifier())
         VerificationRegistry.register(com.example.automation.verification.KeyboardActionVerifier())
+        VerificationRegistry.register(com.example.automation.verification.WaitForUiVerifier())
 
         ToolRegistry.register(openAppTool)
+        ToolRegistry.register(com.example.automation.tools.WaitForUiTool())
         ToolRegistry.register(flashlightTool)
         ToolRegistry.register(whatsAppTool)
         ToolRegistry.register(scheduleTaskTool)

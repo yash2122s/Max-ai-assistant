@@ -106,3 +106,73 @@ async def test_ui_bridge_filters_non_overlay_events():
 
     await bridge.stop()
     await bridge_task
+
+
+@pytest.mark.asyncio
+async def test_ui_bridge_handles_interrupt_and_shutdown_request(monkeypatch):
+    """Verify that UIBridge processes interrupt and shutdown_request messages."""
+    event_bus = EventBus()
+    bridge = UIBridge(host="127.0.0.1", port=9014, event_bus=event_bus)
+
+    bridge_task = asyncio.create_task(bridge.start())
+    await asyncio.sleep(0.1)
+
+    sub_queue = asyncio.Queue()
+    event_bus.subscribe(sub_queue)
+
+    shutdown_triggered = []
+    monkeypatch.setattr("main.trigger_shutdown", lambda: shutdown_triggered.append(True))
+
+    async with websockets.connect("ws://127.0.0.1:9014") as ws:
+        init_msg = await asyncio.wait_for(ws.recv(), timeout=2.0)
+        assert json.loads(init_msg)["type"] == "state_snapshot"
+
+        # Send interrupt message
+        await ws.send(json.dumps({"type": "interrupt"}))
+        await asyncio.sleep(0.1)
+
+        # Check for TASK_INTERRUPTED event in sub_queue
+        found_interrupt = False
+        while not sub_queue.empty():
+            evt = sub_queue.get_nowait()
+            if evt.get("type") == EventType.TASK_INTERRUPTED.value:
+                found_interrupt = True
+                assert evt["payload"]["status"] == "interrupted"
+        assert found_interrupt, "TASK_INTERRUPTED event was not published to EventBus"
+
+        # Send shutdown_request message
+        await ws.send(json.dumps({"type": "shutdown_request"}))
+        await asyncio.sleep(0.1)
+        assert len(shutdown_triggered) == 1
+
+    event_bus.unsubscribe(sub_queue)
+    await bridge.stop()
+    await bridge_task
+
+
+@pytest.mark.asyncio
+async def test_ui_bridge_handles_computer_use_observe_and_chat(monkeypatch):
+    """Verify that UIBridge processes computer_use_observe and chat_message from client."""
+    event_bus = EventBus()
+    bridge = UIBridge(host="127.0.0.1", port=9015, event_bus=event_bus)
+
+    bridge_task = asyncio.create_task(bridge.start())
+    await asyncio.sleep(0.1)
+
+    obs_called = []
+    from core.computer_use.computer_use_engine import computer_use_engine
+    monkeypatch.setattr(computer_use_engine, "observe_screen", lambda include_ocr=True: obs_called.append(include_ocr) or {"status": "success"})
+
+    async with websockets.connect("ws://127.0.0.1:9015") as ws:
+        init_msg = await asyncio.wait_for(ws.recv(), timeout=2.0)
+        assert json.loads(init_msg)["type"] == "state_snapshot"
+
+        # Send computer_use_observe message
+        await ws.send(json.dumps({"type": "computer_use_observe", "include_ocr": True}))
+        await asyncio.sleep(0.2)
+        assert len(obs_called) == 1
+        assert obs_called[0] is True
+
+    await bridge.stop()
+    await bridge_task
+

@@ -450,22 +450,46 @@ object ActionAuthorizer {
     }
 
     fun isPureConversation(intent: String): Boolean {
+        val lower = intent.trim().lowercase()
+
         // Visual or screen queries are actionable screen analysis, NOT pure conversation
         val screenKeywords = listOf("screen", "display", "what's on", "what is on", "read this", "screenshot", "looking at", "which app", "visible", "స్క్రీన్", "డిస్ప్లే", "చూడు")
-        if (screenKeywords.any { intent.contains(it) }) {
+        if (screenKeywords.any { lower.contains(it) }) {
             return false
         }
 
         val hasActionVerb = listOf("open ", "search ", "play ", "send ", "click ", "tap ", "turn on ", "turn off ", "set ", "call ")
-            .any { intent.contains(it) }
+            .any { lower.contains(it) }
         if (hasActionVerb) return false
+
+        // Assistant comparison, personality, feelings, creator inquiries
+        val personalityKeywords = listOf(
+            "siri", "alexa", "google assistant", "yaswanth", "better", "vs", "compare",
+            "feeling", "how are you", "who are you", "what are you", "tell me about yourself",
+            "cheppu", "cheppava", "bavunnava", "bagunnava", "nuvvu", "neeku", "naaku",
+            "prema", "ishta", "kopam", "smart", "intelligent", "cute", "love"
+        )
+        if (personalityKeywords.any { lower.contains(it) }) {
+            return true
+        }
 
         val conversationalPhrases = listOf(
             "tell me about", "what is", "who is", "explain", "how does", "how to", "why is",
             "hello", "hi max", "hey max", "good morning", "good evening", "how are you",
             "what's the weather", "what is the weather", "weather today", "forecast",
-            "చెప్పు", "ఎలా", "ఎవరు", "ఏంటి", "బాగున్నావా", "హలో"
+            "can you", "do you", "are you", "should i", "which is", "where is",
+            "చెప్పు", "ఎలా", "ఎవరు", "ఏంటి", "బాగున్నావా", "హలో", "నమస్తే",
+            "batao", "kaise", "kaun", "kya", "namaste"
         )
-        return conversationalPhrases.any { intent.contains(it) }
+        if (conversationalPhrases.any { lower.contains(it) }) {
+            return true
+        }
+
+        // Generic interrogative sentences ending with ? without action verbs
+        if (lower.endsWith("?") || lower.contains(" better aa") || lower.contains(" aa?") || lower.contains(" kante ") || lower.contains(" kanna ")) {
+            return true
+        }
+
+        return false
     }
 }

@@ -39,7 +39,33 @@ _pa_lock = threading.Lock()
 # ── Live capture registry + atexit safety net ────────────────────────────────
 _live_captures: set["AudioCapture"] = set()
 _live_captures_lock = threading.Lock()
+_live_players: set["SpeakerOutputManager"] = set()
+_live_players_lock = threading.Lock()
 _atexit_registered = False
+
+
+def get_active_audio_stream_count() -> int:
+    """Returns the total number of currently active hardware audio streams."""
+    count = 0
+    with _live_captures_lock:
+        for cap in list(_live_captures):
+            if getattr(cap, "has_active_stream", False):
+                count += 1
+    with _live_players_lock:
+        for pl in list(_live_players):
+            if getattr(pl, "has_active_stream", False):
+                count += 1
+    return count
+
+
+def get_playback_worker_count() -> int:
+    """Returns the total number of currently running audio playback workers."""
+    count = 0
+    with _live_players_lock:
+        for pl in list(_live_players):
+            if getattr(pl, "has_active_worker", False):
+                count += 1
+    return count
 
 
 def get_shared_pyaudio() -> pyaudio.PyAudio:
@@ -121,6 +147,17 @@ class AudioCapture:
     @property
     def queue(self) -> asyncio.Queue[bytes]:
         return self._queue
+
+    @property
+    def has_active_stream(self) -> bool:
+        """Returns True if the microphone stream is open and active."""
+        stream = self._stream
+        if stream is None:
+            return False
+        try:
+            return stream.is_active()
+        except Exception:
+            return False
 
     @property
     def is_running(self) -> bool:
@@ -366,11 +403,7 @@ class SpeakerOutputManager:
         self.set_realtime_session(session)
 
     @property
-    def is_playing(self) -> bool:
-        return self._playing or not self._queue.empty()
-
-    @property
-    def is_stream_active(self) -> bool:
+    def has_active_stream(self) -> bool:
         with self._stream_lock:
             if self._stream is None:
                 return False
@@ -378,6 +411,19 @@ class SpeakerOutputManager:
                 return self._stream.is_active() and not self._stream.is_stopped()
             except Exception:
                 return False
+
+    @property
+    def has_active_worker(self) -> bool:
+        t = self._worker_thread
+        return t is not None and t.is_alive()
+
+    @property
+    def is_playing(self) -> bool:
+        return self._playing or not self._queue.empty()
+
+    @property
+    def is_stream_active(self) -> bool:
+        return self.has_active_stream
 
     def _get_best_output_device_index(self, pa: pyaudio.PyAudio) -> int | None:
         """Find the best output device index."""
@@ -437,6 +483,11 @@ class SpeakerOutputManager:
             return True
         except Exception as e:
             logger.error("SPEAKER: OPEN_FAILED (error: %s)", e)
+            if self._stream is not None:
+                try:
+                    self._stream.close()
+                except Exception:
+                    pass
             self._stream = None
             return False
 
@@ -455,6 +506,8 @@ class SpeakerOutputManager:
                 daemon=True,
                 name="MAX-SpeakerManager-Worker",
             )
+            with _live_players_lock:
+                _live_players.add(self)
             self._worker_thread.start()
             logger.info(
                 f"🔊 Speaker opened: {self._sample_rate}Hz, {self._channels}ch (SpeakerOutputManager active)"
@@ -593,13 +646,27 @@ class SpeakerOutputManager:
 
                 with self._lock:
                     if self._queue.empty():
+                        was_playing = self._playing
                         self._playing = False
                         self._is_buffering = True
+                        if was_playing and self._voice_gate is not None:
+                            try:
+                                if hasattr(self._voice_gate, "state") and str(getattr(self._voice_gate.state, "value", self._voice_gate.state)) == "assistant_speaking":
+                                    self._voice_gate.on_assistant_speaking_finished()
+                            except Exception as vg_err:
+                                logger.debug("VoiceGate playback finish notify error: %s", vg_err)
                 self._queue.task_done()
             except queue.Empty:
                 with self._lock:
+                    was_playing = self._playing
                     self._playing = False
                     self._is_buffering = True
+                    if was_playing and self._voice_gate is not None:
+                        try:
+                            if hasattr(self._voice_gate, "state") and str(getattr(self._voice_gate.state, "value", self._voice_gate.state)) == "assistant_speaking":
+                                self._voice_gate.on_assistant_speaking_finished()
+                        except Exception as vg_err:
+                            logger.debug("VoiceGate playback finish notify error: %s", vg_err)
             except Exception as e:
                 logger.debug(f"Audio playback worker exception: {e}")
 
@@ -645,6 +712,13 @@ class SpeakerOutputManager:
                 self._queue.task_done()
             except Exception:
                 break
+
+        if self._voice_gate is not None:
+            try:
+                from core.voice_gate import VoiceState
+                self._voice_gate.transition_to(VoiceState.LIVE_CONVERSATION)
+            except Exception:
+                pass
         logger.debug("🔇 Playback interrupted (barge-in queue flushed)")
 
     def resume(self):
@@ -670,6 +744,9 @@ class SpeakerOutputManager:
         if self._worker_thread and self._worker_thread.is_alive():
             self._worker_thread.join(timeout=0.5)
             self._worker_thread = None
+
+        with _live_players_lock:
+            _live_players.discard(self)
 
         with self._stream_lock:
             stream, self._stream = self._stream, None

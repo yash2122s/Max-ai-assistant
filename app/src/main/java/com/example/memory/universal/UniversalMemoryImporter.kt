@@ -306,6 +306,11 @@ class UniversalMemoryImporter(private val context: Context) {
             // Trigger debounced Markdown projection sync
             MemorySyncService.getInstance(context).exportToMarkdown()
 
+            // Notify MemoryRepository and increment memoryRevision for real-time live voice agent visibility
+            com.example.memory.data.MemoryRepository.getInstance(context).notifyMemoryChanged(
+                com.example.memory.data.MemoryChangeEvent.Imported(toInsert.size + toUpdate.size)
+            )
+
             // Asynchronously index newly imported memories into RAG
             val allCommittedDecrypted = (toInsert + toUpdate).map { decryptMemory(it) }
             try {

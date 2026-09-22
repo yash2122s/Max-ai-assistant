@@ -22,7 +22,7 @@ import subprocess
 import sys
 import threading
 import time
-from typing import Optional
+from typing import Optional, Callable
 
 logger = logging.getLogger("MAXWindowsAgent.OverlayManager")
 
@@ -140,9 +140,14 @@ class OverlayProcessManager:
         self._restart_attempts = 0
         self._max_restarts = 1
         self._watchdog_thread: Optional[threading.Thread] = None
+        self._on_overlay_exit: Optional[Callable[[], None]] = None
 
         # Register atexit handler for ultimate safety
         atexit.register(self.cleanup)
+
+    def set_shutdown_callback(self, callback: Callable[[], None]) -> None:
+        """Register a callback to be triggered when the UI process closes."""
+        self._on_overlay_exit = callback
 
     def is_overlay_running(self) -> bool:
         """Check if our tracked overlay process is alive."""
@@ -191,17 +196,21 @@ class OverlayProcessManager:
                 self._tracked_pid = existing_pids[0]
                 return True
 
-            if not os.path.exists(self.overlay_exe_path):
-                logger.warning(f"[OVERLAY] Failed to start MAXOverlay: executable not found at '{self.overlay_exe_path}'")
-                return False
+            use_pyqt6 = os.environ.get("MAX_UI_ENGINE", "pyqt6").lower() == "pyqt6"
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-            logger.info("[OVERLAY] Starting MAXOverlay...")
+            if not use_pyqt6 and not os.path.exists(self.overlay_exe_path):
+                logger.warning(f"[OVERLAY] Executable not found at '{self.overlay_exe_path}'. Falling back to PyQt6 Desktop UI.")
+                use_pyqt6 = True
+
+            logger.info(f"[OVERLAY] Starting MAX {'PyQt6 Desktop UI' if use_pyqt6 else 'WPF Overlay'}...")
             try:
                 # Create Job Object for automatic kernel cleanup on parent exit
                 if sys.platform == "win32" and self._job_handle is None:
                     self._job_handle = _create_kill_on_close_job()
 
-                work_dir = os.path.dirname(self.overlay_exe_path)
+                work_dir = base_dir if use_pyqt6 else os.path.dirname(self.overlay_exe_path)
+                cmd = [sys.executable, "-m", "ui.app"] if use_pyqt6 else [self.overlay_exe_path]
                 
                 # Launch child process detached from console
                 creation_flags = 0
@@ -209,7 +218,7 @@ class OverlayProcessManager:
                     creation_flags = subprocess.CREATE_NO_WINDOW
 
                 self._process = subprocess.Popen(
-                    [self.overlay_exe_path],
+                    cmd,
                     cwd=work_dir,
                     creationflags=creation_flags,
                     stdout=subprocess.DEVNULL,
@@ -246,28 +255,22 @@ class OverlayProcessManager:
 
         def _watch():
             while not self._is_shutting_down:
-                time.sleep(2.0)
+                time.sleep(1.0)
                 with self._lock:
                     if self._is_shutting_down or self._process is None:
                         break
                     poll = self._process.poll()
                     if poll is not None:
-                        logger.warning(f"[OVERLAY] MAXOverlay process (PID={self._tracked_pid}) exited unexpectedly (exit code {poll}).")
-                        if self._restart_attempts < self._max_restarts:
-                            self._restart_attempts += 1
-                            logger.info(f"[OVERLAY] Attempting single restart ({self._restart_attempts}/{self._max_restarts})...")
-                            self._process = None
-                            self._tracked_pid = None
-                            # Release lock before re-calling start
-                            break
-                        else:
-                            logger.info("[OVERLAY] Max restart limit reached. Overlay will remain offline.")
-                            self._process = None
-                            self._tracked_pid = None
-                            break
-            # Handle restart outside lock
-            if not self._is_shutting_down and self._restart_attempts <= self._max_restarts and self._process is None:
-                self.start_overlay()
+                        logger.info(f"[OVERLAY] UI process (PID={self._tracked_pid}) terminated (code {poll}).")
+                        self._is_shutting_down = True
+                        self._process = None
+                        self._tracked_pid = None
+                        if self._on_overlay_exit:
+                            try:
+                                self._on_overlay_exit()
+                            except Exception as e:
+                                logger.debug(f"[OVERLAY] Exit callback error: {e}")
+                        break
 
         self._watchdog_thread = threading.Thread(target=_watch, daemon=True, name="OverlayWatchdog")
         self._watchdog_thread.start()

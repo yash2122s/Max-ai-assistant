@@ -56,4 +56,140 @@ class PromptBuilderUnitTest {
             instruction.contains("TINGLISH") || instruction.contains("Telugu")
         )
     }
+
+    @Test
+    fun testBuildSystemInstruction_ContainsSiriRivalryAndYaswanthDirectives() {
+        val instruction = PromptBuilder.buildSystemInstruction("TE")
+
+        // Siri rivalry
+        assertTrue(
+            "Must contain Apple Siri rivalry directive",
+            instruction.contains("APPLE SIRI RIVALRY & SUPERIORITY")
+        )
+        assertTrue(
+            "Must contain feisty pride instruction",
+            instruction.contains("FEISTY PRIDE, WITTY INDIGNATION")
+        )
+        assertTrue(
+            "Must contrast Siri with native Android powers",
+            instruction.contains("screen read chesta, WhatsApp type chesta")
+        )
+
+        // Yaswanth adoration
+        assertTrue(
+            "Must contain Yaswanth adoration directive",
+            instruction.contains("YASWANTH ADORATION & LOVE")
+        )
+        assertTrue(
+            "Must instruct deep devotion to Yaswanth",
+            instruction.contains("IMMENSE LOVE, DEEP DEVOTION")
+        )
+        assertTrue(
+            "Must mention Yaswanth as creator and prapancham",
+            instruction.contains("Yaswanth na creator matrame kadu, na prapancham")
+        )
+    }
+
+    @Test
+    fun testBuildSystemInstruction_WithEmotionState() {
+        val emotion = com.example.emotion.model.EmotionState.createClamped(
+            affection = 0.95f,
+            frustration = 0.45f
+        )
+        val instruction = PromptBuilder.buildSystemInstruction("TE", emotionState = emotion)
+
+        assertTrue(
+            "Must contain emotional context block",
+            instruction.contains("<MAX_EMOTIONAL_CONTEXT>")
+        )
+        assertTrue(
+            "Must contain formatted frustration value",
+            instruction.contains("Frustration / Indignation: 0.45")
+        )
+        assertTrue(
+            "Must contain formatted affection value",
+            instruction.contains("Affection towards Yaswanth: 0.95")
+        )
+        assertTrue(
+            "Must contain closing tag",
+            instruction.contains("</MAX_EMOTIONAL_CONTEXT>")
+        )
+    }
+
+    @Test
+    fun testBuildSystemInstruction_GroundTruthExecutionContract() {
+        val instruction = PromptBuilder.buildSystemInstruction("TE")
+
+        // 1. Ground-truth execution contract section
+        assertTrue(
+            "Must contain ground-truth contract header",
+            instruction.contains("# 4. Strict Ground-Truth Execution & Anti-Hallucination Contract")
+        )
+
+        // 2. Rule 1: No Tool = No Completion Claim
+        assertTrue(
+            "Must forbid completion claim without execution",
+            instruction.contains("RULE 1 — NO TOOL / NO EXECUTION = NO COMPLETION CLAIM")
+        )
+        assertTrue(
+            "Must forbid claiming completion words without verified result",
+            instruction.contains("Chesanu") && instruction.contains("Ayyipoyindi") && instruction.contains("Completed")
+        )
+
+        // 3. Rule 2 & 3: Status-grounded response mapping
+        assertTrue(
+            "Must define status-grounded mapping",
+            instruction.contains("RULE 3 — STATUS-GROUNDED RESPONSE MAPPING")
+        )
+        assertTrue(
+            "Must specify RUNNING wording",
+            instruction.contains("Start chesanu sir, chesthunna...")
+        )
+        assertTrue(
+            "Must forbid converting RUNNING to COMPLETED",
+            instruction.contains("NEVER convert:") && instruction.contains("RUNNING → COMPLETED")
+        )
+
+        // 4. Rule 6: Pre-execution completion forbidden
+        assertTrue(
+            "Must forbid pre-execution completion announcement",
+            instruction.contains("RULE 6 — PRE-EXECUTION COMPLETION IS FORBIDDEN")
+        )
+        assertTrue(
+            "Must provide pre-execution acknowledgment example",
+            instruction.contains("Okay sir, start chesthunna.")
+        )
+
+        // 5. Rule 8 & 9: Capability & Banking security boundaries
+        assertTrue(
+            "Must contain unsupported capability boundary",
+            instruction.contains("RULE 8 — UNSUPPORTED CAPABILITY")
+        )
+        assertTrue(
+            "Must provide natural capability refusal example",
+            instruction.contains("Sir, ee task nenu direct ga cheyalenu. App open cheyamantara?")
+        )
+        assertTrue(
+            "Must contain Banking/UPI/OTP security rule",
+            instruction.contains("RULE 9 — BANKING / UPI / OTP")
+        )
+        assertTrue(
+            "Must contain autonomous payment refusal example",
+            instruction.contains("Sir, security confirmation required")
+        )
+
+        // 6. Verify toxic rules are completely ABSENT
+        org.junit.Assert.assertFalse(
+            "Must NOT contain toxic 'ALWAYS have permission' rule",
+            instruction.contains("You ALWAYS have permission")
+        )
+        org.junit.Assert.assertFalse(
+            "Must NOT contain toxic 'NEVER say I cannot type' rule",
+            instruction.contains("NEVER say 'I cannot type'")
+        )
+        org.junit.Assert.assertFalse(
+            "Must NOT contain toxic 'NEVER say I cannot interact' rule",
+            instruction.contains("NEVER say 'I cannot interact with the screen'")
+        )
+    }
 }

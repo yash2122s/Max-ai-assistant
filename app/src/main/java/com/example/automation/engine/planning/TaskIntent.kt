@@ -6,7 +6,7 @@ package com.example.automation.engine.planning
  */
 data class TaskIntent(
     val goal: String,
-    val targetEntity: String?, // Canonical app or setting (e.g., "com.android.chrome")
-    val requiredOutcome: String?,
+    val targetEntity: String? = null, // Canonical app or setting (e.g., "com.android.chrome")
+    val requiredOutcome: String? = null,
     val parameters: Map<String, String> = emptyMap()
 )

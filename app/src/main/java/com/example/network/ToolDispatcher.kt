@@ -265,37 +265,44 @@ object ToolDispatcher {
                     argsObj.put("action", "SYSTEM_ACTION")
                     argsObj.put("system_action_str", mappedSystemAction)
                     argsObj.put("function_name", "system_action")
-                } else if (appName.equals("YouTube", ignoreCase = true)) {
+                } else if (normalizedApp in listOf("youtube", "yt", "యూట్యూబ్", "యూట్యూబ్లో", "యూట్యూబ్‌లో") || 
+                    normalizedApp.contains("youtube") || normalizedApp.contains("యూట్యూబ్")) {
                     val queryText = lastInputTranscription.lowercase()
                     val searchTriggers = listOf(
                         "play", "search", "watch", "song", "music", "sing", "listen",
                         "ప్లే", "వెతుకు", "చూడు", "పాట", "సాంగ్", "విను"
                     )
-                    val containsTrigger = searchTriggers.any { queryText.contains(it) }
+                    val containsTrigger = searchTriggers.any { trigger ->
+                        if (trigger.all { it.isLetterOrDigit() && it.code < 128 }) {
+                            Regex("""(?i)\b${Regex.escape(trigger)}\b""").containsMatchIn(queryText)
+                        } else {
+                            queryText.contains(trigger)
+                        }
+                    }
                     if (containsTrigger) {
-                        val cleanedQuery = queryText
-                            .replace("play", "")
-                            .replace("search", "")
-                            .replace("watch", "")
-                            .replace("on youtube", "")
-                            .replace("youtube lo", "")
-                            .replace("యూట్యూబ్‌లో", "")
-                            .replace("ప్లే చేయి", "")
-                            .replace("ప్లే చెయ్", "")
+                        var cleaned = queryText
+                            .replace(Regex("""(?i)\b(?:on|in)\s+youtube\b"""), "")
+                            .replace(Regex("""(?i)\byoutube\s+lo\b"""), "")
+                            .replace(Regex("""(?i)\byoutube\b"""), "")
+                            .replace(Regex("""(?i)\byt\b"""), "")
+                            .replace(Regex("""(?i)(?:యూట్యూబ్‌లో|యూట్యూబ్\s*లో|యూట్యూబ్లో|యూట్యూబ్)"""), "")
+                            .replace(Regex("""(?i)\b(?:play|search|watch|sing|listen\s+to|listen)\b"""), "")
+                            .replace(Regex("""(?i)(?:ప్లే\s*చేయి|ప్లే\s*చెయ్|ప్లే|వెతుకు|చూడు|పాట|సాంగ్|విను|చేయి|చెయ్)"""), "")
+                            .replace(Regex("""\s+"""), " ")
                             .trim()
-                        
-                        if (cleanedQuery.isNotEmpty()) {
-                            Log.d(TAG, "Local Fallback: converting open_app(YouTube) to YOUTUBE_SEARCH for query: '$cleanedQuery'")
+
+                        if (cleaned.isNotEmpty()) {
+                            Log.d(TAG, "Local Fallback: converting open_app($appName) to YOUTUBE_SEARCH for query: '$cleaned'")
                             argsObj.put("action", "YOUTUBE_SEARCH")
-                            argsObj.put("query", cleanedQuery)
+                            argsObj.put("query", cleaned)
                             argsObj.put("function_name", "youtube_search")
                         } else {
                             argsObj.put("action", "OPEN_APP")
-                            argsObj.put("app", appName)
+                            argsObj.put("app", "YouTube")
                         }
                     } else {
                         argsObj.put("action", "OPEN_APP")
-                        argsObj.put("app", appName)
+                        argsObj.put("app", "YouTube")
                     }
                 } else {
                     argsObj.put("action", "OPEN_APP")

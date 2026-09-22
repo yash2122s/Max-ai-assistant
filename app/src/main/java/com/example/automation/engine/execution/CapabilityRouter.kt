@@ -92,7 +92,12 @@ class CapabilityRouter(
             // =========================================================================
             is UiStep.OpenApp -> {
                 Log.d(TAG, "[TIER 2 INTENT] Opening app: ${uiStep.appName} (pkg: ${uiStep.packageName})")
-                val pkgToLaunch = uiStep.packageName ?: appRepository.findApp(context, uiStep.appName)
+                val pkgToLaunch = uiStep.packageName
+                    ?: if (uiStep.appName.contains(".") && context.packageManager.getLaunchIntentForPackage(uiStep.appName) != null) {
+                        uiStep.appName
+                    } else {
+                        appRepository.findApp(context, uiStep.appName)
+                    }
                 
                 if (pkgToLaunch == null) {
                     Log.w(TAG, "Cannot launch '${uiStep.appName}': package not resolved")
@@ -136,7 +141,18 @@ class CapabilityRouter(
                     }
                     
                     val node = resolution.matchedNode
-                    val clicked = node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+                    var clicked = node?.performAction(AccessibilityNodeInfo.ACTION_CLICK) ?: false
+                    
+                    if (!clicked && bounds != null) {
+                        val centerX = bounds.exactCenterX().coerceAtLeast(0f)
+                        val centerY = bounds.exactCenterY().coerceAtLeast(0f)
+                        val path = android.graphics.Path().apply { moveTo(centerX, centerY) }
+                        val gesture = android.accessibilityservice.GestureDescription.Builder()
+                            .addStroke(android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 100))
+                            .build()
+                        clicked = JarvisAccessibilityService.dispatchGestureAction(gesture)
+                        Log.d(TAG, "[TIER 3 ACCESSIBILITY] Fallback gesture tap at ($centerX, $centerY): $clicked")
+                    }
                     
                     AutomationEventBus.publish(AutomationEvent.ActionStarted(executionId, "TAP", query))
                     ExecutionResult(success = clicked, activePackage = node?.packageName?.toString())
@@ -213,7 +229,23 @@ class CapabilityRouter(
             }
 
             is UiStep.WaitForUi -> {
-                ExecutionResult(success = true)
+                val target = uiStep.targetText ?: uiStep.resourceId
+                val ok = if (!target.isNullOrBlank()) {
+                    com.example.automation.verification.RuntimeStepVerifier.verifyTargetVisible(
+                        context = context,
+                        targetQuery = target,
+                        timeoutMs = uiStep.timeoutMs
+                    )
+                } else if (!uiStep.packageName.isNullOrBlank()) {
+                    com.example.automation.verification.RuntimeStepVerifier.verifyAppForeground(
+                        context = context,
+                        expectedPackage = uiStep.packageName,
+                        timeoutMs = uiStep.timeoutMs
+                    )
+                } else {
+                    true
+                }
+                ExecutionResult(success = ok)
             }
 
             is UiStep.Finish -> {

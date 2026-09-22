@@ -9,10 +9,10 @@ data class UiSnapshot(
 )
 
 data class UiNode(
-    val id: String?,
-    val text: String?,
-    val contentDescription: String?,
-    val className: String,
-    val isClickable: Boolean,
-    val bounds: Rect
+    val id: String? = null,
+    val text: String? = null,
+    val contentDescription: String? = null,
+    val className: String = "",
+    val isClickable: Boolean = false,
+    val bounds: Rect = Rect()
 )

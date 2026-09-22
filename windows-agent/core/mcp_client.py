@@ -128,6 +128,38 @@ class MCPClientManager:
             "tools_count": len(self._tools)
         }
 
+    def stop(self, timeout: float = 1.0):
+        """Synchronously signals background loop to stop and joins thread."""
+        self._running = False
+        if self._mcp_loop and self._mcp_loop.is_running():
+            try:
+                self._mcp_loop.call_soon_threadsafe(self._mcp_loop.stop)
+            except Exception:
+                pass
+        if self._mcp_thread and self._mcp_thread.is_alive():
+            try:
+                self._mcp_thread.join(timeout=timeout)
+            except Exception:
+                pass
+            self._mcp_thread = None
+        logger.info("🛑 MCP client manager stopped")
+
+    async def stop_async(self, timeout: float = 1.0):
+        """Asynchronously stops the MCP background loop without blocking the caller's event loop."""
+        self._running = False
+        if self._mcp_loop and self._mcp_loop.is_running():
+            try:
+                self._mcp_loop.call_soon_threadsafe(self._mcp_loop.stop)
+            except Exception:
+                pass
+        if self._mcp_thread and self._mcp_thread.is_alive():
+            try:
+                await asyncio.to_thread(self._mcp_thread.join, timeout)
+            except Exception:
+                pass
+            self._mcp_thread = None
+        logger.info("🛑 MCP client manager stopped (async)")
+
 
 # Singleton instance
 mcp_client = MCPClientManager.get_instance()

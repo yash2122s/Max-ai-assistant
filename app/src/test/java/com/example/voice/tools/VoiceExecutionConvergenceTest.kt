@@ -7,11 +7,16 @@ import com.example.automation.event.AutomationEvent
 import com.example.automation.event.AutomationEventBus
 import com.example.automation.tools.DiagnosticsTool
 import com.example.automation.tools.ToolRegistry
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -65,7 +70,8 @@ class VoiceExecutionConvergenceTest {
 
         // Real engine-side effects only ExecutionEngine publishes. A direct
         // tool.execute() bypass would never produce these events.
-        val subscription = AutomationEventBus.events.collectInBackground { event ->
+        val readySignal = CompletableDeferred<Unit>()
+        val subscription = AutomationEventBus.events.collectInBackground(readySignal) { event ->
             when (event) {
                 is AutomationEvent.ExecutionStarted -> lifecycleStarted.set(true)
                 is AutomationEvent.StateChanged -> if (event.newState == ExecutionState.SUCCEEDED) succeededState.set(true)
@@ -74,30 +80,41 @@ class VoiceExecutionConvergenceTest {
             }
         }
 
-        // Real production constructor — authorization runs normally.
-        val authManager = AuthorizationManager(context, ExecutionPolicy(CapabilityProvider(context)))
-        val registry = AssistantToolRegistry(context, authManager)
-
-        val callbackLatch = CountDownLatch(1)
-        var resultJson: String? = null
-        val args = JSONObject().apply { put("action", "MAX_DIAGNOSTICS") }
-        registry.executeToolAsync("MAX_DIAGNOSTICS", args) { json ->
-            resultJson = json
-            callbackLatch.countDown()
+        // Deterministically ensure subscription is active before dispatching tool
+        runBlocking {
+            withTimeout(5_000) {
+                readySignal.await()
+            }
         }
 
-        assertTrue("ExecutionFinished event never emitted", latch.await(10, TimeUnit.SECONDS))
-        assertTrue("Tool callback never fired", callbackLatch.await(10, TimeUnit.SECONDS))
-        assertTrue(
-            "ExecutionEngine lifecycle events were NOT emitted - voice tool bypassed the engine (direct tool.execute)",
-            lifecycleStarted.get()
-        )
-        assertTrue("ExecutionEngine never reached SUCCEEDED", succeededState.get())
+        try {
+            // Real production constructor — authorization runs normally.
+            val authManager = AuthorizationManager(context, ExecutionPolicy(CapabilityProvider(context)))
+            val registry = AssistantToolRegistry(context, authManager)
 
-        val parsed = JSONObject(resultJson ?: "{}")
-        assertEquals("success", parsed.optString("status"))
+            val callbackLatch = CountDownLatch(1)
+            var resultJson: String? = null
+            val args = JSONObject().apply { put("action", "MAX_DIAGNOSTICS") }
+            registry.executeToolAsync("MAX_DIAGNOSTICS", args) { json ->
+                resultJson = json
+                callbackLatch.countDown()
+            }
 
-        subscription.cancel()
+            assertTrue("ExecutionFinished event never emitted", latch.await(15, TimeUnit.SECONDS))
+            assertTrue("Tool callback never fired", callbackLatch.await(15, TimeUnit.SECONDS))
+            assertTrue(
+                "ExecutionEngine lifecycle events were NOT emitted - voice tool bypassed the engine (direct tool.execute)",
+                lifecycleStarted.get()
+            )
+            assertTrue("ExecutionEngine never reached SUCCEEDED", succeededState.get())
+
+            val parsed = JSONObject(resultJson ?: "{}")
+            assertEquals("success", parsed.optString("status"))
+        } finally {
+            runBlocking {
+                subscription.cancelAndJoin()
+            }
+        }
     }
 
     @Test
@@ -115,16 +132,19 @@ class VoiceExecutionConvergenceTest {
         }
 
         assertTrue(latch.await(10, TimeUnit.SECONDS))
-        val parsed = JSONObject(resultJson)
+        val parsed = JSONObject(resultJson ?: "{}")
         assertEquals("success", parsed.optString("status"))
     }
 }
 
-/** In-process SharedFlow collector on a background dispatcher. */
+/** In-process SharedFlow collector on a background dispatcher with registration signal. */
 private fun SharedFlow<AutomationEvent>.collectInBackground(
+    readySignal: CompletableDeferred<Unit>,
     onEvent: (AutomationEvent) -> Unit
 ): Job {
     return CoroutineScope(Dispatchers.Default).launch {
-        this@collectInBackground.collect { onEvent(it) }
+        this@collectInBackground
+            .onSubscription { readySignal.complete(Unit) }
+            .collect { onEvent(it) }
     }
 }

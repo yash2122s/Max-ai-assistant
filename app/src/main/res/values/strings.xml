@@ -1,4 +1,5 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
     <string name="app_name">MAX Ai Agent</string>
-<string name="accessibility_service_description">MAX Automation Service</string></resources>
+    <string name="accessibility_service_description">MAX uses the Accessibility Service API strictly to perform user-requested device automation tasks (such as clicking buttons, scrolling, entering text, navigating apps, and answering/rejecting calls via voice commands). MAX never collects, stores, or transmits your personal data or keystrokes.</string>
+</resources>

@@ -22,6 +22,7 @@ import re
 import sys
 import time
 import traceback
+from typing import Dict, Any, Optional, List, Union
 
 from google import genai
 from google.genai import types
@@ -93,7 +94,7 @@ class RealtimeVoiceSession:
         self.tools = tool_registry
         self.audio_capture = AudioCapture()
         self.audio_player = AudioPlayer()
-        self.voice_gate = VoiceInputGate()
+        self.voice_gate = VoiceInputGate(defer_model_load=True)
         if hasattr(self.audio_player, "set_voice_gate"):
             self.audio_player.set_voice_gate(self.voice_gate)
         if hasattr(self.audio_player, "set_realtime_session"):
@@ -102,7 +103,7 @@ class RealtimeVoiceSession:
             self.audio_player.set_gemini_session(self)
         if hasattr(self.tools, "set_voice_gate"):
             self.tools.set_voice_gate(self.voice_gate)
-        
+
         self._client: genai.Client | None = None
         self._session = None
         self._running = False
@@ -113,6 +114,20 @@ class RealtimeVoiceSession:
         self._is_printing_assistant = False
         self._is_first_connect = True
         self._latest_resumption_handle: str | None = None
+        self._voice_turn_count: int = 0
+
+    async def initialize_vosk_background(self):
+        """Asynchronously initialize the Vosk model in a background thread."""
+        from core.readiness import readiness
+        from core.startup_profiler import profiler
+        try:
+            await asyncio.to_thread(self.voice_gate.ensure_model_loaded)
+            readiness.set_voice_ready()
+            profiler.mark("VOSK_READY")
+            safe_print("  🎙️  Voice (Vosk): READY")
+        except Exception as exc:
+            readiness.set_voice_error(str(exc))
+            logger.exception(f"Vosk background initialization failed: {exc}")
 
     @property
     def latest_resumption_handle(self) -> str | None:
@@ -197,9 +212,18 @@ class RealtimeVoiceSession:
                 try:
                     self._client = genai.Client(api_key=GEMINI_API_KEY)
                     await self._run_session()
+                except (asyncio.CancelledError, KeyboardInterrupt):
+                    self._running = False
+                    break
                 except Exception as e:
                     if not self._running:
                         break
+                    try:
+                        from core.readiness import readiness
+                        if not readiness.gemini.is_set():
+                            readiness.set_gemini_error(str(e))
+                    except Exception:
+                        pass
                     err_str = str(e)
                     if self._latest_resumption_handle is not None and any(
                         k in err_str.lower() for k in ("resum", "handle", "invalid_argument", "not_found")
@@ -209,7 +233,21 @@ class RealtimeVoiceSession:
                     logger.info(f"Realtime voice session reconnecting: {e}")
                     await self._handle_reconnect()
         finally:
-            # Guaranteed audio cleanup on any exit
+            # Guaranteed async and audio cleanup on any exit
+            if self._client is not None:
+                try:
+                    if hasattr(self._client, "aio") and hasattr(self._client.aio, "aclose"):
+                        await self._client.aio.aclose()
+                    elif hasattr(self._client, "close"):
+                        self._client.close()
+                except Exception:
+                    pass
+                self._client = None
+            try:
+                if hasattr(self.voice_gate, "close"):
+                    self.voice_gate.close()
+            except Exception:
+                pass
             try:
                 self.audio_capture.stop()
             except Exception:
@@ -339,13 +377,24 @@ class RealtimeVoiceSession:
             self._consecutive_failures = 0
             
             logger.info(f"🔌 Realtime voice connection established ({GEMINI_MODEL}) [Standby: WAKE_WORD_LISTENING]")
+            try:
+                from core.readiness import readiness
+                readiness.set_gemini_ready()
+            except Exception:
+                pass
+            try:
+                from core.startup_profiler import profiler
+                profiler.mark("GEMINI_REALTIME_READY")
+            except Exception:
+                pass
+            safe_print(f"  🔌 Gemini Live ({GEMINI_MODEL}): READY")
+            try:
+                from core.memory_diagnostics import memory_diagnostics
+                memory_diagnostics.record_checkpoint("after realtime voice initialization")
+            except Exception:
+                pass
             if self._is_first_connect:
-                safe_print("\n" + "=" * 60)
-                safe_print("✨ MAX is online and waiting for wake word!")
-                safe_print("   👂 Say 'Hey MAX' to activate voice conversation")
-                safe_print("   💬 Or type text below & press Enter")
-                safe_print("   Type 'exit' or press Ctrl+C to shutdown.")
-                safe_print("=" * 60 + "\n")
+                safe_print("✨ Realtime Voice: Session ready and waiting for wake word.")
                 self._is_first_connect = False
             
             # Manage audio send, text send, and receive loops with structured TaskGroup
@@ -405,6 +454,17 @@ class RealtimeVoiceSession:
                     print("\n🛑 Shutdown requested via text command.")
                     self.stop()
                     break
+                elif user_text.lower() in ("esc", "stop", "cancel", "interrupt"):
+                    print("\n🛑 Interrupted (speech, audio, and tasks cancelled).")
+                    if hasattr(self, "audio_player") and self.audio_player:
+                        self.audio_player.interrupt()
+                    try:
+                        from orchestrator.max_task_authority import max_task_authority
+                        max_task_authority.cancel_active_task(reason="User console interrupt")
+                    except Exception:
+                        pass
+                    self.voice_gate.transition_to(VoiceState.IDLE)
+                    continue
                 elif user_text.lower() in ("sleep", "standby", "mute"):
                     self.voice_gate.go_to_sleep()
                     continue
@@ -455,30 +515,72 @@ class RealtimeVoiceSession:
                     logger.error(f"Text send error: {e}")
                 await asyncio.sleep(0.5)
 
+    def get_realtime_status(self) -> Dict[str, Any]:
+        """Returns structured dictionary of realtime voice components and statuses."""
+        mic_active = (
+            getattr(self.audio_capture, "has_active_stream", False)
+            or getattr(self.audio_capture, "is_running", False)
+        )
+        ws_connected = self._is_session_alive(self._session) if self._session is not None else False
+        state_val = getattr(self.voice_gate.state, "value", str(self.voice_gate.state))
+        send_loop = getattr(self, "_is_send_audio_running", False)
+        recv_loop = getattr(self, "_is_receive_loop_running", False)
+        input_ready = (state_val in ("live_conversation", "command_listening"))
+        return {
+            "state": state_val,
+            "mic_active": mic_active,
+            "audio_send_loop": send_loop,
+            "audio_receive_loop": recv_loop,
+            "ws_connected": ws_connected,
+            "input_ready": input_ready,
+        }
+
+    def _log_realtime_voice_state(self, prefix: str = ""):
+        """Logs structured [REALTIME_VOICE] diagnostic telemetry."""
+        status = self.get_realtime_status()
+        pfx = f"{prefix} " if prefix else ""
+        logger.info(
+            f"[REALTIME_VOICE] {pfx}state={status['state']} mic_active={status['mic_active']} "
+            f"audio_send_loop={status['audio_send_loop']} audio_receive_loop={status['audio_receive_loop']} "
+            f"ws_connected={status['ws_connected']} input_ready={status['input_ready']}"
+        )
+
     async def _send_audio_loop(self, session):
         """Continuously stream microphone audio to Realtime Voice backend."""
         logger.info("🎤 Audio send loop started")
-        
-        while self._running:
-            try:
-                # Check if an inline command was extracted from wake-word utterance
-                if self.voice_gate.pending_text_command:
-                    cmd_text = self.voice_gate.pending_text_command
-                    self.voice_gate.pending_text_command = None
-                    logger.info(f"🚀 Dispatching inline command: '{cmd_text}'")
-                    if hasattr(session, "send_client_content"):
-                        await session.send_client_content(
-                            turns=[
-                                types.Content(
-                                    role="user",
-                                    parts=[types.Part(text=cmd_text)],
-                                )
-                            ],
-                            turn_complete=True,
-                        )
-                    else:
-                        await session.send(
-                            input=types.LiveClientContent(
+        self._is_send_audio_running = True
+        self._last_speech_log_time = 0.0
+        self._last_realtime_status_log = 0.0
+
+        # Wait gate: Ensure local Voice (Vosk) engine has completed background loading
+        try:
+            from core.readiness import readiness
+            if not readiness.is_ready("voice"):
+                logger.info("⏳ Waiting for local Voice (Vosk) engine to finish background loading...")
+                safe_print("⏳ Voice subsystem initializing — awaiting readiness gate...")
+                await readiness.wait_for("voice")
+            if not readiness.is_ready("voice"):
+                logger.warning("Voice wake-word detector is not ready (status: %s).", readiness.get("voice"))
+                safe_print(f"⚠️ Voice wake-word detector unavailable (status: {readiness.get('voice')}). Text commands active.")
+        except Exception:
+            pass
+
+        try:
+            while self._running:
+                try:
+                    now = time.time()
+                    if (now - self._last_realtime_status_log) >= 5.0:
+                        self._last_realtime_status_log = now
+                        self._log_realtime_voice_state()
+                        self.voice_gate.verify_live_conversation_invariant(self)
+
+                    # Check if an inline command was extracted from wake-word utterance
+                    if self.voice_gate.pending_text_command:
+                        cmd_text = self.voice_gate.pending_text_command
+                        self.voice_gate.pending_text_command = None
+                        logger.info(f"🚀 Dispatching inline command: '{cmd_text}'")
+                        if hasattr(session, "send_client_content"):
+                            await session.send_client_content(
                                 turns=[
                                     types.Content(
                                         role="user",
@@ -487,46 +589,65 @@ class RealtimeVoiceSession:
                                 ],
                                 turn_complete=True,
                             )
-                        )
-                    continue
+                        else:
+                            await session.send(
+                                input=types.LiveClientContent(
+                                    turns=[
+                                        types.Content(
+                                            role="user",
+                                            parts=[types.Part(text=cmd_text)],
+                                        )
+                                    ],
+                                    turn_complete=True,
+                                )
+                            )
+                        continue
 
-                # Get audio chunk from microphone queue
-                audio_data = await asyncio.wait_for(
-                    self.audio_capture.queue.get(),
-                    timeout=0.1,
-                )
-                
-                # Check with VoiceInputGate if speech is permitted to transmit
-                should_transmit = self.voice_gate.process_audio_chunk(audio_data)
-                if not should_transmit:
-                    continue
-
-                # Send raw PCM audio using canonical supported audio API
-                chunk = types.Blob(
-                    data=audio_data,
-                    mime_type=f"audio/pcm;rate={INPUT_SAMPLE_RATE}",
-                )
-                if hasattr(session, "send_realtime_input"):
-                    await session.send_realtime_input(audio=chunk)
-                else:
-                    await session.send(
-                        input=types.LiveClientRealtimeInput(audio=chunk)
+                    # Get audio chunk from microphone queue
+                    audio_data = await asyncio.wait_for(
+                        self.audio_capture.queue.get(),
+                        timeout=0.1,
                     )
-                logger.debug(
-                    "📤 Audio packet forwarded: format=audio/pcm;rate=%d size=%d bytes",
-                    INPUT_SAMPLE_RATE,
-                    len(audio_data),
-                )
+                    
+                    # Check with VoiceInputGate if speech is permitted to transmit
+                    should_transmit = self.voice_gate.process_audio_chunk(audio_data)
+                    if not should_transmit:
+                        continue
 
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                err_str = str(e)
-                if "1000" in err_str or "closed" in err_str.lower():
-                    break
-                if self._running:
-                    logger.debug(f"Audio chunk send warning: {e}")
-                await asyncio.sleep(0.05)
+                    # Log throttled user speech start for diagnostics
+                    if (now - self._last_speech_log_time) >= 1.5:
+                        self._last_speech_log_time = now
+                        rms = self.voice_gate.calculate_rms(audio_data)
+                        logger.info(f"[VOICE_INPUT] audio_packet_received rms={rms:.0f} size={len(audio_data)}")
+
+                    # Send raw PCM audio using canonical supported audio API
+                    chunk = types.Blob(
+                        data=audio_data,
+                        mime_type=f"audio/pcm;rate={INPUT_SAMPLE_RATE}",
+                    )
+                    if hasattr(session, "send_realtime_input"):
+                        await session.send_realtime_input(audio=chunk)
+                    else:
+                        await session.send(
+                            input=types.LiveClientRealtimeInput(audio=chunk)
+                        )
+                    logger.debug(
+                        "📤 Audio packet forwarded: format=audio/pcm;rate=%d size=%d bytes",
+                        INPUT_SAMPLE_RATE,
+                        len(audio_data),
+                    )
+
+                except asyncio.TimeoutError:
+                    continue
+                except Exception as e:
+                    err_str = str(e)
+                    if "1000" in err_str or "closed" in err_str.lower():
+                        break
+                    if self._running:
+                        logger.debug(f"Audio chunk send warning: {e}")
+                    await asyncio.sleep(0.05)
+        finally:
+            self._is_send_audio_running = False
 
     async def _receive_loop(self, session):
         """
@@ -534,160 +655,178 @@ class RealtimeVoiceSession:
         Keeps running for the entire lifespan of the Live session.
         """
         logger.info("📥 Realtime receive loop started")
+        self._is_receive_loop_running = True
         self._session_active = True
         self._last_active_time = time.monotonic()
         
-        while self._running and self._is_session_alive(session):
-            try:
-                async for response in session.receive():
-                    if not self._running:
-                        break
-                    self._session_active = True
-                    self._last_active_time = time.monotonic()
-                    
-                    server_content = response.server_content
-                    tool_call = response.tool_call
-                    
-                    # Capture session resumption updates if provided by server
-                    if getattr(response, "session_resumption_update", None):
-                        ru = response.session_resumption_update
-                        if getattr(ru, "resumable", False) and getattr(ru, "new_handle", None):
-                            if self._latest_resumption_handle is None:
-                                logger.info("Session resumption armed")
-                            self._latest_resumption_handle = ru.new_handle
-                            logger.debug(f"Stored session resumption handle: {ru.new_handle[:8]}... (resumable={ru.resumable})")
+        try:
+            while self._running and self._is_session_alive(session):
+                try:
+                    async for response in session.receive():
+                        if not self._running:
+                            break
+                        self._session_active = True
+                        self._last_active_time = time.monotonic()
+                        
+                        server_content = response.server_content
+                        tool_call = response.tool_call
+                        
+                        # Capture session resumption updates if provided by server
+                        if getattr(response, "session_resumption_update", None):
+                            ru = response.session_resumption_update
+                            if getattr(ru, "resumable", False) and getattr(ru, "new_handle", None):
+                                if self._latest_resumption_handle is None:
+                                    logger.info("Session resumption armed")
+                                self._latest_resumption_handle = ru.new_handle
+                                logger.debug(f"Stored session resumption handle: {ru.new_handle[:8]}... (resumable={ru.resumable})")
 
-                    # ── Handle audio + text responses ───────────────────────
-                    if server_content:
-                        if server_content.interrupted:
-                            # Barge-in detected — user started speaking
-                            self.audio_player.interrupt()
-                            if self._is_printing_assistant:
-                                safe_print()
-                                self._is_printing_assistant = False
-                            logger.debug("🔇 Barge-in: playback interrupted")
-                            continue
-                        
-                        if server_content.model_turn:
-                            for part in server_content.model_turn.parts:
-                                # Assistant Audio response
-                                if part.inline_data:
-                                    self.voice_gate.on_assistant_speaking_started()
-                                    if hasattr(self.audio_player, "ensure_stream_ready"):
-                                        self.audio_player.ensure_stream_ready()
-                                    self.audio_player.resume()
-                                    self.audio_player.play_chunk(part.inline_data.data)
-                        
-                        # Check for input transcription (what the user said)
-                        if server_content.input_transcription:
-                            text = server_content.input_transcription.text
-                            if text and text.strip():
-                                self.voice_gate.notify_user_activity()
-                                try:
-                                    from core.vision_coordinator import vision_coordinator
-                                    vision_coordinator.reset_turn()
-                                except Exception:
-                                    pass
+                        # ── Handle audio + text responses ───────────────────────
+                        if server_content:
+                            if server_content.interrupted:
+                                # Barge-in detected — user started speaking
+                                self.audio_player.interrupt()
+                                self.voice_gate.transition_to(VoiceState.LIVE_CONVERSATION)
                                 if self._is_printing_assistant:
                                     safe_print()
                                     self._is_printing_assistant = False
-                                safe_print(f"\n🗣️  You: {text}")
+                                logger.info("🔇 [REALTIME_VOICE] Barge-in detected: playback interrupted, returned to LIVE_CONVERSATION")
+                                continue
+                            
+                            if server_content.model_turn:
+                                for part in server_content.model_turn.parts:
+                                    # Assistant Audio response
+                                    if part.inline_data:
+                                        self.voice_gate.on_assistant_speaking_started()
+                                        if hasattr(self.audio_player, "ensure_stream_ready"):
+                                            self.audio_player.ensure_stream_ready()
+                                        self.audio_player.resume()
+                                        self.audio_player.play_chunk(part.inline_data.data)
+                            
+                            # Check for input transcription (what the user said)
+                            if server_content.input_transcription:
+                                text = server_content.input_transcription.text
+                                if text and text.strip():
+                                    self.voice_gate.notify_user_activity()
+                                    logger.info(f"[VOICE_INPUT] transcript_received text=\"{text.strip()}\"")
+                                    try:
+                                        from core.vision_coordinator import vision_coordinator
+                                        vision_coordinator.reset_turn()
+                                    except Exception:
+                                        pass
+                                    if self._is_printing_assistant:
+                                        safe_print()
+                                        self._is_printing_assistant = False
+                                    safe_print(f"\n🗣️  You: {text}")
 
-                                # Publish user transcript to EventBus for overlay
-                                try:
-                                    from server.event_bus import event_bus
-                                    from protocol.event_types import EventType
-                                    event_bus.publish(EventType.TRANSCRIPT_USER, {"text": text})
-                                except Exception:
-                                    pass
-                                
-                                # Check if user asked to sleep / standby
-                                text_lower = text.strip().lower()
-                                if any(p in text_lower for p in self.voice_gate.SLEEP_PHRASES):
-                                    self.voice_gate.go_to_sleep()
+                                    # Publish user transcript to EventBus for overlay
+                                    try:
+                                        from server.event_bus import event_bus
+                                        from protocol.event_types import EventType
+                                        event_bus.publish(EventType.TRANSCRIPT_USER, {"text": text})
+                                    except Exception:
+                                        pass
+                                    
+                                    # Check if user asked to sleep / standby
+                                    text_lower = text.strip().lower()
+                                    if any(p in text_lower for p in self.voice_gate.SLEEP_PHRASES):
+                                        self.voice_gate.go_to_sleep()
 
-                                # Check for explicit task cancellation command
-                                EXPLICIT_CANCEL_PHRASES = (
-                                    "stop", "stop the task", "cancel that", "cancel the task", "abort",
-                                    "stop task", "cancel task", "stop execution", "cancel execution"
-                                )
-                                if any(text_lower == p or text_lower == f"{p} please" for p in EXPLICIT_CANCEL_PHRASES):
+                                    # Check for explicit task cancellation command
+                                    EXPLICIT_CANCEL_PHRASES = (
+                                        "stop", "stop the task", "cancel that", "cancel the task", "abort",
+                                        "stop task", "cancel task", "stop execution", "cancel execution"
+                                    )
+                                    if any(text_lower == p or text_lower == f"{p} please" for p in EXPLICIT_CANCEL_PHRASES):
+                                        from orchestrator.max_task_authority import max_task_authority
+                                        cancel_res = max_task_authority.cancel_active_task(reason=f"User voice cancellation: '{text}'")
+                                        if cancel_res.get("success"):
+                                            safe_print(f"🛑 {cancel_res['message']}")
+
+                                    # Check for confirmation of pending dangerous tool, MCP/ComputerUse gate, or Task Authority task
                                     from orchestrator.max_task_authority import max_task_authority
-                                    cancel_res = max_task_authority.cancel_active_task(reason=f"User voice cancellation: '{text}'")
-                                    if cancel_res.get("success"):
-                                        safe_print(f"🛑 {cancel_res['message']}")
+                                    from core.confirmation_gate import confirmation_gate
+                                    if self.tools.has_pending_confirmation or max_task_authority.has_pending_confirmation or confirmation_gate.has_pending:
+                                        await self._handle_confirmation(session, text.strip().lower())
+                            
+                            # Output transcription (what MAX said — streamed on single line)
+                            if server_content.output_transcription:
+                                text = server_content.output_transcription.text
+                                if text:
+                                    if not self._is_printing_assistant:
+                                        safe_print("\n✨ MAX: ", end="", flush=True)
+                                        self._is_printing_assistant = True
+                                    safe_print(text, end="", flush=True)
 
-                                # Check for confirmation of pending dangerous tool or Task Authority task
-                                from orchestrator.max_task_authority import max_task_authority
-                                if self.tools.has_pending_confirmation or max_task_authority.has_pending_confirmation:
-                                    await self._handle_confirmation(session, text.strip().lower())
-                        
-                        # Output transcription (what MAX said — streamed on single line)
-                        if server_content.output_transcription:
-                            text = server_content.output_transcription.text
-                            if text:
-                                if not self._is_printing_assistant:
-                                    safe_print("\n✨ MAX: ", end="", flush=True)
-                                    self._is_printing_assistant = True
-                                safe_print(text, end="", flush=True)
+                                    # Publish assistant transcript fragment to EventBus for overlay
+                                    try:
+                                        from server.event_bus import event_bus
+                                        from protocol.event_types import EventType
+                                        event_bus.publish(EventType.TRANSCRIPT_ASSISTANT, {"text": text})
+                                    except Exception:
+                                        pass
+                            
+                            if server_content.turn_complete:
+                                self.audio_player.flush()
+                                if not self.audio_player.is_playing:
+                                    self.voice_gate.on_assistant_speaking_finished()
+                                if self._is_printing_assistant:
+                                    safe_print()
+                                    self._is_printing_assistant = False
+                                self._voice_turn_count += 1
+                                if self._voice_turn_count == 5:
+                                    try:
+                                        from core.memory_diagnostics import memory_diagnostics
+                                        memory_diagnostics.record_checkpoint("after 5 voice turns")
+                                    except Exception:
+                                        pass
+                                logger.debug("Turn complete — assistant speech flushed, awaiting hardware playback finish.")
 
-                                # Publish assistant transcript fragment to EventBus for overlay
-                                try:
-                                    from server.event_bus import event_bus
-                                    from protocol.event_types import EventType
-                                    event_bus.publish(EventType.TRANSCRIPT_ASSISTANT, {"text": text})
-                                except Exception:
-                                    pass
-                        
-                        if server_content.turn_complete:
-                            self.audio_player.flush()
-                            self.voice_gate.on_assistant_speaking_finished()
+                        # ── Handle tool calls ───────────────────────────────────
+                        if tool_call:
                             if self._is_printing_assistant:
                                 safe_print()
                                 self._is_printing_assistant = False
-                            logger.debug("Turn complete — entered cooldown, returning to live conversation.")
+                            await self._handle_tool_calls(session, tool_call)
 
-                    # ── Handle tool calls ───────────────────────────────────
-                    if tool_call:
-                        if self._is_printing_assistant:
-                            safe_print()
-                            self._is_printing_assistant = False
-                        await self._handle_tool_calls(session, tool_call)
+                    if not self._is_session_alive(session):
+                        break
 
-                if not self._is_session_alive(session):
-                    break
-
-            except Exception as e:
-                err_str = str(e).lower()
-                is_disconnect = (
-                    not self._is_session_alive(session)
-                    or isinstance(e, (ConnectionResetError, ConnectionError, BrokenPipeError))
-                    or any(k in err_str for k in ("1000", "1006", "closed", "connection lost", "disconnected", "eof"))
-                )
-                if is_disconnect:
-                    logger.info(f"Realtime voice connection terminated: {e}")
-                    raise
-                if self._running:
-                    logger.warning(f"Recoverable receive warning in turn: {e}")
-                    await asyncio.sleep(0.1)
+                except Exception as e:
+                    err_str = str(e).lower()
+                    is_disconnect = (
+                        not self._is_session_alive(session)
+                        or isinstance(e, (ConnectionResetError, ConnectionError, BrokenPipeError))
+                        or any(k in err_str for k in ("1000", "1006", "closed", "connection lost", "disconnected", "eof"))
+                    )
+                    if is_disconnect:
+                        logger.info(f"Realtime voice connection terminated: {e}")
+                        raise
+                    if self._running:
+                        logger.warning(f"Recoverable receive warning in turn: {e}")
+                        await asyncio.sleep(0.1)
+        finally:
+            self._is_receive_loop_running = False
 
     async def _handle_tool_calls(self, session, tool_call):
         """Process tool calls from Realtime Voice and send results back."""
         function_responses = []
         
         for fc in tool_call.function_calls:
-            logger.info(f"🔧 Tool call: {fc.name}({json.dumps(fc.args, default=str) if fc.args else '{}'})")
-            safe_print(f"\n⚙️  Executing: {fc.name}({json.dumps(fc.args, default=str) if fc.args else ''})")
+            args = dict(fc.args) if fc.args else {}
+            logger.info(f"[VOICE_TOOL_BOUNDARY] before_tool tool={fc.name} args={json.dumps(args, default=str)}")
+            logger.info(f"🔧 Tool call: {fc.name}({json.dumps(args, default=str)})")
+            safe_print(f"\n⚙️  Executing: {fc.name}({json.dumps(args, default=str) if args else ''})")
             
+            tool_start_t = time.time()
+
             # Two-Phase Vision Acknowledgement
             try:
                 from core.vision_coordinator import vision_coordinator
-                vision_coordinator.acknowledge_if_vision_task(fc.name, dict(fc.args) if fc.args else {})
+                vision_coordinator.acknowledge_if_vision_task(fc.name, args)
             except Exception as ex:
                 logger.debug(f"Vision coordinator acknowledgement notice: {ex}")
 
             # Primary Execution Authority: Route through MaxOrchestrator
-            args = dict(fc.args) if fc.args else {}
             orchestrator_available = False
             try:
                 from core.max_orchestrator import max_orchestrator, MaxAgentRequest
@@ -720,6 +859,11 @@ class RealtimeVoiceSession:
             if not isinstance(result, dict):
                 result = {"status": "ok", "result": result}
             
+            dur_ms = int((time.time() - tool_start_t) * 1000)
+            logger.info(
+                f"[VOICE_TOOL_BOUNDARY] after_tool tool={fc.name} duration_ms={dur_ms} "
+                f"status={result.get('status')} verified={result.get('verified', result.get('action_execution_verified', True))}"
+            )
             logger.info(f"📤 Tool result: {json.dumps(result, default=str)[:200]}")
             
             if result.get("status") == "awaiting_confirmation":
@@ -752,10 +896,13 @@ class RealtimeVoiceSession:
         is_cancel = normalized in CANCEL_PHRASES
         
         from orchestrator.max_task_authority import max_task_authority
+        from core.confirmation_gate import confirmation_gate
 
         if is_confirm:
             if self.tools.has_pending_confirmation:
                 result = self.tools.confirm_pending()
+            elif confirmation_gate.has_pending:
+                result = confirmation_gate.confirm_latest_pending(approved=True)
             elif max_task_authority.has_pending_confirmation:
                 result = max_task_authority.confirm_active_task(approved=True)
             else:
@@ -778,6 +925,8 @@ class RealtimeVoiceSession:
         elif is_cancel:
             if self.tools.has_pending_confirmation:
                 result = self.tools.cancel_pending()
+            elif confirmation_gate.has_pending:
+                result = confirmation_gate.confirm_latest_pending(approved=False)
             elif max_task_authority.has_pending_confirmation:
                 result = max_task_authority.confirm_active_task(approved=False)
             else:
@@ -822,9 +971,95 @@ class RealtimeVoiceSession:
         )
         await asyncio.sleep(total_delay)
 
+    async def aclose(self):
+        """Asynchronously stops the session, cleanly closes websocket and awaits GenAI client aclose."""
+        self._running = False
+        logger.info("🛑 MAX Realtime Voice session stopping (async)...")
+
+        # 1. Close active Live session if open
+        if self._session is not None:
+            try:
+                if hasattr(self._session, "close"):
+                    await self._session.close()
+            except Exception as se:
+                logger.debug(f"Live session close notice: {se}")
+            self._session = None
+
+        # 2. Await GenAI AsyncClient cleanup
+        if self._client is not None:
+            try:
+                if hasattr(self._client, "aio") and hasattr(self._client.aio, "aclose"):
+                    await self._client.aio.aclose()
+                elif hasattr(self._client, "close"):
+                    self._client.close()
+            except Exception as ce:
+                logger.debug(f"GenAI client aclose notice: {ce}")
+            self._client = None
+
+        # 3. Cleanly close voice gate
+        if hasattr(self.voice_gate, "close"):
+            try:
+                self.voice_gate.close()
+            except Exception:
+                pass
+
+        # 4. Stop audio I/O
+        try:
+            self.audio_capture.stop()
+        except Exception:
+            pass
+        try:
+            self.audio_player.stop()
+        except Exception:
+            pass
+        try:
+            terminate_shared_pyaudio()
+        except Exception:
+            pass
+        logger.info("✅ MAX Realtime Voice session cleanly closed")
+
+    async def send_text_message(self, text: str, timeout: float = 10.0) -> bool:
+        """
+        Sends text message to active Gemini Live session with readiness gate.
+        Returns True if sent, False if Gemini is not ready or unavailable.
+        """
+        from core.readiness import readiness
+        if not readiness.is_ready("gemini"):
+            logger.info("⏳ Waiting for Gemini Live connection before sending text...")
+            try:
+                await readiness.wait_for("gemini", timeout=timeout)
+            except asyncio.TimeoutError:
+                logger.warning("Gemini Live connection wait timed out.")
+                return False
+
+        if not readiness.is_ready("gemini") or self._session is None:
+            logger.warning("Gemini Live session unavailable (status: %s)", readiness.get("gemini"))
+            return False
+
+        try:
+            if hasattr(self._session, "send_client_content"):
+                await self._session.send_client_content(
+                    turns=[
+                        types.Content(
+                            role="user",
+                            parts=[types.Part(text=text)],
+                        )
+                    ],
+                    turn_complete=True,
+                )
+                return True
+        except Exception as e:
+            logger.error("Failed to send text message to Gemini: %s", e)
+            return False
+
     def stop(self):
         """Signal the session to stop. Idempotent and thread-safe."""
         self._running = False
+        if hasattr(self.voice_gate, "close"):
+            try:
+                self.voice_gate.close()
+            except Exception:
+                pass
         self.audio_capture.stop()
         self.audio_player.stop()
         terminate_shared_pyaudio()

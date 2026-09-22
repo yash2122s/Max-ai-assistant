@@ -1,24 +1,105 @@
-"""
-JARVIS Web Tools
-Browser actions, web search, weather, news.
-"""
-
 import os
+import time
+import logging
 import webbrowser
 import urllib.parse
 import datetime
 import requests
+import pyautogui
+import pyperclip
+
+from tools.app_control import _find_windows_for_app, activate_app_window
+
+logger = logging.getLogger("MAXWindowsAgent.WebTools")
+
+
+def find_existing_youtube_context() -> dict:
+    """
+    Finds existing YouTube context across browser layers with strict priority:
+    1. Active Playwright/CDP browser context (if active page is youtube.com)
+    2. Open Desktop Browser Window containing 'YouTube' in active window title
+    3. Deep UIA tab inspection for background tabs containing 'YouTube' across open browsers
+    
+    Returns structured context dict if found, else None.
+    """
+    try:
+        # Tier 1: Check active Playwright/CDP browser context
+        try:
+            from core.browser_automation import browser_manager
+            if browser_manager._active_page and hasattr(browser_manager._active_page, "url"):
+                page_url = browser_manager._active_page.url or ""
+                if "youtube.com" in page_url:
+                    return {
+                        "type": "playwright_cdp",
+                        "url": page_url,
+                        "is_active_tab": True,
+                        "description": "Playwright/CDP active page"
+                    }
+        except Exception:
+            pass
+
+        # Tier 2: Check open desktop browser windows with YouTube in active window title
+        browser_names = ["chrome", "msedge", "brave", "firefox", "opera", "vivaldi"]
+        for b_name in browser_names:
+            wins = _find_windows_for_app(b_name)
+            for w in wins:
+                title = w.get("title", "")
+                if "youtube" in title.lower():
+                    return {
+                        "type": "browser_window",
+                        "hwnd": w["hwnd"],
+                        "pid": w.get("pid", 0),
+                        "title": title,
+                        "process_name": w.get("process_name", b_name),
+                        "is_active_tab": True,
+                        "description": f"Active window '{title}'"
+                    }
+
+        # Tier 3: Deep UIA Tab Inspection across open browser windows
+        try:
+            from core.ui_automation import uia_engine
+            if uia_engine.is_available:
+                for b_name in browser_names:
+                    wins = _find_windows_for_app(b_name)
+                    for w in wins:
+                        hwnd = w["hwnd"]
+                        if not hwnd:
+                            continue
+                        root = uia_engine._uia.ElementFromHandle(hwnd)
+                        if root:
+                            tab_matches = uia_engine.find_elements_by_name(root, "YouTube", partial=True, max_results=3)
+                            for match in tab_matches:
+                                ctrl_type = match.get("control_type", "").lower()
+                                if "tab" in ctrl_type or "item" in ctrl_type or "button" in ctrl_type or "youtube" in (match.get("name") or "").lower():
+                                    return {
+                                        "type": "browser_tab_uia",
+                                        "hwnd": hwnd,
+                                        "pid": w.get("pid", 0),
+                                        "title": match.get("name", "YouTube"),
+                                        "process_name": w.get("process_name", b_name),
+                                        "is_active_tab": False,
+                                        "element": match,
+                                        "description": f"Browser tab '{match.get('name')}' in {b_name}"
+                                    }
+        except Exception as e:
+            logger.debug(f"UIA browser tab inspection error: {e}")
+
+    except Exception as e:
+        logger.error(f"Error checking existing YouTube context: {e}")
+
+    return None
 
 
 def open_website(url: str) -> dict:
     """
     Open a URL or configured website shortcut in the default web browser.
+    Reuses existing browser context if the target (e.g. YouTube) is already open.
     
     Args:
         url: The URL or shortcut name (e.g., 'google', 'youtube', 'github', 'https://example.com').
     """
     try:
-        url_clean = url.lower().strip()
+        url_clean = str(url or "").lower().strip()
         target_url = None
         
         # Check config.json urls section
@@ -36,9 +117,29 @@ def open_website(url: str) -> dict:
             target_url = url
             if not target_url.startswith(("http://", "https://")):
                 target_url = "https://" + target_url
-                
+
+        # Check for YouTube context reuse
+        if "youtube.com" in target_url or url_clean in ("youtube", "yt"):
+            yt_ctx = find_existing_youtube_context()
+            if yt_ctx and yt_ctx.get("hwnd"):
+                act_res = activate_app_window(yt_ctx["hwnd"])
+                if act_res.get("verified"):
+                    if yt_ctx.get("type") == "browser_tab_uia" and not yt_ctx.get("is_active_tab"):
+                        try:
+                            from core.ui_automation import uia_engine
+                            uia_engine.click_element_by_selector(target=yt_ctx["title"])
+                        except Exception:
+                            pass
+                    return {
+                        "status": "success",
+                        "message": f"Reused existing YouTube window ('{yt_ctx.get('title', 'YouTube')}').",
+                        "reused_context": True,
+                        "verified": True,
+                        "hwnd": yt_ctx.get("hwnd")
+                    }
+
         webbrowser.open(target_url)
-        return {"status": "success", "message": f"Opened {url} ({target_url})"}
+        return {"status": "success", "message": f"Opened {url} ({target_url})", "reused_context": False, "verified": True}
     except Exception as e:
         return {"status": "error", "message": str(e)}
 
@@ -76,17 +177,77 @@ async def search_web_fast(query: str) -> dict:
 
 def search_youtube(query: str) -> dict:
     """
-    Search YouTube in the default browser.
+    Search YouTube in the browser. Reuses existing YouTube context if already open.
     
     Args:
         query: The search query for YouTube.
     """
     try:
         encoded = urllib.parse.quote_plus(query)
-        url = f"https://www.youtube.com/results?search_query={encoded}"
-        webbrowser.open(url)
-        return {"status": "success", "message": f"Searching YouTube for: {query}"}
+        target_url = f"https://www.youtube.com/results?search_query={encoded}"
+        
+        # 1. Inspect existing browser instances for YouTube context
+        yt_ctx = find_existing_youtube_context()
+        
+        if yt_ctx and yt_ctx.get("hwnd"):
+            logger.info(f"🎯 Reusing existing YouTube context: {yt_ctx.get('description')}")
+            act_res = activate_app_window(yt_ctx["hwnd"], timeout_seconds=2.5)
+            
+            if act_res.get("verified"):
+                # If it's a background tab, click tab to bring it to foreground
+                if yt_ctx.get("type") == "browser_tab_uia" and not yt_ctx.get("is_active_tab"):
+                    try:
+                        from core.ui_automation import uia_engine
+                        uia_engine.click_element_by_selector(target=yt_ctx.get("title", "YouTube"))
+                        time.sleep(0.15)
+                    except Exception:
+                        pass
+                
+                # Navigate existing browser tab directly via address bar (Ctrl+L)
+                pyautogui.FAILSAFE = False
+                pyautogui.hotkey("ctrl", "l")
+                time.sleep(0.08)
+                pyperclip.copy(target_url)
+                pyautogui.hotkey("ctrl", "v")
+                time.sleep(0.05)
+                pyautogui.press("enter")
+                
+                return {
+                    "status": "success",
+                    "message": f"Searching YouTube for: {query} (reusing existing window)",
+                    "reused_context": True,
+                    "verified": True,
+                    "window_title": act_res.get("window_title", ""),
+                    "hwnd": act_res.get("hwnd")
+                }
+
+        # 2. If no existing YouTube context, check if any browser window is already open
+        browser_names = ["chrome", "msedge", "brave", "firefox"]
+        for b_name in browser_names:
+            wins = _find_windows_for_app(b_name)
+            if wins:
+                act_res = activate_app_window(wins[0]["hwnd"], timeout_seconds=2.0)
+                if act_res.get("verified"):
+                    pyautogui.FAILSAFE = False
+                    pyautogui.hotkey("ctrl", "t")
+                    time.sleep(0.1)
+                    pyperclip.copy(target_url)
+                    pyautogui.hotkey("ctrl", "v")
+                    time.sleep(0.05)
+                    pyautogui.press("enter")
+                    return {
+                        "status": "success",
+                        "message": f"Searching YouTube for: {query}",
+                        "reused_context": False,
+                        "verified": True,
+                        "window_title": act_res.get("window_title", "")
+                    }
+
+        # 3. Fallback: Launch default browser
+        webbrowser.open(target_url)
+        return {"status": "success", "message": f"Searching YouTube for: {query}", "reused_context": False, "verified": True}
     except Exception as e:
+        logger.error(f"Error in search_youtube: {e}")
         return {"status": "error", "message": str(e)}
 
 

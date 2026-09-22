@@ -28,11 +28,25 @@ import com.example.ui.theme.*
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
+    onNavigateToSkills: () -> Unit = {},
     viewModel: SettingsViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val scrollState = rememberScrollState()
+
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.checkDefaultAssistantStatus()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -69,8 +83,8 @@ fun SettingsScreen(
                 .padding(horizontal = MaxDimensions.spaceMd, vertical = MaxDimensions.spaceSm),
             verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceLg)
         ) {
-            // Section 1: AI Provider & API Keys
-            SettingsSection(title = "AI Engine & API Keys", icon = Icons.Default.Key) {
+            // Section 1: AI Engine & API Key
+            SettingsSection(title = "AI Engine & API Key", icon = Icons.Default.Key) {
                 MaxTextField(
                     value = uiState.geminiApiKey,
                     onValueChange = { viewModel.updateGeminiApiKey(it) },
@@ -80,74 +94,122 @@ fun SettingsScreen(
                     leadingIcon = { Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaxTextMuted) },
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                MaxTextField(
-                    value = uiState.uiAgentApiKey,
-                    onValueChange = { viewModel.updateUiAgentApiKey(it) },
-                    label = "OpenRouter / UI Agent API Key",
-                    placeholder = "sk-or-v1-...",
-                    isPassword = true,
-                    leadingIcon = { Icon(Icons.Default.Token, contentDescription = null, tint = MaxTextMuted) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
-                ) {
-                    ProviderChoiceChip(
-                        label = "OpenRouter",
-                        isSelected = uiState.uiAgentProvider.equals("openrouter", ignoreCase = true),
-                        onClick = { viewModel.updateUiAgentProvider("openrouter") },
-                        modifier = Modifier.weight(1f)
-                    )
-                    ProviderChoiceChip(
-                        label = "Gemini Fallback",
-                        isSelected = uiState.uiAgentProvider.equals("gemini", ignoreCase = true),
-                        onClick = { viewModel.updateUiAgentProvider("gemini") },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                MaxTextField(
-                    value = uiState.uiAgentModel,
-                    onValueChange = { viewModel.updateUiAgentModel(it) },
-                    label = "UI Agent Model",
-                    placeholder = "stealth/ox-alpha",
-                    leadingIcon = { Icon(Icons.Default.SmartToy, contentDescription = null, tint = MaxTextMuted) },
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
 
-            // Section 2: Gemini Live Voice
-            SettingsSection(title = "Gemini Live Voice", icon = Icons.Default.RecordVoiceOver) {
-                SettingsSwitchRow(
-                    title = "Live Audio Session Mode",
-                    subtitle = "Stream real-time full duplex voice over WebSocket",
-                    isChecked = uiState.isLiveVoiceMode,
-                    onCheckedChange = { viewModel.updateIsLiveVoiceMode(it) }
-                )
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                Text(
-                    text = "Live Voice Persona",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaxTextMuted
-                )
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceXs))
-                val voices = listOf("Aoede", "Kore", "Fenrir", "Puck", "Charon")
+            // Section 1.5: MAX System Assistant
+            SettingsSection(title = "MAX Assistant", icon = Icons.Default.RecordVoiceOver) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceXs)
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    voices.forEach { voice ->
-                        VoiceChip(
-                            voice = voice,
-                            isSelected = uiState.liveVoiceName.equals(voice, ignoreCase = true),
-                            onClick = { viewModel.updateLiveVoiceName(voice) },
-                            modifier = Modifier.weight(1f)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Default Digital Assistant",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaxTextPrimary
+                        )
+                        Text(
+                            text = if (uiState.isDefaultAssistant) "MAX is your active system digital assistant" else "Set MAX as system default assistant",
+                            fontSize = 12.sp,
+                            color = MaxTextMuted
                         )
                     }
+                    Surface(
+                        color = if (uiState.isDefaultAssistant) NeonGreen.copy(alpha = 0.15f) else MaxSurfaceVariant,
+                        shape = RoundedCornerShape(MaxDimensions.radiusSm)
+                    ) {
+                        Text(
+                            text = if (uiState.isDefaultAssistant) "Default" else "Not Default",
+                            color = if (uiState.isDefaultAssistant) NeonGreen else MaxTextSecondary,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+
+                if (!uiState.isDefaultAssistant) {
+                    Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
+                    MaxButton(
+                        text = "Set MAX as Default Assistant",
+                        onClick = {
+                            val intent = com.example.voice.assistant.SystemAssistantManager.createSetDefaultAssistantIntent(context)
+                            context.startActivity(intent)
+                        },
+                        variant = MaxButtonVariant.PRIMARY,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "System Wake Word (\"Hey MAX\")",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaxTextPrimary
+                        )
+                        Text(
+                            text = "System invocation via assist gesture / shortcut active",
+                            fontSize = 12.sp,
+                            color = MaxTextMuted
+                        )
+                    }
+                    Surface(
+                        color = MaxSurfaceVariant,
+                        shape = RoundedCornerShape(MaxDimensions.radiusSm)
+                    ) {
+                        Text(
+                            text = uiState.wakeWordStatus,
+                            color = MaxTextMuted,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+
+            // Section 2: Automation Skills Management
+            SettingsSection(title = "Automation Skills", icon = Icons.Default.Extension) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(MaxDimensions.radiusMd))
+                        .background(MaxSurfaceVariant)
+                        .clickable(onClick = onNavigateToSkills)
+                        .padding(MaxDimensions.spaceMd),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Manage & Import Skills",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaxTextPrimary
+                        )
+                        Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
+                        Text(
+                            text = "Import declarative .json / .md skills, inspect capabilities, and toggle workflows",
+                            fontSize = 12.sp,
+                            color = MaxTextMuted
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = "Open Skills",
+                        tint = MaxPrimary,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
 

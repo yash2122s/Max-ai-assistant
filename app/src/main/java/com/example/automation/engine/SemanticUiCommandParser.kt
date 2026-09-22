@@ -66,8 +66,8 @@ data class SemanticUiCommand(
 object SemanticUiCommandParser {
 
     private val ACTION_VERBS = setOf(
-        "tap", "click", "press", "select", "hit", "touch", "find", "search", "type", "write", "enter", "input",
-        "నొక్కు", "ట్యాప్", "వెతుకు", "రాయి", "టైప్", "శోధించు"
+        "tap", "click", "press", "select", "hit", "touch", "find", "search", "type", "write", "enter", "input", "wait", "pause", "stay", "verify",
+        "నొక్కు", "ట్యాప్", "వెతుకు", "రాయి", "టైప్", "శోధించు", "ఆగు"
     )
 
     // 1. Tanglish / Telugu Compound App Search ("Google maps open chesi Palakollu ane search chey", "YouTube open chesi songs search chey")
@@ -289,7 +289,7 @@ object SemanticUiCommandParser {
      * Preserves exact sequence and duplicate actions.
      */
     private fun parseMultiClauseSequence(input: String): SemanticUiCommand? {
-        val rawClauses = input.split(Regex("(?:,|\\s+(?:then|and then|తర్వాత)\\s+|\\s+(?:and|మరియు|అలాగే)\\s+(?=(?:tap|click|press|select|hit|touch|type|write|enter|input|find|search|play|watch|open|directions|నొక్కు|ట్యాప్|రాయి|టైప్)\\b))", RegexOption.IGNORE_CASE))
+        val rawClauses = input.split(Regex("(?:,|\\s+(?:then|and then|తర్వాత)\\s+|\\s+(?:and|మరియు|అలాగే)\\s+(?=(?:tap|click|press|select|hit|touch|type|write|enter|input|find|search|play|watch|open|directions|wait|pause|stay|verify|నొక్కు|ట్యాప్|రాయి|టైప్|ఆగు)\\b))", RegexOption.IGNORE_CASE))
             .map { it.trim() }
             .filter { it.isNotBlank() }
 
@@ -301,11 +301,25 @@ object SemanticUiCommandParser {
         for (clause in rawClauses) {
             // Strip leading "and " or filler
             val cleanClause = clause.replace(Regex("^(?:and|మరియు|అలాగే)\\s+", RegexOption.IGNORE_CASE), "").trim()
-            val action = parseSingleClause(cleanClause) ?: return null
-            if (action.action == "OPEN_APP" && appName == null) {
-                appName = action.target
+            val single = parseSingleClause(cleanClause)
+            if (single != null) {
+                if (single.action == "OPEN_APP" && appName == null) {
+                    appName = single.target
+                }
+                parsedActions.add(single)
+            } else {
+                val compound = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.parseTrailingActionClauses(cleanClause)
+                if (compound.isNotEmpty()) {
+                    for (act in compound) {
+                        if (act.action == "OPEN_APP" && appName == null) {
+                            appName = act.target
+                        }
+                        parsedActions.add(act)
+                    }
+                } else {
+                    return null
+                }
             }
-            parsedActions.add(action)
         }
 
         if (parsedActions.isEmpty()) return null
@@ -321,6 +335,13 @@ object SemanticUiCommandParser {
         val trimmed = clause.trim()
         if (trimmed.isBlank()) return null
 
+        // Pattern 0c: Wait action ("wait", "wait for ui", "wait for composer", "pause", "stay")
+        val waitMatch = Regex("^(?:wait|stay|pause)(?:\\s+for\\s+(?:the\\s+)?(.+))?$", RegexOption.IGNORE_CASE).find(trimmed)
+        if (waitMatch != null) {
+            val waitTarget = waitMatch.groupValues[1].trim().ifBlank { "composer" }
+            return ParsedAction("WAIT", target = waitTarget)
+        }
+
         // Pattern 0a: Play action ("play the video", "play it", "play", "watch the video")
         val playMatch = Regex("^(?:play|watch)(?:\\s+(?:the\\s+)?(?:video|it|song|media|first\\s+video))?$", RegexOption.IGNORE_CASE).find(trimmed)
         if (playMatch != null) {
@@ -333,13 +354,16 @@ object SemanticUiCommandParser {
             return ParsedAction("CLICK", target = "Directions")
         }
 
-        // Pattern 1: App launch or UI Element open ("Open Calculator", "Launch Settings", "open the first result", "open first video")
+        // Pattern 1: App launch or UI Element open ("Open Calculator", "Launch Settings", "open the first result", "open first video", "open Message")
         val openMatch = Regex("^(?:open|launch|start|go to|ఓపెన్|స్టార్ట్|తెరువు)\\s+(?:the\\s+)?(.+)$", RegexOption.IGNORE_CASE).find(trimmed)
         if (openMatch != null) {
             val raw = openMatch.groupValues[1].trim()
             if (raw.contains("result", ignoreCase = true) || raw.contains("direction", ignoreCase = true) ||
                 raw.contains("video", ignoreCase = true) || raw.contains("link", ignoreCase = true) ||
-                raw.contains("post", ignoreCase = true) || raw.contains("tab", ignoreCase = true)) {
+                raw.contains("post", ignoreCase = true) || raw.contains("tab", ignoreCase = true) ||
+                raw.contains("message", ignoreCase = true) || raw.contains("account", ignoreCase = true) ||
+                raw.contains("profile", ignoreCase = true) || raw.contains("button", ignoreCase = true) ||
+                raw.contains("contact", ignoreCase = true) || raw.contains("chat", ignoreCase = true)) {
                 return ParsedAction("CLICK", target = cleanElementTarget(raw))
             }
             val app = cleanAppTarget(raw)
@@ -511,8 +535,8 @@ object SemanticUiCommandParser {
             )
         }
 
-        val trailingActions = split?.trailingClauses?.mapNotNull {
-            com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.parseTrailingActionClause(it)
+        val trailingActions = split?.trailingClauses?.flatMap {
+            com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.parseTrailingActionClauses(it)
         } ?: emptyList()
 
         val actions = mutableListOf(
@@ -547,8 +571,8 @@ object SemanticUiCommandParser {
             )
         }
 
-        val trailingActions = split?.trailingClauses?.mapNotNull {
-            com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.parseTrailingActionClause(it)
+        val trailingActions = split?.trailingClauses?.flatMap {
+            com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.parseTrailingActionClauses(it)
         } ?: emptyList()
 
         val actions = mutableListOf(

@@ -16,17 +16,28 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-
-import kotlinx.coroutines.flow.flowOn
 import java.util.concurrent.atomic.AtomicBoolean
 
 sealed class MemoryValidationResult {
     object Success : MemoryValidationResult()
     data class Error(val message: String) : MemoryValidationResult()
+}
+
+sealed class MemoryChangeEvent {
+    data class Created(val memory: PermanentMemory) : MemoryChangeEvent()
+    data class Updated(val memory: PermanentMemory) : MemoryChangeEvent()
+    data class Deleted(val memoryId: String) : MemoryChangeEvent()
+    data class Toggled(val memoryId: String, val isEnabled: Boolean) : MemoryChangeEvent()
+    data class Imported(val count: Int) : MemoryChangeEvent()
+    object Cleared : MemoryChangeEvent()
 }
 
 class MemoryRepository constructor(private val context: Context) : MemoryProvider {
@@ -60,6 +71,18 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
 
     private val _memoriesMarkdownFlow = MutableStateFlow("")
     val memoriesMarkdownFlow: StateFlow<String> = _memoriesMarkdownFlow.asStateFlow()
+
+    private val _memoryRevision = MutableStateFlow(0L)
+    val memoryRevision: StateFlow<Long> = _memoryRevision.asStateFlow()
+
+    private val _memoryChangeEvents = kotlinx.coroutines.flow.MutableSharedFlow<MemoryChangeEvent>(replay = 0, extraBufferCapacity = 64)
+    val memoryChangeEvents: kotlinx.coroutines.flow.SharedFlow<MemoryChangeEvent> = _memoryChangeEvents.asSharedFlow()
+
+    fun notifyMemoryChanged(event: MemoryChangeEvent) {
+        _memoryRevision.value += 1
+        _memoryChangeEvents.tryEmit(event)
+        triggerDebouncedMarkdownSync()
+    }
 
     // Debounced markdown sync job — tracked to prevent orphan coroutines
     @Volatile
@@ -348,6 +371,7 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
         val encryptedMem = encryptMemory(memoryToSave)
         dao.insert(encryptedMem)
         Log.d(TAG, "Memory committed to Room DB: '${memory.title}' (embedding deferred)")
+        notifyMemoryChanged(MemoryChangeEvent.Created(memoryToSave))
 
         // ASYNC: Generate embedding + update + RAG index + markdown sync
         // Uses repositoryScope (SupervisorJob) — NOT a throwaway CoroutineScope
@@ -412,6 +436,7 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
         val updatedMemoryDecrypted = memory.copy(updatedAt = System.currentTimeMillis(), contentHash = contentHash)
         val encryptedMem = encryptMemory(updatedMemoryDecrypted)
         dao.update(encryptedMem)
+        notifyMemoryChanged(MemoryChangeEvent.Updated(updatedMemoryDecrypted))
 
         // ASYNC: Generate embedding + update + RAG index
         repositoryScope.launch {
@@ -477,6 +502,7 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
 
         matching.forEach { mem ->
             dao.deleteById(mem.memoryId)
+            notifyMemoryChanged(MemoryChangeEvent.Deleted(mem.memoryId))
             repositoryScope.launch {
                 try {
                     com.example.rag.engine.RagEngine.getInstance(context).deleteMemory(mem.memoryId)
@@ -514,6 +540,7 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
     suspend fun deleteAll() = withContext(Dispatchers.IO) {
         dao.deleteAll()
         _memoriesMarkdownFlow.value = ""
+        notifyMemoryChanged(MemoryChangeEvent.Cleared)
         triggerDebouncedMarkdownSync()
         repositoryScope.launch {
             try {
@@ -524,6 +551,7 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
 
     suspend fun deleteById(memoryId: String) = withContext(Dispatchers.IO) {
         dao.deleteById(memoryId)
+        notifyMemoryChanged(MemoryChangeEvent.Deleted(memoryId))
         triggerDebouncedMarkdownSync()
         repositoryScope.launch {
             try {
@@ -534,21 +562,25 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
 
     suspend fun toggleEnabled(memoryId: String, enabled: Boolean) = withContext(Dispatchers.IO) {
         dao.toggleEnabled(memoryId, enabled)
+        notifyMemoryChanged(MemoryChangeEvent.Toggled(memoryId, enabled))
         triggerDebouncedMarkdownSync()
     }
 
     suspend fun togglePinned(memoryId: String, pinned: Boolean) = withContext(Dispatchers.IO) {
         dao.togglePinned(memoryId, pinned)
+        notifyMemoryChanged(MemoryChangeEvent.Toggled(memoryId, pinned))
         triggerDebouncedMarkdownSync()
     }
 
     suspend fun deleteBySpace(isPrivate: Boolean) = withContext(Dispatchers.IO) {
         dao.deleteBySpace(if (isPrivate) 1 else 0)
+        notifyMemoryChanged(MemoryChangeEvent.Cleared)
         triggerDebouncedMarkdownSync()
     }
 
     suspend fun replaceAllForSpace(newMemories: List<PermanentMemory>, isPrivate: Boolean) = withContext(Dispatchers.IO) {
         dao.deleteBySpace(if (isPrivate) 1 else 0)
+        notifyMemoryChanged(MemoryChangeEvent.Cleared)
         for (mem in newMemories) {
             addMemory(mem)
         }

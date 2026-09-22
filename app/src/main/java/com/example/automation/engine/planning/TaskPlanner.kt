@@ -146,7 +146,7 @@ class TaskPlanner(
             }
 
             return listOf(
-                TaskStep("maps_1", UiStep.OpenApp(targetApp), ExpectedOutcome.PackageForeground(targetApp)),
+                TaskStep("maps_1", UiStep.OpenApp(appName = "Google Maps", packageName = targetApp), ExpectedOutcome.PackageForeground(targetApp)),
                 TaskStep("maps_2", UiStep.Tap(target = "Search here"), ExpectedOutcome.ElementPresent("Search here")),
                 TaskStep("maps_3", UiStep.TypeText(text = destination, target = "Search here"), ExpectedOutcome.TextContentEquals(destination)),
                 TaskStep("maps_4", UiStep.PressEnter, ExpectedOutcome.ElementPresent("Directions")),
@@ -164,7 +164,7 @@ class TaskPlanner(
             }
 
             val steps = mutableListOf(
-                TaskStep("ch_1", UiStep.OpenApp(targetApp), ExpectedOutcome.PackageForeground(targetApp)),
+                TaskStep("ch_1", UiStep.OpenApp(appName = "Chrome", packageName = targetApp), ExpectedOutcome.PackageForeground(targetApp)),
                 TaskStep("ch_2", UiStep.Tap(target = "Search or type URL"), ExpectedOutcome.ElementPresent("Search or type URL")),
                 TaskStep("ch_3", UiStep.TypeText(text = query, target = "Search or type URL"), ExpectedOutcome.TextContentEquals(query)),
                 TaskStep("ch_4", UiStep.PressEnter, ExpectedOutcome.ElementPresent(query))
@@ -179,26 +179,63 @@ class TaskPlanner(
             return steps
         }
 
-        // 4. Instagram DAG (DEV-05)
+        // 4. Instagram Navigation & Workflows
         if (text.contains("instagram")) {
             val targetApp = "com.instagram.android"
+
+            // Case A: Reels navigation
+            if (text.contains("reels") || text.contains("reel") || text.contains("clips")) {
+                return listOf(
+                    TaskStep("ig_reels_1", UiStep.OpenApp(appName = targetApp, packageName = targetApp), ExpectedOutcome.PackageForeground(targetApp)),
+                    TaskStep("ig_reels_2", UiStep.Tap(target = "Reels"), ExpectedOutcome.ElementPresent("Reels"))
+                )
+            }
+
+            // Case B: Direct Messages / Chats / Inbox navigation
+            if (text.contains("dms") || text.contains("dm") || text.contains("chat") || text.contains("inbox") || (text.contains("messages") && !text.contains("search"))) {
+                return listOf(
+                    TaskStep("ig_dm_1", UiStep.OpenApp(appName = targetApp, packageName = targetApp), ExpectedOutcome.PackageForeground(targetApp)),
+                    TaskStep("ig_dm_2", UiStep.Tap(target = "Messages"), ExpectedOutcome.ElementPresent("Messages"))
+                )
+            }
+
+            // Case C: Search user / account -> Select match -> Message
             var username = intent.parameters["username"] ?: intent.parameters["query"] ?: intent.parameters["target"] ?: ""
             if (username.isBlank()) {
-                val uMatch = Regex("""(?i)(?:search|profile of|user)\s+([a-zA-Z0-9._]+)""").find(originalUtterance)
-                username = uMatch?.groupValues?.get(1)?.trim() ?: "openai"
+                val uMatch = Regex("""(?i)(?:search|profile of|user|account)\s+([a-zA-Z0-9._]+)""").find(originalUtterance)
+                username = uMatch?.groupValues?.get(1)?.trim() ?: ""
             }
-            val steps = mutableListOf(
-                TaskStep("ig_1", UiStep.OpenApp(targetApp), ExpectedOutcome.PackageForeground(targetApp)),
-                TaskStep("ig_2", UiStep.Tap(target = "Search"), ExpectedOutcome.ElementPresent("Search")),
-                TaskStep("ig_3", UiStep.TypeText(text = username, target = "Search"), ExpectedOutcome.TextContentEquals(username)),
-                TaskStep("ig_4", UiStep.PressEnter, ExpectedOutcome.ElementPresent(username))
-            )
-            if (text.contains("first result") || text.contains("profile")) {
-                steps.add(TaskStep("ig_5", UiStep.Tap(target = "first result"), ExpectedOutcome.ElementPresent("Posts")))
+
+            val steps = mutableListOf<TaskStep>()
+            steps.add(TaskStep("ig_1", UiStep.OpenApp(appName = targetApp, packageName = targetApp), ExpectedOutcome.PackageForeground(targetApp)))
+            steps.add(TaskStep("ig_2", UiStep.Tap(target = "Search"), ExpectedOutcome.ElementPresent("Search input")))
+
+            if (username.isNotBlank()) {
+                steps.add(TaskStep("ig_3", UiStep.Tap(target = "Search input"), ExpectedOutcome.ElementPresent("Search input")))
+                steps.add(TaskStep("ig_4", UiStep.TypeText(text = username, target = "Search input"), ExpectedOutcome.TextContentEquals(username)))
+                steps.add(TaskStep("ig_5", UiStep.WaitForUi(targetText = username, timeoutMs = 2500L), ExpectedOutcome.ElementPresent(username)))
+
+                if (text.contains("first") || text.contains("account") || text.contains("profile") || text.contains("open") || text.contains("message")) {
+                    val resultTarget = if (text.contains("first")) "first account" else username
+                    steps.add(TaskStep("ig_6", UiStep.Tap(target = resultTarget), ExpectedOutcome.ElementPresent("Message", timeoutMs = 5000L)))
+                }
+
+                if (text.contains("message") || text.contains("chat")) {
+                    steps.add(TaskStep("ig_7", UiStep.Tap(target = "Message"), ExpectedOutcome.ElementPresent("Message composer", timeoutMs = 5000L)))
+                    if (text.contains("wait")) {
+                        steps.add(TaskStep("ig_8", UiStep.WaitForUi(targetText = "Message composer", timeoutMs = 5000L), ExpectedOutcome.ElementPresent("Message composer", timeoutMs = 5000L)))
+                    }
+
+                    // Send message ONLY if explicitly requested by user with actual content
+                    val messageText = intent.parameters["message"] ?: intent.parameters["text"] ?: ""
+                    val isExplicitSendRequested = (text.contains("send") || text.contains("saying") || text.contains("with text")) && messageText.isNotBlank()
+                    if (isExplicitSendRequested) {
+                        steps.add(TaskStep("ig_9", UiStep.TypeText(text = messageText, target = "Message composer"), ExpectedOutcome.TextContentEquals(messageText)))
+                        steps.add(TaskStep("ig_10", UiStep.Tap(target = "Send"), ExpectedOutcome.ElementPresent("Message composer")))
+                    }
+                }
             }
-            if (text.contains("first post") || text.contains("inspect")) {
-                steps.add(TaskStep("ig_6", UiStep.Tap(target = "first post"), ExpectedOutcome.ElementPresent("Like")))
-            }
+
             return steps
         }
 
@@ -222,24 +259,44 @@ class TaskPlanner(
         return steps
     }
 
-    fun replanTask(task: AgentTask): Boolean {
+    suspend fun replanTask(task: AgentTask, context: android.content.Context? = null): Boolean {
         val provider = com.example.automation.engine.GoalPlanner.getPlanningProvider() ?: return false
         return try {
-            val request = com.example.network.provider.PlanningRequest(
-                goal = "Re-plan remaining steps for goal: '${task.goal}' after step '${task.getCurrentStep()?.id}'.",
-                screenContext = ScreenContextPayload(
-                    packageName = task.context.currentApp,
-                    prunedNodes = emptyList(),
-                    visibleText = "",
-                    clickableElements = emptyList(),
-                    screenshotJpeg = null,
-                    isScreenshotSent = false,
-                    hasAccessibility = false,
-                    focusMode = "general"
-                )
+            val ctx = context ?: com.example.service.JarvisAccessibilityService.instance?.applicationContext
+            val liveScreen = if (ctx != null) {
+                try {
+                    com.example.voice.vision.ScreenContextProvider.captureScreenContext(ctx, focus = "general")
+                } catch (e: Exception) {
+                    android.util.Log.w("TaskPlanner", "Failed capturing live screen context for replan: ${e.message}")
+                    null
+                }
+            } else null
+
+            val screenPayload = liveScreen ?: ScreenContextPayload(
+                packageName = (task.context.currentApp ?: "").ifBlank { com.example.automation.state.WorldStateManager.getCurrentState().currentApp.ifBlank { null } },
+                prunedNodes = emptyList(),
+                visibleText = "",
+                clickableElements = emptyList(),
+                screenshotJpeg = null,
+                isScreenshotSent = false,
+                hasAccessibility = com.example.service.JarvisAccessibilityService.instance != null,
+                focusMode = "general"
             )
-            val result = kotlinx.coroutines.runBlocking { provider.generatePlan(request) }
+
+            val currentStep = task.getCurrentStep()
+            val remainingGoalPrompt = "Recovery re-plan for goal: '${task.goal}'. Failed step '${currentStep?.id}' (${currentStep?.action?.let { it::class.simpleName } ?: ""}). Current foreground package: '${screenPayload.packageName}'. Generate the remaining steps to achieve the goal from the current screen state."
+
+            val request = com.example.network.provider.PlanningRequest(
+                goal = remainingGoalPrompt,
+                screenContext = screenPayload
+            )
+            val result = provider.generatePlan(request)
             if (result.success && result.plan.isNotEmpty()) {
+                val validationError = com.example.automation.engine.GoalPlanner.validatePlan(result.plan, task.goal)
+                if (validationError != null) {
+                    android.util.Log.w("TaskPlanner", "Replanned steps failed validation: $validationError")
+                    return false
+                }
                 val newSteps = result.plan.map { actionStep ->
                     TaskStep(
                         id = actionStep.stepId,
@@ -247,7 +304,7 @@ class TaskPlanner(
                         expectedOutcome = null
                     )
                 }
-                val currentRemaining = task.steps.take(task.currentStepIndex + 1).toMutableList()
+                val currentRemaining = task.steps.take(task.currentStepIndex).toMutableList()
                 currentRemaining.addAll(newSteps)
                 task.steps = currentRemaining
                 true

@@ -48,6 +48,9 @@ class VisionTaskCoordinator:
         "visual_qa",
         "describe_screen",
         "click_coordinate",
+        "capture_webcam",
+        "webcam_photo",
+        "detect_webcam",
     }
 
     VISION_PHRASES: tuple = (
@@ -62,6 +65,11 @@ class VisionTaskCoordinator:
         "take a screenshot",
         "capture my screen",
         "tell me what's open",
+        "webcam",
+        "take a webcam photo",
+        "camera photo",
+        "take a photo",
+        "pc camera",
     )
 
     FAST_COMMAND_TOOLS: Set[str] = {

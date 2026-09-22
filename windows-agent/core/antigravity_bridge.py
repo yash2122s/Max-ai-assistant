@@ -41,10 +41,6 @@ class AntigravityBridge:
         self.max_retries = max_retries
         self.supervisor = supervisor or process_supervisor
 
-    async def run_task(self, envelope: TaskEnvelope, **kwargs) -> TaskResult:
-        """Async convenience wrapper for execute_task."""
-        import asyncio
-        return await asyncio.to_thread(self.execute_task, envelope, **kwargs)
 
     def cancel_task(self, task_id: str) -> bool:
         """Signals cancellation to the task's process tree."""

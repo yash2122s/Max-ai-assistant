@@ -26,6 +26,11 @@ class AudioProcessor(
         private const val TAG = "VAD"
     }
 
+    private var isSpeaking = false
+    private var speechAccumulatorMs = 0L
+    private var silenceAccumulatorMs = 0L
+    private val chunkDurationMs = 20L // Approx 320 shorts at 16kHz = 20ms
+
     fun processAudio(shorts: ShortArray, size: Int): Float {
         if (size <= 0) return 0f
 
@@ -34,13 +39,41 @@ class AudioProcessor(
             sum += shorts[i] * shorts[i]
         }
         val rawRms = sqrt(sum / size).toFloat()
-        return (rawRms / 32767f).coerceIn(0f, 1f)
+        val normalizedRms = (rawRms / 32767f).coerceIn(0f, 1f)
+
+        if (normalizedRms >= speechThreshold) {
+            silenceAccumulatorMs = 0L
+            speechAccumulatorMs += chunkDurationMs
+            if (speechAccumulatorMs >= minSpeechDurationMs) {
+                isSpeaking = true
+            }
+        } else if (isSpeaking && normalizedRms >= silenceThreshold) {
+            // Quiet trailing words / speech continuation
+            silenceAccumulatorMs = 0L
+        } else {
+            // Silence
+            if (isSpeaking) {
+                silenceAccumulatorMs += chunkDurationMs
+                if (silenceAccumulatorMs >= silenceDurationMs) {
+                    isSpeaking = false
+                    silenceAccumulatorMs = 0L
+                    speechAccumulatorMs = 0L
+                    onEndOfSpeech?.invoke()
+                }
+            } else {
+                speechAccumulatorMs = 0L
+            }
+        }
+
+        return normalizedRms
     }
 
     fun reset() {
-        // No-op — continuous server-VAD mode; no client state to reset
+        isSpeaking = false
+        speechAccumulatorMs = 0L
+        silenceAccumulatorMs = 0L
     }
 
-    fun isSpeechDetected(): Boolean = false
+    fun isSpeechDetected(): Boolean = isSpeaking
 }
 

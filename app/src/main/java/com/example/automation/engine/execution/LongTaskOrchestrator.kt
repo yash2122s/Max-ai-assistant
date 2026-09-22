@@ -208,7 +208,7 @@ class LongTaskOrchestrator(
             if (replanCount < MAX_REPLANS) {
                 replanCount++
                 Log.w(TAG, "Attempting dynamic replan (attempt $replanCount/$MAX_REPLANS) for goal: '${task.goal}'")
-                val replanSuccess = taskPlanner.replanTask(task)
+                val replanSuccess = taskPlanner.replanTask(task, appContext)
                 if (replanSuccess) {
                     task.status = TaskStatus.RUNNING
                     continue
@@ -224,13 +224,16 @@ class LongTaskOrchestrator(
             task.status = TaskStatus.COMPLETED
         }
 
+        val isSuccess = task.status == TaskStatus.COMPLETED
         Log.d(TAG, "Task execution finished with status: ${task.status} ($executedStepsCount/${task.steps.size} steps)")
+        AutomationEventBus.publish(AutomationEvent.ExecutionFinished(UUID.randomUUID(), success = isSuccess))
+
         return@withContext TaskExecutionResult(
-            success = task.status == TaskStatus.COMPLETED,
+            success = isSuccess,
             task = task,
             executedSteps = executedStepsCount,
             totalSteps = task.steps.size,
-            message = if (task.status == TaskStatus.COMPLETED) "Task completed successfully" else "Task failed"
+            message = if (isSuccess) "Task completed successfully" else "Task failed"
         )
     }
 

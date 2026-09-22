@@ -144,5 +144,44 @@ class RealSafeFileSystem:
             "message": f"Successfully deleted '{abs_path}'. Rollback available via undo."
         }
 
+    def snapshot_for_overwrite(self, file_path: str) -> Optional[str]:
+        """
+        Takes an atomic disk snapshot of an existing file before overwriting it.
+        Returns the absolute path to the vault entry, or None if the file does not exist.
+        """
+        if not file_path or not os.path.exists(file_path) or not os.path.isfile(file_path):
+            return None
+
+        abs_path = os.path.realpath(os.path.abspath(file_path))
+        path_hash = hashlib.sha256(abs_path.encode("utf-8")).hexdigest()[:12]
+        base_name = os.path.basename(abs_path)
+        timestamp = int(os.path.getmtime(abs_path))
+        vault_entry = os.path.join(self.vault_dir, f"overwrite_{path_hash}_{timestamp}_{base_name}")
+
+        try:
+            shutil.copy2(abs_path, vault_entry)
+            return vault_entry
+        except Exception as e:
+            logger.error(f"Failed to create pre-overwrite vault snapshot for '{file_path}': {e}")
+            return None
+
+    @staticmethod
+    def compute_file_hash(file_path: str, algorithm: str = "sha256") -> str:
+        """
+        Computes cryptographic hash (sha256, md5, sha1) of a file using streaming chunks.
+        """
+        algo_name = algorithm.lower().strip()
+        if algo_name == "md5":
+            hasher = hashlib.md5()
+        elif algo_name == "sha1":
+            hasher = hashlib.sha1()
+        else:
+            hasher = hashlib.sha256()
+
+        with open(file_path, "rb") as f:
+            while chunk := f.read(65536):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
 
 safe_fs = RealSafeFileSystem()

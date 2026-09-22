@@ -218,18 +218,17 @@ class UIAutomationEngine:
         import time
         import pyautogui
 
-        # Step 1: Find and focus window if specified
+        # Step 1: Find and focus window if specified via shared activate_app_window
         root = None
         if window_title:
             try:
-                from tools.system_tool import system_helper
-                hwnd = system_helper.find_window(window_title)
-                if hwnd:
-                    system_helper.user32.ShowWindow(hwnd, 9)  # SW_RESTORE
-                    system_helper.user32.SetForegroundWindow(hwnd)
-                    time.sleep(0.1)
-                    if self.is_available:
-                        root = self._uia.ElementFromHandle(hwnd)
+                from tools.app_control import activate_app_window
+                act_res = activate_app_window(window_title, timeout_seconds=2.5)
+                if not act_res.get("verified"):
+                    logger.warning(f"Target window '{window_title}' could not be verified in foreground: {act_res.get('failure_reason')}")
+                hwnd = act_res.get("hwnd")
+                if hwnd and self.is_available:
+                    root = self._uia.ElementFromHandle(hwnd)
             except Exception as e:
                 logger.debug(f"Could not bind window root for '{window_title}': {e}")
 
@@ -252,18 +251,12 @@ class UIAutomationEngine:
             bbox = matched.get("bounding_box", {})
             cx, cy = bbox.get("center_x", 0), bbox.get("center_y", 0)
 
-            # METHOD 1 & 2: Physical Mouse Click at Center + UIA Invoke
-            if cx > 0 and cy > 0:
-                try:
-                    pyautogui.moveTo(cx, cy, duration=0.08)
-                    from tools.input_tool import input_helper
-                    input_helper.left_click(x=cx, y=cy, clicks=click_count) if button == "left" else input_helper.click_mouse(button=button, double=(click_count > 1), x=cx, y=cy)
-                    logger.info(f"Method 2 (Physical Click) dispatched at ({cx}, {cy}) on '{matched.get('name')}'")
-                except Exception as click_err:
-                    logger.warning(f"Physical click warning: {click_err}")
+            ctrl_type = str(matched.get("control_type", "")).lower()
+            action_executed = False
+            executed_method = "none"
 
-            # Also trigger UIA patterns (Invoke, Expand, Toggle, Select)
-            if elem_obj:
+            # 1. Deterministic UIA Pattern Selection (if elem_obj is available and not a double click or special button)
+            if elem_obj and click_count == 1 and button == "left":
                 try:
                     from comtypes.gen.UIAutomationClient import (
                         IUIAutomationInvokePattern,
@@ -271,36 +264,65 @@ class UIAutomationEngine:
                         IUIAutomationTogglePattern,
                         IUIAutomationSelectionItemPattern
                     )
-                    p_inv = elem_obj.GetCurrentPattern(UIA_INVOKE_PATTERN_ID)
-                    if p_inv:
-                        p_inv.QueryInterface(IUIAutomationInvokePattern).Invoke()
-
-                    p_exp = elem_obj.GetCurrentPattern(10005)
-                    if p_exp:
-                        p_exp.QueryInterface(IUIAutomationExpandCollapsePattern).Expand()
-
-                    p_tog = elem_obj.GetCurrentPattern(UIA_TOGGLE_PATTERN_ID)
-                    if p_tog:
-                        p_tog.QueryInterface(IUIAutomationTogglePattern).Toggle()
-
-                    p_sel = elem_obj.GetCurrentPattern(UIA_SELECTION_ITEM_PATTERN_ID)
-                    if p_sel:
-                        p_sel.QueryInterface(IUIAutomationSelectionItemPattern).Select()
+                    if ctrl_type in ("button", "menuitem", "hyperlink", "splitbutton"):
+                        p_inv = elem_obj.GetCurrentPattern(UIA_INVOKE_PATTERN_ID)
+                        if p_inv:
+                            p_inv.QueryInterface(IUIAutomationInvokePattern).Invoke()
+                            action_executed = True
+                            executed_method = "UIA_InvokePattern"
+                    elif ctrl_type in ("checkbox", "radiobutton"):
+                        p_tog = elem_obj.GetCurrentPattern(UIA_TOGGLE_PATTERN_ID)
+                        if p_tog:
+                            p_tog.QueryInterface(IUIAutomationTogglePattern).Toggle()
+                            action_executed = True
+                            executed_method = "UIA_TogglePattern"
+                    elif ctrl_type in ("tabitem", "listitem", "treeitem", "dataitem"):
+                        p_sel = elem_obj.GetCurrentPattern(UIA_SELECTION_ITEM_PATTERN_ID)
+                        if p_sel:
+                            p_sel.QueryInterface(IUIAutomationSelectionItemPattern).Select()
+                            action_executed = True
+                            executed_method = "UIA_SelectionItemPattern"
+                    elif ctrl_type in ("combobox",):
+                        p_exp = elem_obj.GetCurrentPattern(10005)
+                        if p_exp:
+                            p_exp.QueryInterface(IUIAutomationExpandCollapsePattern).Expand()
+                            action_executed = True
+                            executed_method = "UIA_ExpandCollapsePattern"
                 except Exception as ex:
-                    logger.debug(f"Method 1 UIA pattern invocation secondary notice: {ex}")
+                    logger.debug(f"UIA pattern execution attempted but failed ({ex}); fallback to physical click.")
+                    action_executed = False
 
-            return {
-                "status": "success",
-                "method": "Multi_Layer_Physical_and_UIA",
-                "element": {
-                    "name": matched.get("name"),
-                    "control_type": matched.get("control_type"),
-                    "automation_id": matched.get("automation_id"),
-                    "center": (cx, cy)
-                },
-                "verification_status": "VERIFIED",
-                "message": f"Successfully clicked element '{matched.get('name')}' at ({cx}, {cy})."
-            }
+            # 2. Physical Mouse Click (Fallback only if semantic pattern was not applicable or failed)
+            if not action_executed:
+                if cx > 0 and cy > 0:
+                    try:
+                        from tools.input_tool import input_helper
+                        pyautogui.moveTo(cx, cy, duration=0.08)
+                        if button == "left":
+                            input_helper.left_click(x=cx, y=cy, clicks=click_count)
+                        else:
+                            input_helper.click_mouse(button=button, double=(click_count > 1), x=cx, y=cy)
+                        action_executed = True
+                        executed_method = f"Physical_Click_{button}_count_{click_count}"
+                        logger.info(f"Physical click dispatched at ({cx}, {cy}) on '{matched.get('name')}'")
+                    except Exception as click_err:
+                        logger.warning(f"Physical click failed: {click_err}")
+                        action_executed = False
+
+            if action_executed:
+                return {
+                    "status": "success",
+                    "method": executed_method,
+                    "element": {
+                        "name": matched.get("name"),
+                        "control_type": matched.get("control_type"),
+                        "automation_id": matched.get("automation_id"),
+                        "center": (cx, cy)
+                    },
+                    "action_execution_verified": True,
+                    "verification_status": "VERIFIED",
+                    "message": f"Successfully clicked element '{matched.get('name')}' via {executed_method} at ({cx}, {cy})."
+                }
 
         # Step 3: METHOD 4 - Vision fallback when UIA fails to locate target
         try:
@@ -332,12 +354,43 @@ class UIAutomationEngine:
     ) -> Dict[str, Any]:
         """
         Types text into a focused input element using physical mouse focus + PyAutoGUI.
+        Strictly enforces that the target application/window is foreground before typing.
         """
         import pyautogui
         import time
+        from tools.app_control import activate_app_window
+
+        # Guard: If window_title is specified, bring it to foreground and verify
+        if window_title:
+            act_res = activate_app_window(window_title, timeout_seconds=3.0)
+            if not act_res.get("verified"):
+                return {
+                    "status": "error",
+                    "error_code": "FOREGROUND_VERIFICATION_FAILED",
+                    "message": f"Target application/window '{window_title}' is not foreground: {act_res.get('failure_reason')}",
+                    "details": act_res
+                }
+        elif target:
+            # Check if target is a known registered app name (e.g. 'notepad', 'chrome')
+            try:
+                from tools.app_control import APP_REGISTRY
+                target_lower = target.lower().strip()
+                if target_lower in APP_REGISTRY or target_lower.endswith(".exe"):
+                    act_res = activate_app_window(target_lower, timeout_seconds=3.0)
+                    if not act_res.get("verified"):
+                        return {
+                            "status": "error",
+                            "error_code": "FOREGROUND_VERIFICATION_FAILED",
+                            "message": f"Target application '{target}' is not foreground: {act_res.get('failure_reason')}",
+                            "details": act_res
+                        }
+            except Exception:
+                pass
 
         # First click the target element to guarantee focus
         click_res = self.click_element_by_selector(target, window_title=window_title)
+        if click_res.get("status") == "error" and click_res.get("error_code") == "FOREGROUND_VERIFICATION_FAILED":
+            return click_res
         
         # Give focus a moment to establish
         time.sleep(0.1)

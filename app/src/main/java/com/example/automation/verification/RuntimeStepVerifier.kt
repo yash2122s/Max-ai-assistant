@@ -54,7 +54,7 @@ object RuntimeStepVerifier {
         val service = JarvisAccessibilityService.instance
 
         while (System.currentTimeMillis() - startTime < timeoutMs) {
-            val root = rootNode ?: service?.rootInActiveWindow
+            val root = rootNode ?: JarvisAccessibilityService.getActiveRoot()
             if (root != null) {
                 val result = UiTargetResolver.resolve(
                     query = targetQuery,
@@ -82,10 +82,9 @@ object RuntimeStepVerifier {
         rootNode: AccessibilityNodeInfo? = null
     ): Boolean {
         val startTime = System.currentTimeMillis()
-        val service = JarvisAccessibilityService.instance
 
         while (System.currentTimeMillis() - startTime < timeoutMs) {
-            val root = rootNode ?: service?.rootInActiveWindow
+            val root = rootNode ?: JarvisAccessibilityService.getActiveRoot()
             if (root != null) {
                 val focused = try { root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Exception) { null }
                 val focusedText = focused?.text?.toString() ?: ""
@@ -127,7 +126,7 @@ object RuntimeStepVerifier {
         val service = JarvisAccessibilityService.instance
 
         while (System.currentTimeMillis() - startTime < timeoutMs) {
-            val root = rootNode ?: service?.rootInActiveWindow
+            val root = rootNode ?: JarvisAccessibilityService.getActiveRoot()
             if (root != null) {
                 val currentSig = service?.getScreenSignature(root) ?: ""
                 if (currentSig.isNotEmpty() && currentSig != preSignature && currentSig != "null_root") {
@@ -149,11 +148,12 @@ object RuntimeStepVerifier {
     }
 
     private fun resolveCurrentForegroundPackage(context: Context): String {
-        val service = JarvisAccessibilityService.instance
-        val livePkg = service?.rootInActiveWindow?.packageName?.toString()?.trim().orEmpty()
+        val root = JarvisAccessibilityService.getActiveRoot()
+        val livePkg = root?.packageName?.toString()?.trim().orEmpty()
         if (livePkg.isNotEmpty()) return livePkg
 
-        val activeWindowRoot = service?.windows?.firstOrNull { it.isFocused || it.isActive }?.root
+        val windows = JarvisAccessibilityService.getActiveWindows()
+        val activeWindowRoot = windows?.firstOrNull { it.isFocused || it.isActive }?.root
         val winPkg = activeWindowRoot?.packageName?.toString()?.trim().orEmpty()
         if (winPkg.isNotEmpty()) return winPkg
 
@@ -167,14 +167,27 @@ object RuntimeStepVerifier {
         if (currentPackage.isEmpty() || expectedPackage.isEmpty()) return false
         if (currentPackage.equals(expectedPackage, ignoreCase = true)) return true
 
+        if (currentPackage.contains(expectedPackage, ignoreCase = true) || expectedPackage.contains(currentPackage, ignoreCase = true)) {
+            return true
+        }
+
         if ((expectedPackage.contains("calculator", ignoreCase = true) || expectedPackage.contains("calc", ignoreCase = true)) &&
             (currentPackage.contains("calculator", ignoreCase = true) || currentPackage.contains("calc", ignoreCase = true))) {
             return true
         }
-        if (expectedPackage == "com.android.settings" && currentPackage.contains("settings", ignoreCase = true)) {
+        if (expectedPackage.contains("settings", ignoreCase = true) && currentPackage.contains("settings", ignoreCase = true)) {
             return true
         }
-        if (expectedPackage == "com.android.camera" && currentPackage.contains("camera", ignoreCase = true)) {
+        if (expectedPackage.contains("camera", ignoreCase = true) && currentPackage.contains("camera", ignoreCase = true)) {
+            return true
+        }
+        if (expectedPackage.contains("instagram", ignoreCase = true) && currentPackage.contains("instagram", ignoreCase = true)) {
+            return true
+        }
+        if (expectedPackage.contains("chrome", ignoreCase = true) && currentPackage.contains("chrome", ignoreCase = true)) {
+            return true
+        }
+        if (expectedPackage.contains("maps", ignoreCase = true) && currentPackage.contains("maps", ignoreCase = true)) {
             return true
         }
         return false

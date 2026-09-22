@@ -36,9 +36,10 @@ VK_MAP = {
     "bracketleft": 0xDB, "backslash": 0xDC, "bracketright": 0xDD, "quote": 0xDE,
     "oem_8": 0xDF, "ico_help": 0xE1, "ico_00": 0xE4,
     "processkey": 0xE5, "attn": 0xF6, "crsel": 0xF7, "exsel": 0xF8,
-    "lcontrol": 0xA2, "lctrl": 0xA2, "rcontrol": 0xA3, "rctrl": 0xA3,
-    "lshift": 0xA0, "rshift": 0xA1, "lmenu": 0xA4, "lalt": 0xA4,
-    "rmenu": 0xA5, "ralt": 0xA5, "lwin": 0x5B, "rwin": 0x5C,
+    "ctrl": 0x11, "control": 0x11, "lcontrol": 0xA2, "lctrl": 0xA2, "rcontrol": 0xA3, "rctrl": 0xA3,
+    "shift": 0x10, "lshift": 0xA0, "rshift": 0xA1,
+    "alt": 0x12, "menu": 0x12, "lmenu": 0xA4, "lalt": 0xA4, "rmenu": 0xA5, "ralt": 0xA5,
+    "win": 0x5B, "windows": 0x5B, "lwin": 0x5B, "rwin": 0x5C,
     "apps": 0x5D, "sleep": 0x5F, "browser_back": 0xA6, "browser_forward": 0xA7,
     "browser_refresh": 0xA8, "browser_stop": 0xA9, "browser_search": 0xAA,
     "browser_favorites": 0xAB, "browser_home": 0xAC, "volume_mute": 0xAD,
@@ -95,10 +96,12 @@ class InputHelper:
                 vk_codes.append(vk)
 
             for vk in vk_codes:
-                self.user32.keybd_event(vk, 0, 0, 0)
+                scan = self.user32.MapVirtualKeyW(vk, 0)
+                self.user32.keybd_event(vk, scan, 0, 0)
                 time.sleep(0.02)
             for vk in reversed(vk_codes):
-                self.user32.keybd_event(vk, 0, 2, 0)
+                scan = self.user32.MapVirtualKeyW(vk, 0)
+                self.user32.keybd_event(vk, scan, 2, 0)
                 time.sleep(0.02)
 
             return {"status": "success", "message": f"Key combo {keys} executed"}
@@ -216,6 +219,27 @@ class InputHelper:
             return {"status": "success", "message": f"Executed continuous stroke across {len(points)} points", "points_count": len(points), "verified": True}
         except Exception as e:
             # Guarantee mouse release on error
+            try:
+                self.mouse_up(button=button)
+            except Exception:
+                pass
+            return {"status": "failed", "error": str(e)}
+
+    def drag_and_drop(self, start_x: int, start_y: int, end_x: int, end_y: int, duration_sec: float = 0.5, button: str = "left", steps: int = 15) -> dict:
+        """
+        Executes a controlled drag-and-drop from (start_x, start_y) to (end_x, end_y)
+        with smooth intermediate waypoints and guaranteed mouse release on error.
+        """
+        try:
+            points = []
+            steps = max(5, int(steps))
+            for i in range(steps + 1):
+                t = i / float(steps)
+                px = int(start_x + (end_x - start_x) * t)
+                py = int(start_y + (end_y - start_y) * t)
+                points.append((px, py))
+            return self.drag_path(points, duration_sec=duration_sec, button=button)
+        except Exception as e:
             try:
                 self.mouse_up(button=button)
             except Exception:

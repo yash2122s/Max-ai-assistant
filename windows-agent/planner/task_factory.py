@@ -22,6 +22,16 @@ ACTION_VERIFICATION_MAP: Dict[str, VerificationType] = {
     "open_application": VerificationType.APP_LAUNCHED,
     "switch_to_app": VerificationType.APP_LAUNCHED,
     "close_application": VerificationType.WINDOW_CLOSED,
+    "create_file": VerificationType.FILE_CREATED,
+    "create_text_file": VerificationType.FILE_CREATED,
+    "write_file": VerificationType.FILE_WRITTEN,
+    "create_folder": VerificationType.FOLDER_CREATED,
+    "create_directory": VerificationType.FOLDER_CREATED,
+    "open_file": VerificationType.FILE_OPENED,
+    "open_folder": VerificationType.PATH_EXISTS,
+    "read_file": VerificationType.PATH_EXISTS,
+    "delete_file": VerificationType.PATH_DELETED,
+    "delete_folder": VerificationType.PATH_DELETED,
 }
 
 # Tools that are safely retryable (idempotent / read-only / repeatable)
@@ -37,6 +47,7 @@ RETRYABLE_ACTIONS: set = {
     "take_screenshot",
     "remember_fact",
     "recall_fact",
+    "read_file",
 }
 
 
@@ -73,6 +84,8 @@ class TaskFactory:
             v_target = None
             if v_type in (VerificationType.APP_LAUNCHED, VerificationType.WINDOW_CLOSED):
                 v_target = args.get("app_name") or args.get("target")
+            elif v_type in (VerificationType.FILE_CREATED, VerificationType.FILE_WRITTEN, VerificationType.FILE_OPENED, VerificationType.FOLDER_CREATED, VerificationType.PATH_EXISTS, VerificationType.PATH_DELETED):
+                v_target = args.get("path") or args.get("target") or args.get("file_path") or args.get("folder_path")
 
             verification = VerificationPolicy(
                 type=v_type,

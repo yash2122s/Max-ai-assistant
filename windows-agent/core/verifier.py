@@ -109,20 +109,45 @@ class ActionVerifier:
         return os.path.exists(path) and os.path.isdir(path) and not os.path.isfile(path)
 
     @staticmethod
+    def verify_path_exists_sync(path: str) -> bool:
+        """Verify that a file or directory exists at the given path."""
+        if not path:
+            return False
+        return os.path.exists(path)
+
+    @staticmethod
     def verify_file_created_sync(path: str, expected_content: Optional[str] = None) -> bool:
-        """Verify that a file exists, is strictly a regular file (not a folder), and optionally verify content."""
+        """Verify that a file exists, is strictly a regular file (not a folder), parent dir exists, and optionally verify content."""
         if not path or not os.path.exists(path):
             return False
         if not os.path.isfile(path) or os.path.isdir(path):
             return False
+        parent_dir = os.path.dirname(os.path.abspath(path))
+        if not os.path.exists(parent_dir) or not os.path.isdir(parent_dir):
+            return False
         if expected_content is not None and expected_content != "":
-            try:
-                with open(path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-                return expected_content in content
-            except Exception:
-                return False
+            return ActionVerifier.verify_file_content_sync(path, expected_content, exact_match=True)
         return True
+
+    @staticmethod
+    def verify_file_content_sync(path: str, expected_content: str, exact_match: bool = True) -> bool:
+        """Verify that a file exists, is a regular file, and its content matches the expected content."""
+        if not path or not os.path.exists(path):
+            return False
+        if not os.path.isfile(path) or os.path.isdir(path):
+            return False
+        if expected_content is None:
+            return True
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                actual_content = f.read()
+            if exact_match:
+                # Compare exact content with standard whitespace normalization
+                return actual_content == expected_content or actual_content.strip() == expected_content.strip()
+            return expected_content in actual_content
+        except Exception as e:
+            logger.warning(f"Error reading file '{path}' for content verification: {e}")
+            return False
 
     @staticmethod
     def verify_path_deleted_sync(path: str) -> bool:
@@ -137,9 +162,45 @@ class ActionVerifier:
         return not os.path.exists(source) and os.path.exists(destination)
 
     @staticmethod
-    def verify_file_copied_sync(source: str, destination: str) -> bool:
-        """Verify that both source and destination exist."""
-        return os.path.exists(source) and os.path.exists(destination)
+    def verify_file_copied_sync(source: str, destination: str, check_hash: bool = False) -> bool:
+        """Verify that both source and destination exist, sizes match, and optionally hashes match."""
+        if not os.path.exists(source) or not os.path.exists(destination):
+            return False
+        try:
+            src_sz = os.path.getsize(source) if os.path.isfile(source) else 0
+            dst_sz = os.path.getsize(destination) if os.path.isfile(destination) else 0
+            if os.path.isfile(source) and os.path.isfile(destination):
+                if src_sz != dst_sz:
+                    return False
+                if check_hash:
+                    from core.safe_fs import safe_fs
+                    return safe_fs.compute_file_hash(source) == safe_fs.compute_file_hash(destination)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def verify_hash_matches_sync(path: str, expected_hash: str, algorithm: str = "sha256") -> bool:
+        """Verify that a file exists and its hash matches the expected hash."""
+        if not path or not os.path.exists(path) or not os.path.isfile(path):
+            return False
+        try:
+            from core.safe_fs import safe_fs
+            actual = safe_fs.compute_file_hash(path, algorithm=algorithm)
+            return actual.lower().strip() == expected_hash.lower().strip()
+        except Exception:
+            return False
+
+    @staticmethod
+    def verify_archive_extracted_sync(destination: str, min_files: int = 1) -> bool:
+        """Verify that an extraction destination exists and contains at least min_files."""
+        if not destination or not os.path.exists(destination) or not os.path.isdir(destination):
+            return False
+        try:
+            count = sum(len(files) for _, _, files in os.walk(destination))
+            return count >= min_files
+        except Exception:
+            return False
 
     @staticmethod
     def verify_clipboard_contains_sync(expected: str) -> bool:

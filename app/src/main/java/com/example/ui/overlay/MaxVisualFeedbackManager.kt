@@ -11,6 +11,11 @@ import android.view.Gravity
 import android.view.WindowManager
 import com.example.automation.event.AutomationEvent
 import com.example.automation.event.AutomationEventBus
+import com.example.network.ConnectionState
+import com.example.voice.assistant.AssistantEvent
+import com.example.voice.assistant.AssistantEventBus
+import com.example.voice.assistant.AssistantLifecycleManager
+import com.example.voice.assistant.SessionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -19,7 +24,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Central lifecycle-driven visual feedback manager for MAX.
- * Manages Edge Lighting and Action Cursor overlays purely based on AutomationEventBus events.
+ * Manages Edge Lighting and Action Cursor overlays based on AutomationEventBus and AssistantEventBus events.
  * Fully decoupled from tool names and never intercepts touches or drives execution coordinates.
  */
 class MaxVisualFeedbackManager(private val context: Context) {
@@ -33,7 +38,9 @@ class MaxVisualFeedbackManager(private val context: Context) {
     var isAttached = false
         private set
     private var eventJob: Job? = null
+    private var assistantJob: Job? = null
     private var pendingDetachRunnable: Runnable? = null
+    private var isVoiceLiveActive = false
 
     companion object {
         const val COMPLETION_DISPLAY_MS = 800L
@@ -44,26 +51,47 @@ class MaxVisualFeedbackManager(private val context: Context) {
 
     fun startListening(scope: CoroutineScope) {
         eventJob?.cancel()
+        assistantJob?.cancel()
+
+        // 1. Observe Automation Execution Events
         eventJob = scope.launch(Dispatchers.Main) {
             AutomationEventBus.events.collectLatest { event ->
                 handleAutomationEvent(event)
             }
         }
-        Log.d(TAG, "MaxVisualFeedbackManager started listening to AutomationEventBus.")
+
+        // 2. Observe Voice Live Assistant Events (Voice Conversation start/stop & RMS)
+        assistantJob = scope.launch(Dispatchers.Main) {
+            launch {
+                AssistantEventBus.events.collectLatest { event ->
+                    handleAssistantEvent(event)
+                }
+            }
+            launch {
+                AssistantLifecycleManager.engine.collectLatest { engine ->
+                    engine?.stateMachine?.currentState?.collectLatest { sessionState ->
+                        handleSessionState(sessionState)
+                    }
+                }
+            }
+        }
+
+        Log.d(TAG, "MaxVisualFeedbackManager started listening to AutomationEventBus and AssistantEventBus.")
     }
 
     fun stopListening() {
         eventJob?.cancel()
+        assistantJob?.cancel()
         eventJob = null
+        assistantJob = null
         cancelPendingDetach()
         detachOverlaysImmediately()
     }
 
-    fun ensureOverlaysAttached() {
-        cancelPendingDetach()
-        if (isAttached) return
+    fun ensureEdgeLightingAttached() {
+        if (edgeLightingView != null && edgeLightingView?.isAttachedToWindow == true) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context) && !isTesting) {
-            Log.w(TAG, "Overlay permission not granted; visual feedback overlays disabled.")
+            Log.w(TAG, "Overlay permission not granted; edge lighting overlay disabled.")
             return
         }
 
@@ -89,7 +117,49 @@ class MaxVisualFeedbackManager(private val context: Context) {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    setFitInsetsTypes(0)
+                    setFitInsetsSides(0)
+                }
             }
+
+            if (edgeLightingView == null) {
+                edgeLightingView = EdgeLightingOverlayView(context)
+            }
+
+            if (edgeLightingView?.isAttachedToWindow != true) {
+                windowManager.addView(edgeLightingView, edgeParams)
+                isAttached = true
+                Log.d(TAG, "[UI_OVERLAY] EdgeLightingView attached cleanly for Voice Live (touch pass-through active).")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "[UI_OVERLAY] Error attaching EdgeLightingView: ${e.message}")
+        }
+    }
+
+    fun ensureOverlaysAttached() {
+        ensureEdgeLightingAttached()
+        cancelPendingDetach()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context) && !isTesting) {
+            return
+        }
+
+        try {
+            val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            } else {
+                @Suppress("DEPRECATION")
+                WindowManager.LayoutParams.TYPE_PHONE
+            }
+
+            val flags = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
 
             val cursorParams = WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -99,21 +169,80 @@ class MaxVisualFeedbackManager(private val context: Context) {
                 PixelFormat.TRANSLUCENT
             ).apply {
                 gravity = Gravity.TOP or Gravity.START
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    setFitInsetsTypes(0)
+                    setFitInsetsSides(0)
+                }
             }
 
-            if (edgeLightingView == null) {
-                edgeLightingView = EdgeLightingOverlayView(context)
-            }
             if (cursorView == null) {
                 cursorView = ActionCursorOverlayView(context)
             }
 
-            windowManager.addView(edgeLightingView, edgeParams)
-            windowManager.addView(cursorView, cursorParams)
-            isAttached = true
-            Log.d(TAG, "[UI_OVERLAY] Visual feedback overlays successfully attached to WindowManager (FLAG_NOT_TOUCHABLE | FLAG_NOT_FOCUSABLE).")
+            if (cursorView?.isAttachedToWindow != true) {
+                windowManager.addView(cursorView, cursorParams)
+                isAttached = true
+                Log.d(TAG, "[UI_OVERLAY] ActionCursorOverlayView attached successfully.")
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "[UI_OVERLAY] Error attaching visual feedback overlays: ${e.message}")
+            Log.e(TAG, "[UI_OVERLAY] Error attaching cursor view: ${e.message}")
+        }
+    }
+
+    private fun handleAssistantEvent(event: AssistantEvent) {
+        mainHandler.post {
+            when (event) {
+                is AssistantEvent.ConnectionStateChanged -> {
+                    if (event.state == ConnectionState.DISCONNECTED || event.state == ConnectionState.FAILED) {
+                        setVoiceLiveActive(false)
+                    }
+                }
+                is AssistantEvent.AudioRmsChanged -> {
+                    if (isVoiceLiveActive) {
+                        edgeLightingView?.updateRms(event.rms)
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+
+    private fun handleSessionState(sessionState: SessionState) {
+        mainHandler.post {
+            val isActiveVoiceState = when (sessionState) {
+                SessionState.LISTENING,
+                SessionState.STREAMING_AUDIO,
+                SessionState.STREAMING_TEXT,
+                SessionState.PROCESSING_AUDIO,
+                SessionState.WAITING_FOR_MODEL -> true
+                else -> false // IDLE, CONNECTED (standby), CONNECTING, ERROR, DISCONNECTING
+            }
+
+            if (isActiveVoiceState) {
+                setVoiceLiveActive(true)
+            } else {
+                setVoiceLiveActive(false)
+            }
+        }
+    }
+
+    private fun setVoiceLiveActive(active: Boolean) {
+        if (isVoiceLiveActive == active) return
+        isVoiceLiveActive = active
+
+        if (active) {
+            ensureEdgeLightingAttached()
+            edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.VOICE_LIVE)
+            Log.d(TAG, "[UI_OVERLAY] Voice Live conversation STARTED -> Edge lighting fluid wave ON")
+        } else {
+            Log.d(TAG, "[UI_OVERLAY] Voice Live conversation ENDED -> Edge lighting OFF")
+            edgeLightingView?.turnOffImmediately()
+            if (cursorView?.isAttachedToWindow != true) {
+                detachOverlaysImmediately()
+            }
         }
     }
 
@@ -123,14 +252,14 @@ class MaxVisualFeedbackManager(private val context: Context) {
                 is AutomationEvent.PlanningStarted,
                 is AutomationEvent.ObservationStarted -> {
                     ensureOverlaysAttached()
-                    edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.PLANNING)
+                    if (!isVoiceLiveActive) {
+                        edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.PLANNING)
+                    }
                     cursorView?.showThinking()
                     MaxHapticFeedback.startPulse(context)
                 }
 
-                is AutomationEvent.ObservationCompleted -> {
-                    // Subtle transition
-                }
+                is AutomationEvent.ObservationCompleted -> {}
 
                 is AutomationEvent.TargetGrounded -> {
                     ensureOverlaysAttached()
@@ -140,7 +269,9 @@ class MaxVisualFeedbackManager(private val context: Context) {
 
                 is AutomationEvent.ActionStarted -> {
                     ensureOverlaysAttached()
-                    edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.RUNNING)
+                    if (!isVoiceLiveActive) {
+                        edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.RUNNING)
+                    }
                     if (event.actionType.contains("SWIPE", ignoreCase = true) ||
                         event.actionType.contains("SCROLL", ignoreCase = true) ||
                         event.actionType.contains("DRAG", ignoreCase = true)
@@ -154,39 +285,56 @@ class MaxVisualFeedbackManager(private val context: Context) {
 
                 is AutomationEvent.TypingStarted -> {
                     ensureOverlaysAttached()
-                    edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.RUNNING)
+                    if (!isVoiceLiveActive) {
+                        edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.RUNNING)
+                    }
                     cursorView?.pulseAction()
                     MaxHapticFeedback.actionPulse(context)
                 }
 
                 is AutomationEvent.VerificationStarted -> {
                     ensureOverlaysAttached()
-                    edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.VERIFYING)
+                    if (!isVoiceLiveActive) {
+                        edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.VERIFYING)
+                    }
                     cursorView?.showThinking()
                 }
 
                 is AutomationEvent.ExecutionCancelled -> {
                     Log.i(TAG, "[UI_OVERLAY] ExecutionCancelled received. Detaching overlays immediately.")
                     cancelPendingDetach()
-                    detachOverlaysImmediately()
+                    detachCursorView()
+                    if (!isVoiceLiveActive) {
+                        detachOverlaysImmediately()
+                    }
                 }
 
                 is AutomationEvent.ExecutionFinished -> {
                     cursorView?.hideImmediately()
-                    if (event.success) {
-                        edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.SUCCESS)
-                        MaxHapticFeedback.successWave(context)
-                        scheduleDelayedDetach(COMPLETION_DISPLAY_MS)
+                    detachCursorView()
+                    if (!isVoiceLiveActive) {
+                        if (event.success) {
+                            edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.SUCCESS)
+                            MaxHapticFeedback.successWave(context)
+                            scheduleDelayedDetach(COMPLETION_DISPLAY_MS)
+                        } else {
+                            edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.FAILURE)
+                            MaxHapticFeedback.failureAlert(context)
+                            scheduleDelayedDetach(FAILURE_DISPLAY_MS)
+                        }
                     } else {
-                        edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.FAILURE)
-                        MaxHapticFeedback.failureAlert(context)
-                        scheduleDelayedDetach(FAILURE_DISPLAY_MS)
+                        // If voice live is active, show success/failure briefly on edge lighting then return to voice live wave
+                        val mode = if (event.success) EdgeLightingOverlayView.Mode.SUCCESS else EdgeLightingOverlayView.Mode.FAILURE
+                        edgeLightingView?.setMode(mode)
+                        mainHandler.postDelayed({
+                            if (isVoiceLiveActive) {
+                                edgeLightingView?.setMode(EdgeLightingOverlayView.Mode.VOICE_LIVE)
+                            }
+                        }, COMPLETION_DISPLAY_MS)
                     }
                 }
 
-                else -> {
-                    // Other events do not affect visual overlay
-                }
+                else -> {}
             }
         }
     }
@@ -194,12 +342,16 @@ class MaxVisualFeedbackManager(private val context: Context) {
     private fun scheduleDelayedDetach(delayMs: Long) {
         cancelPendingDetach()
         val runnable = Runnable {
-            Log.d(TAG, "[UI_OVERLAY] Completion animation elapsed. Detaching overlays to keep device 100% clean and idle.")
-            detachOverlaysImmediately()
+            if (!isVoiceLiveStateActive()) {
+                Log.d(TAG, "[UI_OVERLAY] Completion animation elapsed. Detaching overlays cleanly.")
+                detachOverlaysImmediately()
+            }
         }
         pendingDetachRunnable = runnable
         mainHandler.postDelayed(runnable, delayMs)
     }
+
+    private fun isVoiceLiveStateActive(): Boolean = isVoiceLiveActive
 
     private fun cancelPendingDetach() {
         pendingDetachRunnable?.let {
@@ -209,10 +361,11 @@ class MaxVisualFeedbackManager(private val context: Context) {
     }
 
     fun detachOverlaysImmediately() {
+        detachCursorView()
+        if (isVoiceLiveActive) return // Keep edge lighting attached if voice live is active
         cancelPendingDetach()
         edgeLightingView?.turnOffImmediately()
-        cursorView?.hideImmediately()
-
+        
         if (isAttached) {
             try {
                 edgeLightingView?.let {
@@ -220,19 +373,29 @@ class MaxVisualFeedbackManager(private val context: Context) {
                         windowManager.removeViewImmediate(it)
                     }
                 }
-                cursorView?.let {
-                    it.destroy()
-                    if (it.isAttachedToWindow) {
-                        windowManager.removeViewImmediate(it)
-                    }
-                }
             } catch (e: Exception) {
                 Log.w(TAG, "[UI_OVERLAY] Error removing overlay views: ${e.message}")
             } finally {
-                isAttached = false
-                edgeLightingView = null
-                cursorView = null
+                isAttached = isVoiceLiveActive
+                if (!isVoiceLiveActive) {
+                    edgeLightingView = null
+                }
                 Log.d(TAG, "[UI_OVERLAY] Overlays detached cleanly from WindowManager.")
+            }
+        }
+    }
+
+    private fun detachCursorView() {
+        cursorView?.let {
+            it.destroy()
+            try {
+                if (it.isAttachedToWindow) {
+                    windowManager.removeViewImmediate(it)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error removing cursorView: ${e.message}")
+            } finally {
+                cursorView = null
             }
         }
     }

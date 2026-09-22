@@ -307,12 +307,6 @@ async def test_voice_confirmation_through_max(test_env):
 @pytest.mark.asyncio
 async def test_ambiguous_cancellation_rejected(test_env):
     """Test 8: Speech containing 'stop' casually (e.g. 'non-stop coding') does not trigger cancellation."""
-    from core.gemini_live import GeminiLiveSession
-    from core.tool_executor import ToolRegistry
-
-    reg = ToolRegistry()
-    session = GeminiLiveSession(reg)
-
     # If no active tasks exist, cancellation gracefully reports no active tasks
     cancel_res = test_env["authority"].cancel_active_task(reason="casual speech")
     assert cancel_res["success"] is False

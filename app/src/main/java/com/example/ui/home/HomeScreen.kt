@@ -52,7 +52,9 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -60,7 +62,9 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.outlined.Menu
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -91,6 +95,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -112,8 +119,11 @@ import com.example.ui.theme.AccentCyan
 import com.example.ui.theme.Emerald400
 import com.example.ui.theme.MaxAccent
 import com.example.ui.theme.MaxBgDark
+import com.example.ui.theme.MaxBgLight
 import com.example.ui.theme.MaxBorder
 import com.example.ui.theme.MaxPrimary
+import com.example.ui.theme.MaxSecondary
+import com.example.ui.theme.MaxSuccess
 import com.example.ui.theme.MaxSurface
 import com.example.ui.theme.MaxSurfaceDark
 import com.example.ui.theme.MaxSurfaceVariant
@@ -129,15 +139,13 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Instagram-DM-Style AI Chat Interface for MAX.
+ * Flagship Next-Gen Dashboard & AI Assistant Home Screen for MAX.
  * Features:
- * - Conversation-first layout with smooth LazyColumn feed
- * - Compact top bar with live connection indicator
- * - Right-aligned user bubbles & left-aligned MAX bubbles with Markdown rendering
- * - Three-dot typing indicator (no neural orb)
- * - Compact inline expandable Agent Activity card
- * - Floating rounded pill composer with smooth send/mic transition & quick actions
- * - Integrated live voice mode in the composer area with audio visualizer
+ * - Stunning Glassmorphic Header & Status Bar with Connection Pulse
+ * - Immersive AI Greeting & Interactive Quick Action Cards Grid
+ * - Smooth LazyColumn Conversation Feed with Markdown & Code formatting
+ * - Compact Inline Agent Activity Card with Real-time Step Tracking
+ * - Floating Modern Pill Composer with Quick Actions Drawer, Voice Waveform & AI Speech Sync
  */
 @Composable
 fun HomeScreen(
@@ -150,7 +158,6 @@ fun HomeScreen(
     val audioRms by viewModel.audioRms.collectAsStateWithLifecycle()
     val liveUserCaption by viewModel.liveUserCaption.collectAsStateWithLifecycle()
     val liveAiCaption by viewModel.liveAiCaption.collectAsStateWithLifecycle()
-    val agentActivity by AgentActivityTracker.state.collectAsState()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -216,7 +223,7 @@ fun HomeScreen(
         containerColor = MaxBgDark,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            InstagramDmTopBar(
+            FlagshipTopBar(
                 isMaxEnabled = uiState.isMaxEnabled,
                 connectionState = uiState.connectionState,
                 onMenuClick = onOpenDrawer,
@@ -233,12 +240,13 @@ fun HomeScreen(
                 .navigationBarsPadding()
                 .imePadding()
         ) {
-            // Main Message Feed
+            // Main Message Feed & Dashboard
             if (uiState.messages.isEmpty() && liveAiCaption.isBlank() && !uiState.isThinking) {
-                InstagramDmEmptyState(
+                FlagshipDashboardEmptyState(
                     onPromptSelected = { prompt ->
                         viewModel.sendTextMessage(prompt)
                     },
+                    onNavigateTo = onNavigateTo,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {
@@ -247,8 +255,8 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 14.dp),
-                    contentPadding = PaddingValues(top = 12.dp, bottom = 90.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     items(
                         items = uiState.messages,
@@ -267,23 +275,10 @@ fun HomeScreen(
                         }
                     }
 
-                    // Compact Inline Agent Activity Card (when executing actions)
-                    if (agentActivity.stage != AgentStage.IDLE && !agentActivity.goal.isNullOrBlank()) {
-                        item(key = "agent_activity_inline") {
-                            InlineAgentActivityCard(
-                                activityState = agentActivity,
-                                onCancel = {
-                                    viewModel.clearPendingAutomation()
-                                    viewModel.interruptSpeech()
-                                }
-                            )
-                        }
-                    }
-
                     // Three-Dot Typing Indicator (when model is thinking)
                     if (uiState.isThinking && !uiState.isAiSpeaking) {
                         item(key = "typing_indicator") {
-                            InstagramDmTypingIndicator()
+                            FlagshipTypingIndicator()
                         }
                     }
                 }
@@ -296,7 +291,7 @@ fun HomeScreen(
                 exit = fadeOut() + scaleOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 96.dp)
+                    .padding(bottom = 104.dp)
             ) {
                 Surface(
                     onClick = {
@@ -308,11 +303,11 @@ fun HomeScreen(
                     },
                     shape = CircleShape,
                     color = MaxSurface,
-                    shadowElevation = 4.dp,
+                    shadowElevation = 6.dp,
                     border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp),
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
@@ -325,7 +320,7 @@ fun HomeScreen(
                         Text(
                             text = "New messages",
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            fontWeight = FontWeight.Bold,
                             color = MaxTextPrimary
                         )
                     }
@@ -339,7 +334,7 @@ fun HomeScreen(
                 exit = slideOutVertically { it } + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 85.dp, start = 14.dp, end = 14.dp)
+                    .padding(bottom = 90.dp, start = 14.dp, end = 14.dp)
             ) {
                 QuickPromptsCard(
                     onSelectPrompt = { prompt ->
@@ -350,7 +345,7 @@ fun HomeScreen(
                 )
             }
 
-            // Instagram-DM-Style Floating Rounded Composer with bottom background scrim
+            // Flagship Floating Rounded Composer with bottom background scrim
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -359,15 +354,15 @@ fun HomeScreen(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                MaxBgDark.copy(alpha = 0.75f),
+                                MaxBgDark.copy(alpha = 0.85f),
                                 MaxBgDark,
                                 MaxBgDark
                             )
                         )
                     )
-                    .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 10.dp)
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
             ) {
-                InstagramDmComposer(
+                FlagshipComposer(
                     inputText = inputText,
                     onInputTextChanged = { inputText = it },
                     onSend = {
@@ -402,11 +397,11 @@ fun HomeScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TOP BAR (Instagram DM Style: Compact, Clean, Subtle Status)
+// TOP BAR (Flagship Glassmorphic Header)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun InstagramDmTopBar(
+private fun FlagshipTopBar(
     isMaxEnabled: Boolean,
     connectionState: ConnectionState,
     onMenuClick: () -> Unit,
@@ -417,28 +412,57 @@ private fun InstagramDmTopBar(
     var showMenu by remember { mutableStateOf(false) }
 
     Surface(
-        color = MaxBgDark,
-        tonalElevation = 0.dp
+        color = MaxBgLight.copy(alpha = 0.95f),
+        shadowElevation = 2.dp,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder)
     ) {
         Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
-                    .padding(horizontal = 8.dp),
+                    .height(60.dp)
+                    .padding(horizontal = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Menu Icon
-                IconButton(onClick = onMenuClick) {
+                // Menu Button
+                IconButton(
+                    onClick = onMenuClick,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaxSurfaceVariant)
+                ) {
                     Icon(
                         imageVector = Icons.Outlined.Menu,
                         contentDescription = "Open Drawer",
                         tint = MaxTextPrimary,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Glowing AI Avatar
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                listOf(MaxPrimary, MaxSecondary, MaxAccent)
+                            )
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "M",
+                        color = Color.White,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Black
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
 
                 // Title & Live Status
                 Column(
@@ -450,15 +474,15 @@ private fun InstagramDmTopBar(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = "MAX",
+                            text = "MAX AI",
                             fontSize = 17.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaxTextPrimary,
-                            letterSpacing = 0.5.sp
+                            letterSpacing = 0.4.sp
                         )
                         Box(
                             modifier = Modifier
-                                .size(7.dp)
+                                .size(8.dp)
                                 .clip(CircleShape)
                                 .background(
                                     if (!isMaxEnabled) MaxTextMuted
@@ -472,26 +496,32 @@ private fun InstagramDmTopBar(
                     }
 
                     Text(
-                        text = if (!isMaxEnabled) "Paused"
+                        text = if (!isMaxEnabled) "Offline / Paused"
                         else when (connectionState) {
-                            ConnectionState.CONNECTED -> "Active now"
+                            ConnectionState.CONNECTED -> "Online • Real-time AI"
                             ConnectionState.CONNECTING -> "Connecting..."
-                            else -> "Offline"
+                            else -> "Reconnecting..."
                         },
-                        fontSize = 11.sp,
-                        color = MaxTextMuted,
+                        fontSize = 12.sp,
+                        color = if (connectionState == ConnectionState.CONNECTED && isMaxEnabled) MaxSuccess else MaxTextMuted,
                         fontWeight = FontWeight.Medium
                     )
                 }
 
                 // Options Menu
                 Box {
-                    IconButton(onClick = { showMenu = true }) {
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaxSurfaceVariant)
+                    ) {
                         Icon(
                             imageVector = Icons.Default.MoreVert,
                             contentDescription = "Options",
                             tint = MaxTextPrimary,
-                            modifier = Modifier.size(22.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
 
@@ -509,7 +539,8 @@ private fun InstagramDmTopBar(
                                     Text(
                                         text = if (isMaxEnabled) "MAX Enabled" else "MAX Disabled",
                                         color = MaxTextPrimary,
-                                        fontSize = 14.sp
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold
                                     )
                                     Spacer(modifier = Modifier.weight(1f))
                                     Switch(
@@ -554,17 +585,266 @@ private fun InstagramDmTopBar(
                     }
                 }
             }
+        }
+    }
+}
 
-            HorizontalDivider(
-                color = MaxBorder,
-                thickness = 1.dp
+// ─────────────────────────────────────────────────────────────────────────────
+// DASHBOARD EMPTY STATE (Stunning Hero Card & Quick Action Grid)
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun FlagshipDashboardEmptyState(
+    onPromptSelected: (String) -> Unit,
+    onNavigateTo: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(top = 20.dp, bottom = 120.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        // Hero Greeting Card
+        item {
+            Surface(
+                shape = RoundedCornerShape(24.dp),
+                color = MaxSurface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
+                shadowElevation = 4.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    listOf(MaxPrimary.copy(alpha = 0.2f), MaxAccent.copy(alpha = 0.2f))
+                                )
+                            )
+                            .border(1.5.dp, MaxPrimary.copy(alpha = 0.4f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaxPrimary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Hello, I am MAX",
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaxTextPrimary,
+                        letterSpacing = 0.3.sp
+                    )
+
+                    Text(
+                        text = "Your intelligent assistant for voice, WhatsApp, reminders, device automation, and on-screen vision.",
+                        fontSize = 13.5.sp,
+                        color = MaxTextMuted,
+                        textAlign = TextAlign.Center,
+                        lineHeight = 20.sp,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+            }
+        }
+
+        // Quick Action Grid Section Header
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 4.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Quick Actions & Shortcuts",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaxTextSecondary,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        // 2x2 Grid of Quick Cards
+        item {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    DashboardActionCard(
+                        title = "Send WhatsApp",
+                        subtitle = "Message Mom or friends",
+                        icon = Icons.Default.ChatBubbleOutline,
+                        accentColor = Emerald400,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onPromptSelected("Send a WhatsApp message to Mom") }
+                    )
+                    DashboardActionCard(
+                        title = "Set Alarm",
+                        subtitle = "Wake up or timers",
+                        icon = Icons.Default.Alarm,
+                        accentColor = NeonGold,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onPromptSelected("Set an alarm for 7:00 AM") }
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    DashboardActionCard(
+                        title = "Screen Vision",
+                        subtitle = "Read what's on screen",
+                        icon = Icons.Default.Visibility,
+                        accentColor = AccentCyan,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onPromptSelected("Read what's on my screen") }
+                    )
+                    DashboardActionCard(
+                        title = "Reminders",
+                        subtitle = "Check your schedule",
+                        icon = Icons.Default.Schedule,
+                        accentColor = MaxPrimary,
+                        modifier = Modifier.weight(1f),
+                        onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.REMINDERS) }
+                    )
+                }
+            }
+        }
+
+        // Suggested Prompts Section Header
+        item {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, start = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Suggested Commands",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaxTextSecondary,
+                    letterSpacing = 0.5.sp
+                )
+            }
+        }
+
+        // Suggestion Chips List
+        val suggestions = listOf(
+            "Send a WhatsApp message to Mom",
+            "Set an alarm for 7 AM",
+            "Read what's on my screen",
+            "Check today's reminders",
+            "What is on my calendar today?"
+        )
+
+        items(suggestions) { prompt ->
+            Surface(
+                onClick = { onPromptSelected(prompt) },
+                shape = RoundedCornerShape(16.dp),
+                color = MaxSurface,
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
+                shadowElevation = 1.dp,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = prompt,
+                        fontSize = 13.5.sp,
+                        color = MaxTextPrimary,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = MaxPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DashboardActionCard(
+    title: String,
+    subtitle: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    accentColor: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = MaxSurface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
+        shadowElevation = 2.dp,
+        modifier = modifier.semantics(mergeDescendants = true) {
+            role = Role.Button
+        }
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(accentColor.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = accentColor,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaxTextPrimary
+            )
+
+            Text(
+                text = subtitle,
+                fontSize = 11.5.sp,
+                color = MaxTextMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// USER MESSAGE BUBBLE (Right-Aligned, Rounded Gradient Pill)
+// USER MESSAGE BUBBLE
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -581,16 +861,17 @@ private fun UserMessageBubble(
     ) {
         Column(
             horizontalAlignment = Alignment.End,
-            modifier = Modifier.widthIn(max = 290.dp)
+            modifier = Modifier.widthIn(max = 295.dp)
         ) {
             Surface(
-                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 4.dp),
                 color = Color.Transparent,
+                shadowElevation = 2.dp,
                 modifier = Modifier
-                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp))
+                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 4.dp))
                     .background(
-                        Brush.horizontalGradient(
-                            listOf(Color(0xFF0066FF), Color(0xFF2563EB))
+                        Brush.linearGradient(
+                            listOf(Color(0xFF0062FF), Color(0xFF1E40AF))
                         )
                     )
                     .clickable { onCopyText() }
@@ -600,25 +881,26 @@ private fun UserMessageBubble(
                         text = message.text,
                         color = Color.White,
                         fontSize = 14.5.sp,
-                        lineHeight = 20.sp,
+                        lineHeight = 21.sp,
                         fontWeight = FontWeight.Normal,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp)
                     )
                 }
             }
 
             Text(
                 text = formattedTime,
-                fontSize = 10.sp,
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Medium,
                 color = MaxTextMuted,
-                modifier = Modifier.padding(top = 3.dp, end = 4.dp)
+                modifier = Modifier.padding(top = 4.dp, end = 6.dp)
             )
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAX MESSAGE BUBBLE (Left-Aligned, Clean White Surface, Markdown)
+// MAX MESSAGE BUBBLE
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -635,17 +917,17 @@ private fun MaxMessageBubble(
     ) {
         Column(
             horizontalAlignment = Alignment.Start,
-            modifier = Modifier.widthIn(max = 310.dp)
+            modifier = Modifier.widthIn(max = 315.dp)
         ) {
             Surface(
-                shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp),
+                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 4.dp, bottomEnd = 20.dp),
                 color = MaxSurface,
-                shadowElevation = 1.dp,
+                shadowElevation = 2.dp,
                 border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
                 modifier = Modifier.clickable { onCopyText() }
             ) {
                 SelectionContainer {
-                    Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                         MarkdownChatText(text = message.text)
                     }
                 }
@@ -654,11 +936,12 @@ private fun MaxMessageBubble(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.padding(top = 3.dp, start = 4.dp)
+                modifier = Modifier.padding(top = 4.dp, start = 6.dp)
             ) {
                 Text(
-                    text = if (message.isPending) "MAX • Streaming..." else "MAX • $formattedTime",
-                    fontSize = 10.sp,
+                    text = if (message.isPending) "MAX • Generating..." else "MAX • $formattedTime",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Medium,
                     color = if (message.isPending) MaxPrimary else MaxTextMuted
                 )
             }
@@ -667,34 +950,11 @@ private fun MaxMessageBubble(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STREAMING AI BUBBLE (Live Text Response)
+// TYPING INDICATOR
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun MaxStreamingBubble(text: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start
-    ) {
-        Surface(
-            shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 4.dp, bottomEnd = 18.dp),
-            color = MaxSurfaceVariant,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaxPrimary.copy(alpha = 0.3f)),
-            modifier = Modifier.widthIn(max = 310.dp)
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                MarkdownChatText(text = text)
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// THREE-DOT TYPING INDICATOR (Instagram DM Style)
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun InstagramDmTypingIndicator() {
+private fun FlagshipTypingIndicator() {
     val transition = rememberInfiniteTransition(label = "typing_dots")
     val dot1 by transition.animateFloat(
         initialValue = 0f,
@@ -756,133 +1016,11 @@ private fun InstagramDmTypingIndicator() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INLINE COMPACT AGENT ACTIVITY CARD (Multi-Step Execution in Feed)
+// COMPOSER (Flagship Floating Rounded Pill Bar)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun InlineAgentActivityCard(
-    activityState: AgentActivityState,
-    onCancel: () -> Unit
-) {
-    var isExpanded by remember { mutableStateOf(false) }
-
-    val stageColor = when (activityState.stage) {
-        AgentStage.COMPLETED -> Emerald400
-        AgentStage.FAILED -> NeonPink
-        AgentStage.EXECUTING, AgentStage.VERIFYING -> NeonGold
-        else -> MaxPrimary
-    }
-
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaxSurfaceVariant,
-        border = androidx.compose.foundation.BorderStroke(1.dp, stageColor.copy(alpha = 0.4f)),
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .animateContentSize()
-    ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-            // Header Row
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { isExpanded = !isExpanded }
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(stageColor)
-                )
-
-                Text(
-                    text = when (activityState.stage) {
-                        AgentStage.COMPLETED -> "Completed"
-                        AgentStage.FAILED -> "Failed"
-                        AgentStage.CANCELLED -> "Cancelled"
-                        AgentStage.PLANNING -> "Planning..."
-                        else -> "Working on your request..."
-                    },
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaxTextPrimary,
-                    modifier = Modifier.weight(1f)
-                )
-
-                Icon(
-                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = if (isExpanded) "Collapse" else "Expand",
-                    tint = MaxTextMuted,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-
-            // Goal Title
-            activityState.goal?.let { goal ->
-                Text(
-                    text = goal,
-                    fontSize = 12.sp,
-                    color = MaxTextSecondary,
-                    maxLines = if (isExpanded) Int.MAX_VALUE else 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 4.dp, start = 16.dp)
-                )
-            }
-
-            // Expanded Step Details
-            AnimatedVisibility(visible = isExpanded) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 10.dp, start = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    activityState.steps.forEach { step ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            when (step.status) {
-                                "COMPLETED" -> Text("✓", color = Emerald400, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                "RUNNING", "VERIFYING" -> Text("⏳", fontSize = 11.sp)
-                                "FAILED" -> Text("✕", color = NeonPink, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                else -> Text("•", color = MaxTextMuted, fontSize = 12.sp)
-                            }
-                            Text(
-                                text = step.actionType + (if (!step.targetText.isNullOrBlank()) ": ${step.targetText}" else ""),
-                                fontSize = 12.sp,
-                                color = if (step.status == "RUNNING") MaxTextPrimary else MaxTextMuted
-                            )
-                        }
-                    }
-
-                    if (activityState.stage !in listOf(AgentStage.COMPLETED, AgentStage.FAILED, AgentStage.CANCELLED, AgentStage.IDLE)) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Cancel",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = NeonPink,
-                            modifier = Modifier
-                                .clickable { onCancel() }
-                                .padding(vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// COMPOSER (Instagram DM Floating Rounded Pill Bar)
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun InstagramDmComposer(
+private fun FlagshipComposer(
     inputText: String,
     onInputTextChanged: (String) -> Unit,
     onSend: () -> Unit,
@@ -900,37 +1038,36 @@ private fun InstagramDmComposer(
     val isVoiceActive = isRecording || isAiSpeaking
 
     Surface(
-        shape = RoundedCornerShape(26.dp),
+        shape = RoundedCornerShape(28.dp),
         color = MaxSurface,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
         shadowElevation = 8.dp,
-        modifier = modifier.animateContentSize()
+        modifier = modifier.semantics(mergeDescendants = true) {
+            role = Role.Button
+        }.animateContentSize()
     ) {
         if (isVoiceActive) {
-            // Live Voice Mode Panel inside Composer
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Waveform Indicator
                 VoiceWaveformBar(audioRms = audioRms, isSpeaking = isAiSpeaking)
 
-                // Subtitle / Status Text
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = if (isAiSpeaking) "MAX is speaking..." else "Listening...",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        text = if (isAiSpeaking) "MAX is speaking..." else "Listening to your voice...",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
                         color = if (isAiSpeaking) MaxAccent else MaxPrimary
                     )
                     val caption = if (isAiSpeaking) liveAiCaption else liveUserCaption
                     if (caption.isNotBlank()) {
                         Text(
                             text = caption,
-                            fontSize = 11.sp,
+                            fontSize = 11.5.sp,
                             color = MaxTextMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -938,11 +1075,10 @@ private fun InstagramDmComposer(
                     }
                 }
 
-                // Close Voice Button
                 IconButton(
                     onClick = onStopVoice,
                     modifier = Modifier
-                        .size(36.dp)
+                        .size(38.dp)
                         .clip(CircleShape)
                         .background(MaxSurfaceVariant)
                 ) {
@@ -955,17 +1091,15 @@ private fun InstagramDmComposer(
                 }
             }
         } else {
-            // Standard Text Composer
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Plus Button (Quick Prompts)
                 IconButton(
                     onClick = onPlusClick,
-                    modifier = Modifier.size(38.dp)
+                    modifier = Modifier.size(40.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Add,
@@ -975,7 +1109,6 @@ private fun InstagramDmComposer(
                     )
                 }
 
-                // Multiline Input Text Field
                 Box(
                     modifier = Modifier
                         .weight(1f)
@@ -984,7 +1117,7 @@ private fun InstagramDmComposer(
                 ) {
                     if (inputText.isEmpty()) {
                         Text(
-                            text = "Message MAX...",
+                            text = "Ask MAX or type command...",
                             fontSize = 14.5.sp,
                             color = MaxTextMuted
                         )
@@ -996,7 +1129,7 @@ private fun InstagramDmComposer(
                         textStyle = TextStyle(
                             color = MaxTextPrimary,
                             fontSize = 14.5.sp,
-                            lineHeight = 19.sp
+                            lineHeight = 20.sp
                         ),
                         cursorBrush = SolidColor(MaxPrimary),
                         keyboardOptions = KeyboardOptions(
@@ -1011,12 +1144,11 @@ private fun InstagramDmComposer(
                     )
                 }
 
-                // Send or Mic Button (Smooth Transition)
                 if (inputText.isNotBlank()) {
                     IconButton(
                         onClick = onSend,
                         modifier = Modifier
-                            .size(38.dp)
+                            .size(40.dp)
                             .clip(CircleShape)
                             .background(
                                 Brush.linearGradient(
@@ -1034,7 +1166,7 @@ private fun InstagramDmComposer(
                 } else {
                     IconButton(
                         onClick = onMicClick,
-                        modifier = Modifier.size(38.dp)
+                        modifier = Modifier.size(40.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.Mic,
@@ -1066,20 +1198,20 @@ private fun VoiceWaveformBar(audioRms: Float, isSpeaking: Boolean) {
     Row(
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.height(24.dp)
+        modifier = Modifier.height(26.dp)
     ) {
         val barColor = if (isSpeaking) MaxAccent else MaxPrimary
         val normalizedRms = (audioRms / 10f).coerceIn(0.15f, 1f)
 
         listOf(0.4f, 0.8f, 1.0f, 0.7f, 0.3f).forEachIndexed { i, factor ->
             val heightRatio = if (isSpeaking) {
-                ((waveAnim * factor) * 18).coerceIn(4f, 20f)
+                ((waveAnim * factor) * 20).coerceIn(4f, 22f)
             } else {
-                ((normalizedRms * factor + waveAnim * 0.2f) * 18).coerceIn(4f, 20f)
+                ((normalizedRms * factor + waveAnim * 0.2f) * 20).coerceIn(4f, 22f)
             }
             Box(
                 modifier = Modifier
-                    .width(3.dp)
+                    .width(3.5.dp)
                     .height(heightRatio.dp)
                     .clip(CircleShape)
                     .background(barColor)
@@ -1089,106 +1221,7 @@ private fun VoiceWaveformBar(audioRms: Float, isSpeaking: Boolean) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EMPTY STATE (Minimal, No Hero Graphics, Prompt Chips)
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun InstagramDmEmptyState(
-    onPromptSelected: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Column(
-        modifier = modifier
-            .padding(horizontal = 24.dp)
-            .padding(bottom = 80.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        // Minimal MAX Badge
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(MaxPrimary.copy(alpha = 0.15f), MaxAccent.copy(alpha = 0.15f))
-                    )
-                )
-                .border(1.dp, MaxPrimary.copy(alpha = 0.3f), CircleShape),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.AutoAwesome,
-                contentDescription = null,
-                tint = MaxPrimary,
-                modifier = Modifier.size(22.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(14.dp))
-
-        Text(
-            text = "MAX",
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            color = MaxTextPrimary
-        )
-
-        Text(
-            text = "Your personal AI assistant.\nAsk MAX anything or tell MAX what to do.",
-            fontSize = 13.sp,
-            color = MaxTextMuted,
-            textAlign = TextAlign.Center,
-            lineHeight = 18.sp,
-            modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
-        )
-
-        // Suggestion Chips
-        val suggestions = listOf(
-            "Send a WhatsApp message to Mom",
-            "Set an alarm for 7 AM",
-            "Read what's on my screen",
-            "Check today's reminders"
-        )
-
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            suggestions.forEach { prompt ->
-                Surface(
-                    onClick = { onPromptSelected(prompt) },
-                    shape = RoundedCornerShape(18.dp),
-                    color = MaxSurfaceVariant,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = prompt,
-                            fontSize = 13.sp,
-                            color = MaxTextPrimary,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = MaxPrimary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// QUICK PROMPTS CARD (Popup from Plus Button)
+// QUICK PROMPTS CARD
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -1197,30 +1230,30 @@ private fun QuickPromptsCard(
     onDismiss: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(20.dp),
         color = MaxSurface,
         border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
         shadowElevation = 10.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Quick Actions",
-                    fontSize = 13.sp,
+                    text = "Quick Assistant Actions",
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaxTextPrimary
                 )
-                IconButton(onClick = onDismiss, modifier = Modifier.size(20.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = MaxTextMuted, modifier = Modifier.size(16.dp))
+                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = MaxTextMuted, modifier = Modifier.size(18.dp))
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             val quickItems = listOf(
                 "💬 Message" to "Send a WhatsApp message to ",
@@ -1233,22 +1266,22 @@ private fun QuickPromptsCard(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(RoundedCornerShape(10.dp))
                         .clickable { onSelectPrompt(prompt) }
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
+                        .padding(horizontal = 10.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     Text(
                         text = label,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
                         color = MaxPrimary,
-                        modifier = Modifier.width(96.dp)
+                        modifier = Modifier.width(100.dp)
                     )
                     Text(
                         text = prompt,
-                        fontSize = 12.sp,
+                        fontSize = 12.5.sp,
                         color = MaxTextSecondary,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -1302,7 +1335,7 @@ private fun MarkdownChatText(text: String) {
         text = annotatedString,
         color = MaxTextPrimary,
         fontSize = 14.sp,
-        lineHeight = 20.sp
+        lineHeight = 21.sp
     )
 }
 
@@ -1314,7 +1347,6 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendFormattedInli
                 append(part)
             }
         } else {
-            // Check for inline code `...`
             val codeParts = part.split("`")
             codeParts.forEachIndexed { ci, cpart ->
                 if (ci % 2 == 1) {

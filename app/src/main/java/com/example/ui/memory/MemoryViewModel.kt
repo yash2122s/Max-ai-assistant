@@ -123,23 +123,20 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
 
     fun deleteMemory(memory: PermanentMemory) {
         viewModelScope.launch(Dispatchers.IO) {
-            val dao = com.example.data.local.AppDatabase.getDatabase(getApplication()).permanentMemoryDao()
-            dao.deleteById(memory.memoryId)
+            repository.deleteById(memory.memoryId)
             _events.send(MemoryUiEvent.ShowToast("Memory deleted"))
         }
     }
 
     fun togglePinned(memory: PermanentMemory) {
         viewModelScope.launch(Dispatchers.IO) {
-            val dao = com.example.data.local.AppDatabase.getDatabase(getApplication()).permanentMemoryDao()
-            dao.togglePinned(memory.memoryId, !memory.pinned)
+            repository.togglePinned(memory.memoryId, !memory.pinned)
         }
     }
 
     fun toggleEnabled(memory: PermanentMemory) {
         viewModelScope.launch(Dispatchers.IO) {
-            val dao = com.example.data.local.AppDatabase.getDatabase(getApplication()).permanentMemoryDao()
-            dao.toggleEnabled(memory.memoryId, !memory.enabled)
+            repository.toggleEnabled(memory.memoryId, !memory.enabled)
         }
     }
 }

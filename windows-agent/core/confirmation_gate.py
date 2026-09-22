@@ -176,6 +176,25 @@ class HumanConfirmationGate:
                 }
             return None
 
+    @property
+    def has_pending(self) -> bool:
+        with self._lock:
+            self._cleanup_expired()
+            return len(self._pending) > 0
+
+    def confirm_latest_pending(self, approved: bool = True, reason: str = "Voice confirmation") -> Dict[str, Any]:
+        with self._lock:
+            self._cleanup_expired()
+            if not self._pending:
+                return {"status": "error", "message": "No pending action to confirm."}
+            # Get most recent ticket
+            latest_tid = list(self._pending.keys())[-1]
+
+        if approved:
+            return self.user_ui_approve(latest_tid)
+        else:
+            return self.user_ui_reject(latest_tid, reason=reason)
+
     def _cleanup_expired(self):
         now = time.time()
         expired = [tid for tid, act in self._pending.items() if (now - act.created_at) > self.expiry_seconds]

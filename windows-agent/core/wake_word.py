@@ -49,20 +49,25 @@ class RealWakeWordEngine:
         self._init_model()
 
     def _init_model(self):
-        """Initializes Vosk model and Kaldi recognizer with grammar constraint."""
+        """Initializes Vosk model and Kaldi recognizer with grammar constraint via shared vosk_manager."""
         if not os.path.exists(self.model_path):
             logger.error(f"Vosk acoustic model directory not found at: {self.model_path}")
             return
 
         try:
-            from vosk import Model, KaldiRecognizer
-            logger.info(f"Loading local acoustic model from: {self.model_path}")
-            self._model = Model(self.model_path)
-            # Constrain search space to wake phrases + [unk] for near-zero false positive rate
-            grammar = json.dumps(self.wake_words + ["[unk]"])
-            self._recognizer = KaldiRecognizer(self._model, self.sample_rate, grammar)
-            self._recognizer.SetWords(False)
-            logger.info(f"✅ Real acoustic wake word model ready. Grammar: {self.wake_words}")
+            from core.vosk_manager import vosk_manager
+            self._model = vosk_manager.acquire_model(self.model_path, consumer_id="WakeWord")
+            grammar = self.wake_words + ["[unk]"]
+            self._recognizer = vosk_manager.create_recognizer(
+                self.model_path,
+                consumer_id="WakeWord",
+                sample_rate=self.sample_rate,
+                grammar=grammar
+            )
+            if self._recognizer is not None:
+                logger.info(f"✅ Real acoustic wake word model ready. Grammar: {self.wake_words}")
+            else:
+                logger.warning("Wake word recognizer initialization failed.")
         except Exception as e:
             logger.error(f"Failed to initialize Vosk model: {e}")
             self._model = None
@@ -82,6 +87,8 @@ class RealWakeWordEngine:
             if self._running:
                 return
             if not self.is_available:
+                self._init_model()
+            if not self.is_available:
                 logger.warning("Cannot start wake word engine: model not loaded.")
                 return
             self._running = True
@@ -90,11 +97,26 @@ class RealWakeWordEngine:
             logger.info(f"👂 Real wake-word detector active (Listening on 16kHz PCM for {self.wake_words})")
 
     def stop(self):
-        """Stops the wake word engine."""
+        """Stops the wake word engine and releases recognizer/model."""
         with self._lock:
             self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=1.0)
+            self._thread = None
+        if self._recognizer is not None:
+            try:
+                from core.vosk_manager import vosk_manager
+                vosk_manager.destroy_recognizer(self._recognizer, consumer_id="WakeWord")
+            except Exception:
+                pass
+            self._recognizer = None
+        if self._model is not None:
+            try:
+                from core.vosk_manager import vosk_manager
+                vosk_manager.release_model(self.model_path, consumer_id="WakeWord")
+            except Exception:
+                pass
+            self._model = None
         logger.info("🛑 Real wake word engine stopped")
 
     def feed_audio(self, pcm_chunk: bytes):

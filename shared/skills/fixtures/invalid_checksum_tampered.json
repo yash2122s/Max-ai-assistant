@@ -1,0 +1,23 @@
+{
+  "skill_id": "com.max.test.tampered",
+  "name": "Tampered Skill",
+  "description": "Demonstrates detection of forged/tampered checksum.",
+  "version": "1.0.0",
+  "schema_version": "1.0.0",
+  "checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+  "supported_platforms": ["android"],
+  "requirements": {
+    "common": { "capabilities": [], "permissions": [] },
+    "android": { "capabilities": [], "permissions": [] },
+    "windows": { "capabilities": [], "permissions": [] }
+  },
+  "allowed_capabilities": ["ui.click"],
+  "steps": [
+    {
+      "step_id": "step_1",
+      "action": "ui.click",
+      "target": "Button",
+      "depends_on": []
+    }
+  ]
+}

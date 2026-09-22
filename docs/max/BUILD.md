@@ -6,7 +6,7 @@
 |----------|-------|
 | Project name | Gemini Live |
 | App module | `:app` |
-| App ID | `com.aistudio.geminilive.abcde` |
+| App ID | `com.maxaiagent.yash` |
 | Package | `com.example` |
 | compileSdk | 36 (API 36.1 — `release(36) { minorApiLevel = 1 }`) |
 | targetSdk | 36 |

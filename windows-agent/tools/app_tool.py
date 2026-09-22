@@ -147,112 +147,26 @@ class AppHelper:
 
     def launch_app(self, target: str) -> dict:
         """
-        Launches an application by alias, executable name, Start Menu shortcut, fuzzy registry search, or direct path.
+        Authoritative application launcher delegating to app_control.open_application.
         """
-        target_clean = target.strip()
-        target_lower = target_clean.lower()
-
-        # Reject dangerous shell chaining metacharacters
-        if any(c in target_clean for c in ["&", "|", ";", ">", "<", "`", "$"]):
-            raise ValueError(f"Invalid application target containing illegal characters: '{target_clean}'")
-
-        # 1. Alias lookup & direct system launch
-        if target_lower in COMMON_APP_ALIASES:
-            app_cmd = COMMON_APP_ALIASES[target_lower]
-            try:
-                subprocess.Popen(["cmd.exe", "/c", "start", "", app_cmd], shell=False)
-                return {
-                    "status": "success",
-                    "message": f"Successfully launched '{target}' ({app_cmd}).",
-                    "exe_path": app_cmd
-                }
-            except Exception:
-                try:
-                    os.startfile(app_cmd)
-                    return {
-                        "status": "success",
-                        "message": f"Successfully launched '{target}' via os.startfile.",
-                        "exe_path": app_cmd
-                    }
-                except Exception as e:
-                    logger.warning(f"Direct start for alias {app_cmd} failed: {e}")
-
-        # Direct executable path check or command launch
-        if os.path.exists(target_clean):
-            try:
-                os.startfile(target_clean)
-                return {
-                    "status": "success",
-                    "message": f"Successfully launched '{target}' from path: {target_clean}",
-                    "exe_path": target_clean
-                }
-            except Exception as e:
-                logger.warning(f"os.startfile failed for path {target_clean}: {e}")
-
-        # 2. Check Start Menu Shortcuts directly
-        start_shortcuts = self._get_start_menu_shortcuts()
-        for item in start_shortcuts:
-            app_name_lower = item["app"].lower()
-            if target_lower == app_name_lower or target_lower in app_name_lower:
-                try:
-                    os.startfile(item["exe"])
-                    return {
-                        "status": "success",
-                        "message": f"Successfully launched {item['app']}",
-                        "exe_path": item["exe"]
-                    }
-                except Exception as e:
-                    logger.warning(f"os.startfile failed for shortcut {item['exe']}: {e}")
-
-        # 3. Query installed apps registry database
-        apps = self.list_installed_apps()
-        exe_path = None
-        app_name = target_clean
-
-        # Exact match
-        for item in apps:
-            if item["app"].lower() == target_lower:
-                exe_path = item["exe"]
-                app_name = item["app"]
-                break
-
-        # Fuzzy match
-        if not exe_path:
-            for item in apps:
-                if target_lower in item["app"].lower() or (item["exe"] and target_lower in os.path.basename(item["exe"]).lower()):
-                    exe_path = item["exe"]
-                    app_name = item["app"]
-                    break
-
-        if exe_path and os.path.exists(exe_path):
-            try:
-                os.startfile(exe_path)
-                return {
-                    "status": "success",
-                    "message": f"Successfully launched {app_name}",
-                    "exe_path": exe_path
-                }
-            except Exception as e:
-                logger.warning(f"os.startfile failed for exe_path {exe_path}: {e}")
-
-        # 4. Fallback: launch target directly via os.startfile or cmd /c start "" "target"
-        try:
-            os.startfile(target_clean)
+        from .app_control import open_application
+        res = open_application(target)
+        if res.get("status") == "success":
             return {
                 "status": "success",
-                "message": f"Dispatched launch for '{target}' via os.startfile.",
-                "exe_path": target_clean
+                "message": res.get("message", f"Successfully launched '{target}'"),
+                "exe_path": res.get("executable", target),
+                "hwnd": res.get("hwnd"),
+                "pid": res.get("pid"),
+                "verified": res.get("verified", True)
             }
-        except Exception:
-            try:
-                subprocess.Popen(["cmd.exe", "/c", "start", "", target_clean], shell=False)
-                return {
-                    "status": "success",
-                    "message": f"Dispatched launch command for '{target}' via cmd start.",
-                    "exe_path": target_clean
-                }
-            except Exception as e:
-                raise FileNotFoundError(f"Could not locate installed app or executable matching: '{target}' ({e})")
+        else:
+            return {
+                "status": "error",
+                "message": res.get("message", f"Failed to launch '{target}'"),
+                "verified": False,
+                "failure_reason": res.get("failure_reason")
+            }
 
 
     def is_running(self, target: str) -> dict:

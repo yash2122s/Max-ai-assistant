@@ -40,9 +40,10 @@ TOOL_ALIASES: Dict[str, str] = {
     "mute": "mute_unmute",
     "battery": "get_battery_status",
     "search": "search_files",
-    "create_text_file": "create_text_file",
-    "write_file": "create_text_file",
-    "create_file": "create_text_file",
+    "create_text_file": "create_file",
+    "create_file": "create_file",
+    "write_file": "write_file",
+    "write_text_file": "write_file",
     "read_text_file": "read_file",
     "read_file": "read_file",
     "make_folder": "create_folder",
@@ -54,10 +55,45 @@ TOOL_ALIASES: Dict[str, str] = {
     "delete_dir": "delete_folder",
     "system_info": "get_system_info",
     "sys_info": "get_system_info",
+    # Computer Use Aliases
+    "observe_screen": "computer_use_observe",
+    "observe_desktop": "computer_use_observe",
+    "resolve_ui_target": "computer_use_resolve",
+    "cu_click": "computer_use_click",
+    "cu_type": "computer_use_type",
+    "cu_step": "computer_use_step",
+    # MCP Aliases
+    "mcp_call": "mcp_call_tool",
+    "mcp_execute": "mcp_call_tool",
 }
 
 # Parameter Aliases per Canonical Tool
 ARGUMENT_ALIASES: Dict[str, Dict[str, str]] = {
+    "computer_use_click": {
+        "name": "target",
+        "element": "target",
+        "label": "target",
+        "button_name": "target",
+    },
+    "computer_use_type": {
+        "string": "text",
+        "content": "text",
+        "value": "text",
+        "field": "target",
+        "element": "target",
+    },
+    "computer_use_step": {
+        "action": "action_type",
+        "type": "action_type",
+        "ref": "target_ref",
+        "query": "target_query",
+    },
+    "mcp_call_tool": {
+        "server": "server_name",
+        "tool": "tool_name",
+        "args": "arguments",
+        "params": "arguments",
+    },
     "open_application": {
         "app": "app_name",
         "application": "app_name",
@@ -106,9 +142,9 @@ ARGUMENT_ALIASES: Dict[str, Dict[str, str]] = {
         "path": "directory",
     },
     "open_file": {
-        "path": "file_path",
-        "filepath": "file_path",
-        "file": "file_path",
+        "file_path": "path",
+        "filepath": "path",
+        "file": "path",
     },
     "delete_file": {
         "path": "filepath",
@@ -121,10 +157,18 @@ ARGUMENT_ALIASES: Dict[str, Dict[str, str]] = {
         "folder": "folder_path",
     },
     "create_file": {
-        "path": "path",
         "file_path": "path",
         "file": "path",
         "text": "content",
+    },
+    "write_file": {
+        "file_path": "path",
+        "file": "path",
+        "text": "content",
+    },
+    "read_file": {
+        "file_path": "path",
+        "file": "path",
     },
     "run_command": {
         "cmd": "command",
@@ -155,15 +199,15 @@ class PlanNormalizer:
             raw_tool = step.tool.strip()
             
             # 1. Resolve Canonical Tool Name
-            if raw_tool in canonical_tools:
-                canonical_tool = raw_tool
-            elif raw_tool in TOOL_ALIASES:
+            if raw_tool in TOOL_ALIASES:
                 canonical_tool = TOOL_ALIASES[raw_tool]
                 if canonical_tool not in canonical_tools:
                     return False, None, PlannerError(
                         code="UNKNOWN_CANONICAL_TOOL",
                         message=f"Tool alias '{raw_tool}' resolved to unregistered tool '{canonical_tool}'"
                     )
+            elif raw_tool in canonical_tools:
+                canonical_tool = raw_tool
             else:
                 return False, None, PlannerError(
                     code="UNRESOLVABLE_TOOL",
