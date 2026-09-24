@@ -165,7 +165,13 @@ class SettingsManager(private val context: Context) {
 
     enum class OnboardingStage {
         NOT_STARTED,
+        AUTH_REQUIRED,
+        AUTHENTICATING,
+        AUTHENTICATED,
+        LICENSE_INITIALIZING,
+        PERMISSIONS_REQUIRED,
         PERMISSIONS_IN_PROGRESS,
+        AI_CONFIG_REQUIRED,
         AI_CONFIG_IN_PROGRESS,
         COMPLETED
     }
@@ -245,6 +251,27 @@ class SettingsManager(private val context: Context) {
                 .apply()
         }
 
+    /** Tracks daily messages used for trial entitlement. Resets daily. */
+    var localDailyUsageCount: Long
+        get() {
+            val lastDate = prefs.getString("local_daily_usage_date", "") ?: ""
+            val today = java.time.LocalDate.now().toString()
+            if (lastDate != today) {
+                prefs.edit()
+                    .putString("local_daily_usage_date", today)
+                    .putLong("local_daily_usage_count", 0L)
+                    .apply()
+                return 0L
+            }
+            return prefs.getLong("local_daily_usage_count", 0L)
+        }
+        set(value) {
+            prefs.edit()
+                .putString("local_daily_usage_date", java.time.LocalDate.now().toString())
+                .putLong("local_daily_usage_count", value)
+                .apply()
+        }
+
     /** Returns true if there's budget remaining for agentic iterations today. */
     fun hasAgenticBudget(): Boolean = agenticIterationsUsedToday < agenticDailyBudget
 
@@ -320,13 +347,23 @@ class SettingsManager(private val context: Context) {
 
     /** The Gemini model to use for Live audio sessions. */
     var liveVoiceModelName: String
-        get() = prefs.getString("live_voice_model_name", "gemini-3.1-flash-live-preview") ?: "gemini-3.1-flash-live-preview"
+        get() = prefs.getString("live_voice_model_name", "gemini-3.8-live") ?: "gemini-3.8-live"
         set(value) = prefs.edit().putString("live_voice_model_name", value).apply()
+
+    /** Model routing mode: AUTO, FAST, DEEP. Default: AUTO */
+    var modelRoutingMode: String
+        get() = prefs.getString("model_routing_mode", "AUTO") ?: "AUTO"
+        set(value) = prefs.edit().putString("model_routing_mode", value).apply()
 
     /** Voice persona for Gemini Live audio output. Options: Aoede, Kore, Fenrir, Puck, etc. */
     var liveVoiceName: String
         get() = prefs.getString("live_voice_name", "Aoede") ?: "Aoede"
         set(value) = prefs.edit().putString("live_voice_name", value).apply()
+
+    /** When true, Gemini Extended Thinking thought summaries are streamed and visible in UI. */
+    var isThinkingObservabilityEnabled: Boolean
+        get() = prefs.getBoolean("thinking_observability_enabled", true)
+        set(value) = prefs.edit().putBoolean("thinking_observability_enabled", value).apply()
 
     fun setNotificationAppEnabled(packageName: String, enabled: Boolean) {
         prefs.edit().putBoolean("notif_app_enabled_$packageName", enabled).apply()
@@ -352,8 +389,22 @@ class SettingsManager(private val context: Context) {
         set(value) = securePrefs.edit().putString(KEY_UI_AGENT_API_KEY, value.trim()).apply()
 
     var uiAgentModel: String
-        get() = prefs.getString(KEY_UI_AGENT_MODEL, DEFAULT_UI_AGENT_MODEL) ?: DEFAULT_UI_AGENT_MODEL
-        set(value) = prefs.edit().putString(KEY_UI_AGENT_MODEL, value).apply()
+        get() {
+            val raw = prefs.getString(KEY_UI_AGENT_MODEL, DEFAULT_UI_AGENT_MODEL) ?: DEFAULT_UI_AGENT_MODEL
+            return if (raw.contains("2.0-flash", ignoreCase = true)) {
+                DEFAULT_UI_AGENT_MODEL
+            } else {
+                raw
+            }
+        }
+        set(value) {
+            val sanitized = if (value.contains("2.0-flash", ignoreCase = true)) {
+                DEFAULT_UI_AGENT_MODEL
+            } else {
+                value
+            }
+            prefs.edit().putString(KEY_UI_AGENT_MODEL, sanitized).apply()
+        }
 
     val isUiAgentConfigured: Boolean
         get() = uiAgentApiKey.isNotBlank() || geminiApiKey.isNotBlank()

@@ -6,6 +6,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -42,6 +44,7 @@ object MaxDestinations {
     const val CAPABILITIES = "capabilities"
     const val ABOUT = "about"
     const val PRIVACY = "privacy"
+    const val LICENSE = "license"
 }
 
 data class NavigationDrawerItem(
@@ -54,6 +57,7 @@ data class NavigationDrawerItem(
 
 val MainDrawerItems = listOf(
     NavigationDrawerItem(MaxDestinations.HOME, "Home & Voice", Icons.Default.Home, Color(0xFF0066FF)),
+    NavigationDrawerItem(MaxDestinations.LICENSE, "License & Premium", Icons.Default.Verified, Color(0xFF10B981)),
     NavigationDrawerItem(MaxDestinations.MEMORY, "Memory Wallet", Icons.Default.FolderShared, Color(0xFF8B5CF6)),
     NavigationDrawerItem(MaxDestinations.PERIOD, "Period Tracker", Icons.Default.Favorite, Color(0xFFEC4899)),
     NavigationDrawerItem(MaxDestinations.REMINDERS, "Reminders", Icons.Default.Alarm, Color(0xFFF59E0B)),
@@ -75,11 +79,27 @@ fun MaxNavGraph(
     modifier: Modifier = Modifier
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as com.example.MyApplication
     val settingsManager = androidx.compose.runtime.remember { com.example.data.preferences.SettingsManager(context) }
-    val initialDestination = if (settingsManager.onboardingStage == com.example.data.preferences.SettingsManager.OnboardingStage.COMPLETED) {
+    val currentUser by app.maxLicenseManager.currentUser.collectAsState()
+    val isAuthCompleted = currentUser != null
+
+    val initialDestination = if (settingsManager.onboardingStage == com.example.data.preferences.SettingsManager.OnboardingStage.COMPLETED && isAuthCompleted) {
         MaxDestinations.HOME
     } else {
         MaxDestinations.ONBOARDING
+    }
+
+    // Gatekeeper: if user signs out or has no active Google Account, redirect immediately to ONBOARDING
+    androidx.compose.runtime.LaunchedEffect(currentUser) {
+        if (currentUser == null) {
+            val currentRoute = navController.currentDestination?.route
+            if (currentRoute != null && currentRoute != MaxDestinations.ONBOARDING) {
+                navController.navigate(MaxDestinations.ONBOARDING) {
+                    popUpTo(0) { inclusive = true }
+                }
+            }
+        }
     }
 
     NavHost(
@@ -112,10 +132,17 @@ fun MaxNavGraph(
         }
 
         // Controlled Screens in Drawer Navigation
+        composable(MaxDestinations.LICENSE) {
+            com.example.ui.license.LicenseActivationScreen(
+                onNavigateBack = navigateBackToDrawer
+            )
+        }
+
         composable(MaxDestinations.SETTINGS) {
             com.example.ui.settings.SettingsScreen(
                 onNavigateBack = navigateBackToDrawer,
-                onNavigateToSkills = { navController.navigate(MaxDestinations.SKILLS) }
+                onNavigateToSkills = { navController.navigate(MaxDestinations.SKILLS) },
+                onNavigateToLicense = { navController.navigate(MaxDestinations.LICENSE) }
             )
         }
 

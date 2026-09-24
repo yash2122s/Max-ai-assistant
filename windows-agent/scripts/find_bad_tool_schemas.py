@@ -15,7 +15,7 @@ from core.unified_tool_registry import unified_tool_registry
 
 api_key = os.getenv("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key)
-model_name = "gemini-3.1-flash-live-preview"
+model_name = "gemini-3.8-live"
 
 declarations = unified_tool_registry.declarations
 

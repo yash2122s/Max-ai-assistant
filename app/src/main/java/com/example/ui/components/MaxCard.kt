@@ -1,41 +1,56 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import com.example.ui.theme.BorderDark
-import com.example.ui.theme.MaxDimensions
-import com.example.ui.theme.MaxSurfaceDark
+import com.example.ui.theme.*
 
-import androidx.compose.ui.graphics.Shape
-
+/**
+ * iOS Inset Grouped Card with continuous squircle corners and specular top highlight.
+ */
 @Composable
 fun MaxCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
-    backgroundColor: Color = MaxSurfaceDark,
-    borderColor: Color = BorderDark,
-    borderWidth: Dp = 1.dp,
+    backgroundColor: Color = MaxSurfaceCard,
+    borderColor: Color = MaxBorderHairline,
+    borderWidth: Dp = MaxDimensions.borderHairline,
     shape: Shape? = null,
-    cornerRadius: Dp = MaxDimensions.radiusLg,
+    cornerRadius: Dp = MaxDimensions.radiusXl,
+    specularHighlight: Boolean = true,
     contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
-    Card(
+    val cardShape = shape ?: RoundedCornerShape(cornerRadius)
+
+    val borderModifier = if (specularHighlight) {
+        Modifier.specularBorder(cardShape, borderWidth, MaxBorderSpecular, borderColor)
+    } else {
+        Modifier.specularBorder(cardShape, borderWidth, borderColor, borderColor)
+    }
+
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier),
-        shape = shape ?: RoundedCornerShape(cornerRadius),
-        colors = CardDefaults.cardColors(containerColor = backgroundColor),
-        border = BorderStroke(borderWidth, borderColor)
+            .clip(cardShape)
+            .then(borderModifier)
+            .background(backgroundColor)
+            .then(
+                if (onClick != null) {
+                    Modifier.iosPressEffect(
+                        scalePressed = 0.98f,
+                        alphaPressed = 0.90f,
+                        onClick = onClick
+                    )
+                } else Modifier
+            )
     ) {
         Column(
             modifier = Modifier.padding(contentPadding),
@@ -43,3 +58,4 @@ fun MaxCard(
         )
     }
 }
+

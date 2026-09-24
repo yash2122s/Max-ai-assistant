@@ -87,7 +87,7 @@ class StreamingResponseManager(
     }
 
     fun handleUserSpeaking() {
-        // Interruption / barge-in disabled
+        stopAllPlayback()
     }
 
     fun stopAllPlayback() {

@@ -19,9 +19,9 @@ class VoiceForegroundService : Service() {
         createNotificationChannel()
         
         val notification: Notification = NotificationCompat.Builder(this, "VoiceServiceChannel")
-            .setContentTitle("Jarvis Assistant")
+            .setContentTitle("MAX Autonomous Assistant")
             .setContentText("Listening in the background...")
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(com.example.R.drawable.ic_max_notification)
             .build()
             
         val hasMicPermission = ContextCompat.checkSelfPermission(

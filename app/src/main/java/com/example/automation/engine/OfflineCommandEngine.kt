@@ -33,10 +33,14 @@ object OfflineCommandEngine {
         if (fastPathPlan != null) {
             Log.d(TAG, "Fast-path resolved plan (${fastPathPlan.size} steps) for: '$rawText'. Delegating to canonical GoalPlanner.")
             val planResult = GoalPlanner.planAndExecute(context, rawText)
+            val isTelugu = com.example.automation.computeruse.isTeluguGoal(rawText)
+            val defaultSuccessMsg = if (isTelugu) "Action poorthi ayyindi. Verify chesanu." else "Action completed and verified."
+            val defaultFailMsg = if (isTelugu) "Action fail ayyindi." else "Action failed."
+            val outcomeMsg = planResult.stepResults.lastOrNull()?.message ?: planResult.errorMessage ?: if (planResult.success) defaultSuccessMsg else defaultFailMsg
             return ToolResult(
                 success = planResult.success,
                 toolName = if (fastPathPlan.size == 1) fastPathPlan[0].actionType else "UI_AUTOMATION",
-                message = planResult.errorMessage ?: if (planResult.success) "Action completed." else "Action failed."
+                message = outcomeMsg
             )
         }
 

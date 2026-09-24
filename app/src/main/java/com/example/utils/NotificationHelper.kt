@@ -87,7 +87,7 @@ object NotificationHelper {
         )
 
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setSmallIcon(com.example.R.drawable.ic_max_notification)
             .setContentTitle("Auto-Reply Confirmation: $sender")
             .setContentText("Incoming: \"$incomingMessage\" | Proposed: \"$proposedReply\"")
             .setStyle(NotificationCompat.BigTextStyle().bigText("Sender: $sender\nIncoming: \"$incomingMessage\"\nProposed Reply: \"$proposedReply\""))

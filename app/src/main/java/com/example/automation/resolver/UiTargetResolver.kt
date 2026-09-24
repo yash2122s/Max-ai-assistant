@@ -363,14 +363,16 @@ object UiTargetResolver {
                               nodeId.contains("container") || nodeId.contains("layout") || nodeId.contains("background")
 
         // 2. Exact match evaluations
+        val isSearchEdit = isSearchInputNode(node)
+        val isSearchQuery = q.contains("search") || q.contains("input") || q.contains("box") || q.contains("edit") || q.contains("bar")
         if (nodeText.equals(query, ignoreCase = false)) {
-            baseScore = 1.00f
+            baseScore = if (isSearchEdit && !isSearchQuery) 0.60f else 1.00f
             matchType = "EXACT_TEXT_CASE_SENSITIVE"
         } else if (nodeText.equals(query, ignoreCase = true)) {
-            baseScore = 0.98f
+            baseScore = if (isSearchEdit && !isSearchQuery) 0.58f else 0.98f
             matchType = "EXACT_TEXT"
         } else if (semanticAliases.any { it.equals(nodeText, ignoreCase = true) }) {
-            baseScore = 0.95f
+            baseScore = if (isSearchEdit && !isSearchQuery) 0.55f else 0.95f
             matchType = "EXACT_ALIAS_TEXT"
         } else if (nodeDesc.equals(query, ignoreCase = true)) {
             baseScore = 0.95f
@@ -505,6 +507,13 @@ object UiTargetResolver {
                                q.contains("photo") || q.contains("picture") || q.contains("ring")
         if (isAvatarOrStoryNode(node) && !isExplicitAvatar) {
             finalScore -= 0.50f
+        }
+
+        // 7. Off-screen or invisible node penalty
+        val isOffScreen = bounds.isEmpty || bounds.width() <= 0 || bounds.height() <= 0 ||
+                          bounds.left >= 1080 || bounds.top >= 2400 || bounds.right <= 0 || bounds.bottom <= 0 || !node.isVisibleToUser
+        if (isOffScreen) {
+            finalScore -= 0.60f
         }
 
         finalScore = finalScore.coerceIn(0.0f, 1.0f)

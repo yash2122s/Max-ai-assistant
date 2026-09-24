@@ -100,16 +100,17 @@ class UiVerificationLoop(
                 }
 
                 is UiAgentReasoningResult.Error -> {
-                    Log.w(TAG, "Reasoning error at step $stepIndex: ${reasoningResult.message}")
+                    Log.w(TAG, "Reasoning error at step $stepIndex [provider=$providerUsed, model=$modelUsed]: ${reasoningResult.message}")
+                    val cleanMessage = reasoningResult.message.ifBlank { "UI Agent is temporarily unavailable. Reconnecting..." }
                     return@withContext UiTaskResult(
                         taskId = task.id,
                         success = false,
-                        message = "UI Agent reasoning failed: ${reasoningResult.message}",
+                        message = cleanMessage,
                         stepsExecuted = stepIndex,
                         providerUsed = providerUsed,
                         modelUsed = modelUsed,
                         actionsTaken = actionsTaken,
-                        error = reasoningResult.message
+                        error = reasoningResult.errorCode ?: "REASONING_ERROR"
                     )
                 }
 
@@ -205,7 +206,7 @@ class UiVerificationLoop(
                 return Triple(res, OpenRouterUiAgentProvider.PROVIDER_ID, openRouterModel)
             }
 
-            // On failure/timeout, fall back to Gemini
+            // On failure/timeout, fall back to Gemini 2.5 Flash -> Gemini 1.5 Flash
             Log.w(TAG, "OpenRouter reasoning failed; triggering Gemini UI Agent fallback: ${(res as? UiAgentReasoningResult.Error)?.message}")
             if (geminiKey.isNotBlank()) {
                 val geminiRes = geminiProvider.reasonNextAction(
@@ -215,12 +216,25 @@ class UiVerificationLoop(
                     apiKey = geminiKey,
                     model = GeminiUiAgentProvider.DEFAULT_MODEL
                 )
-                return Triple(geminiRes, GeminiUiAgentProvider.PROVIDER_ID, GeminiUiAgentProvider.DEFAULT_MODEL)
+                if (geminiRes is UiAgentReasoningResult.ActionDecision || geminiRes is UiAgentReasoningResult.FinishTask) {
+                    return Triple(geminiRes, GeminiUiAgentProvider.PROVIDER_ID, GeminiUiAgentProvider.DEFAULT_MODEL)
+                }
+
+                // Secondary fallback to Gemini 1.5 Flash
+                Log.w(TAG, "Gemini ${GeminiUiAgentProvider.DEFAULT_MODEL} failed; trying secondary fallback ${GeminiUiAgentProvider.FALLBACK_MODEL}")
+                val fallbackRes = geminiProvider.reasonNextAction(
+                    task = task,
+                    observation = observation,
+                    stepHistory = stepHistory,
+                    apiKey = geminiKey,
+                    model = GeminiUiAgentProvider.FALLBACK_MODEL
+                )
+                return Triple(fallbackRes, GeminiUiAgentProvider.PROVIDER_ID, GeminiUiAgentProvider.FALLBACK_MODEL)
             }
             return Triple(res, OpenRouterUiAgentProvider.PROVIDER_ID, openRouterModel)
         }
 
-        // 2. Direct Gemini UI Agent fallback if OpenRouter is unconfigured
+        // 2. Direct Gemini UI Agent (2.5 Flash -> 1.5 Flash fallback) if OpenRouter is unconfigured
         if (geminiKey.isNotBlank()) {
             val res = geminiProvider.reasonNextAction(
                 task = task,
@@ -229,11 +243,24 @@ class UiVerificationLoop(
                 apiKey = geminiKey,
                 model = GeminiUiAgentProvider.DEFAULT_MODEL
             )
-            return Triple(res, GeminiUiAgentProvider.PROVIDER_ID, GeminiUiAgentProvider.DEFAULT_MODEL)
+            if (res is UiAgentReasoningResult.ActionDecision || res is UiAgentReasoningResult.FinishTask) {
+                return Triple(res, GeminiUiAgentProvider.PROVIDER_ID, GeminiUiAgentProvider.DEFAULT_MODEL)
+            }
+
+            // Secondary fallback to Gemini 1.5 Flash
+            Log.w(TAG, "Gemini ${GeminiUiAgentProvider.DEFAULT_MODEL} failed; trying secondary fallback ${GeminiUiAgentProvider.FALLBACK_MODEL}")
+            val fallbackRes = geminiProvider.reasonNextAction(
+                task = task,
+                observation = observation,
+                stepHistory = stepHistory,
+                apiKey = geminiKey,
+                model = GeminiUiAgentProvider.FALLBACK_MODEL
+            )
+            return Triple(fallbackRes, GeminiUiAgentProvider.PROVIDER_ID, GeminiUiAgentProvider.FALLBACK_MODEL)
         }
 
         // 3. Unconfigured fallback
-        val emptyRes = UiAgentReasoningResult.Error("No API keys configured for UI Agent (neither OpenRouter nor Gemini)", retryable = false)
+        val emptyRes = UiAgentReasoningResult.Error("No API keys configured for UI Agent (neither OpenRouter nor Gemini)", errorCode = "MISSING_KEY", retryable = false)
         return Triple(emptyRes, "none", "none")
     }
 

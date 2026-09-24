@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "789767250832",
+    "project_id": "max-ai-assistant-5ffda",
+    "storage_bucket": "max-ai-assistant-5ffda.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:789767250832:android:aedb95293750f6edd74915",
+        "android_client_info": {
+          "package_name": "com.maxaiagent.yash"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "789767250832-97v33jvoslh16u5npp65ol56mfounm1b.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.maxaiagent.yash",
+            "certificate_hash": "37993c406ad5cf6a99ee3766ea8e9c9982d01ab6"
+          }
+        },
+        {
+          "client_id": "789767250832-co5efn9n8fih5rchac5v9kdildivokil.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAq4opYsP9efsMFnf-Vuea_4sPO2Bsre14"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "789767250832-co5efn9n8fih5rchac5v9kdildivokil.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -43,8 +43,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             uiAgentProvider = settingsManager.uiAgentProvider,
             uiAgentModel = settingsManager.uiAgentModel,
             liveVoiceModelName = settingsManager.liveVoiceModelName,
+            modelRoutingMode = settingsManager.modelRoutingMode,
             liveVoiceName = settingsManager.liveVoiceName,
             isLiveVoiceMode = settingsManager.isLiveVoiceMode,
+            isThinkingObservabilityEnabled = settingsManager.isThinkingObservabilityEnabled,
             isAgenticModeEnabled = settingsManager.isAgenticModeEnabled,
             agenticMaxIterations = settingsManager.agenticMaxIterations,
             agenticDailyBudget = settingsManager.agenticDailyBudget,
@@ -104,9 +106,26 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         settingsManager.liveVoiceModelName = modelName
     }
 
+    fun updateModelRoutingMode(mode: String) {
+        val normalized = mode.trim().uppercase()
+        _uiState.update { it.copy(modelRoutingMode = normalized) }
+        settingsManager.modelRoutingMode = normalized
+        val resolvedModel = when (normalized) {
+            "DEEP" -> com.example.network.model.GeminiLiveModels.DEEP
+            else -> com.example.network.model.GeminiLiveModels.FAST
+        }
+        _uiState.update { it.copy(liveVoiceModelName = resolvedModel) }
+        settingsManager.liveVoiceModelName = resolvedModel
+    }
+
     fun updateIsLiveVoiceMode(enabled: Boolean) {
         _uiState.update { it.copy(isLiveVoiceMode = enabled) }
         settingsManager.isLiveVoiceMode = enabled
+    }
+
+    fun updateIsThinkingObservabilityEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(isThinkingObservabilityEnabled = enabled) }
+        settingsManager.isThinkingObservabilityEnabled = enabled
     }
 
     fun updateIsAgenticModeEnabled(enabled: Boolean) {

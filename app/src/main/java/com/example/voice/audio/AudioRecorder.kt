@@ -23,7 +23,7 @@ class AudioRecorder {
             return
         }
 
-        val sampleRate = 16000 // Gemini Live standard 16kHz
+        val sampleRate = 24000 // Gemini Live symmetric 24kHz
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
         val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
@@ -39,7 +39,9 @@ class AudioRecorder {
 
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                 Log.e("AudioRecorder", "AudioRecord initialization failed")
-                return
+                audioRecord?.release()
+                audioRecord = null
+                throw IllegalStateException("AudioRecord failed to initialize")
             }
 
             audioRecord?.startRecording()

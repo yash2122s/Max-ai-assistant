@@ -26,10 +26,27 @@ class YoutubeVerifier : Verifier {
             )
         }
 
-        if (request.action == "OPEN_YOUTUBE") {
+        val action = request.action.uppercase()
+        if (action == "OPEN_YOUTUBE" || action == "LAUNCH_YOUTUBE") {
             return VerificationResult(
                 success = isYoutube,
                 reason = if (isYoutube) null else "Not currently on YouTube",
+                retryRecommended = !isYoutube,
+                snapshot = snapshot
+            )
+        }
+
+        if (action in setOf(
+                "PAUSE_YOUTUBE", "YOUTUBE_PAUSE",
+                "RESUME_YOUTUBE", "YOUTUBE_RESUME",
+                "NEXT_YOUTUBE_VIDEO", "YOUTUBE_NEXT",
+                "PREVIOUS_YOUTUBE_VIDEO", "YOUTUBE_PREVIOUS",
+                "SKIP_AD", "YOUTUBE_SKIP_AD",
+                "FULLSCREEN_YOUTUBE", "YOUTUBE_FULLSCREEN"
+            )) {
+            return VerificationResult(
+                success = isYoutube,
+                reason = if (isYoutube) null else "YouTube is not foreground during media control",
                 retryRecommended = !isYoutube,
                 snapshot = snapshot
             )
@@ -41,16 +58,35 @@ class YoutubeVerifier : Verifier {
             val id = node.id?.lowercase().orEmpty()
             val cls = node.className.lowercase()
 
+            // English player controls
             desc.contains("pause video") || desc.contains("play video") || 
             desc.contains("player controls") || desc.contains("video player") ||
             desc.contains("replay video") || desc.contains("seek bar") ||
-            desc.contains("watch in full screen") || desc.contains("like this video") ||
+            desc.contains("watch in full screen") || desc.contains("enter full screen") ||
+            desc.contains("like this video") || desc.contains("dislike this video") ||
+            desc.contains("share this video") || desc.contains("save to playlist") ||
             text.contains("pause") ||
+
+            // Telugu & Hindi controls
+            desc.contains("పాజ్ చేయండి") || desc.contains("ప్లే చేయండి") ||
+            desc.contains("వీడియో పాజ్") || desc.contains("వీడియో ప్లే") ||
+            desc.contains("పూర్తి స్క్రీన్") || desc.contains("లైక్") ||
+            desc.contains("वीडियो रोकें") || desc.contains("वीडियो चलाएं") ||
+            desc.contains("रोकें") || desc.contains("लाइक") ||
+
+            // Player View / Watch Layout resource IDs
             id.contains("player_view") || id.contains("watch_panel") ||
             id.contains("exo_") || id.contains("player_control") ||
             id.contains("movie_player") || id.contains("watch_while") ||
             id.contains("next_gen_watch") || id.contains("video_player") ||
-            cls.contains("playerview") || cls.contains("surfaceview") || cls.contains("videoview")
+            id.contains("player_fragment_container") || id.contains("inline_player") ||
+            id.contains("engagement_panel") || id.contains("video_metadata") ||
+            id.contains("fullscreen_button") || id.contains("like_button") ||
+            id.contains("dislike_button") || id.contains("comments_entry_point") ||
+
+            // Video player surface class names
+            cls.contains("playerview") || cls.contains("surfaceview") ||
+            cls.contains("videoview") || cls.contains("textureview")
         }
 
         Log.d("YoutubeVerifier", "Verification match for YouTube: package check = $isYoutube, hasPlayerControls = $hasPlayerControls")
@@ -72,3 +108,4 @@ class YoutubeVerifier : Verifier {
         }
     }
 }
+

@@ -1,8 +1,10 @@
 package com.example.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -12,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -42,63 +45,73 @@ fun MaxApp(
             gesturesEnabled = (currentRoute == MaxDestinations.HOME),
             drawerContent = {
                 ModalDrawerSheet(
-                    drawerContainerColor = MaxSurfaceDark,
+                    drawerContainerColor = MaxSurfaceCard,
                     drawerContentColor = MaxTextPrimary,
-                    modifier = Modifier.width(300.dp)
+                    modifier = Modifier.width(310.dp)
                 ) {
-                    // Drawer Header
+                    // Frosted Luxury Header
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(MaxSurfaceVariant)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(MaxSurfaceElevated, MaxSurfaceCard)
+                                )
+                            )
                             .padding(horizontal = 20.dp, vertical = 24.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            horizontalArrangement = Arrangement.spacedBy(14.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(36.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(MaxPrimary),
+                                    .size(42.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(
+                                        Brush.linearGradient(
+                                            colors = listOf(MaxPrimaryRoyal, MaxAccentCyan)
+                                        )
+                                    )
+                                    .border(MaxDimensions.borderHairline, Color(0x6600D2FF), RoundedCornerShape(12.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.AutoAwesome,
                                     contentDescription = null,
-                                    tint = OnPrimaryDark,
-                                    modifier = Modifier.size(20.dp)
+                                    tint = Color.White,
+                                    modifier = Modifier.size(24.dp)
                                 )
                             }
                             Column {
                                 Text(
                                     text = "MAX",
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 22.sp,
                                     color = MaxTextPrimary,
                                     letterSpacing = 1.sp
                                 )
                                 Text(
-                                    text = "NATIVE KOTLIN ENGINE",
-                                    fontWeight = FontWeight.SemiBold,
+                                    text = "AUTONOMOUS AGENTIC OS",
+                                    fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp,
-                                    color = MaxPrimary,
-                                    letterSpacing = 0.5.sp
+                                    color = MaxAccentCyan,
+                                    letterSpacing = 0.8.sp
                                 )
                             }
                         }
                     }
 
-                    HorizontalDivider(color = BorderDark, thickness = 1.dp)
+                    HorizontalDivider(color = MaxBorderHairline, thickness = MaxDimensions.borderHairline)
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     // Drawer Items
                     Column(
                         modifier = Modifier
                             .weight(1f)
                             .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 8.dp)
                     ) {
                         MainDrawerItems.forEach { item ->
                             val selected = currentRoute == item.route
@@ -107,10 +120,15 @@ fun MaxApp(
                                     Box(
                                         modifier = Modifier
                                             .size(32.dp)
-                                            .clip(RoundedCornerShape(9.dp))
+                                            .clip(RoundedCornerShape(8.dp))
                                             .background(
-                                                if (selected) item.accentColor.copy(alpha = 0.2f)
+                                                if (selected) item.accentColor.copy(alpha = 0.25f)
                                                 else item.accentColor.copy(alpha = 0.12f)
+                                            )
+                                            .border(
+                                                MaxDimensions.borderHairline,
+                                                if (selected) item.accentColor.copy(alpha = 0.5f) else Color.Transparent,
+                                                RoundedCornerShape(8.dp)
                                             ),
                                         contentAlignment = Alignment.Center
                                     ) {
@@ -126,8 +144,9 @@ fun MaxApp(
                                     Text(
                                         text = item.title,
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                        color = if (selected) MaxPrimary else MaxTextPrimary,
-                                        fontSize = 13.5.sp
+                                        color = if (selected) MaxTextPrimary else MaxTextSecondary,
+                                        fontSize = 14.sp,
+                                        letterSpacing = (-0.2).sp
                                     )
                                 },
                                 selected = selected,
@@ -144,36 +163,48 @@ fun MaxApp(
                                     }
                                 },
                                 modifier = Modifier
-                                    .padding(horizontal = 10.dp, vertical = 2.dp),
-                                shape = RoundedCornerShape(12.dp),
+                                    .padding(vertical = 2.dp)
+                                    .iosPressEffect(scalePressed = 0.98f, alphaPressed = 0.85f, onClick = {
+                                        coroutineScope.launch { drawerState.close() }
+                                        if (currentRoute != item.route) {
+                                            navController.navigate(item.route) {
+                                                popUpTo(MaxDestinations.HOME) {
+                                                    saveState = true
+                                                }
+                                                launchSingleTop = true
+                                                restoreState = true
+                                            }
+                                        }
+                                    }),
+                                shape = RoundedCornerShape(MaxDimensions.radiusMd),
                                 colors = NavigationDrawerItemDefaults.colors(
-                                    selectedContainerColor = item.accentColor.copy(alpha = 0.08f),
+                                    selectedContainerColor = MaxPrimaryRoyal.copy(alpha = 0.14f),
                                     unselectedContainerColor = Color.Transparent
                                 )
                             )
                         }
                     }
 
-                    HorizontalDivider(color = BorderDark, thickness = 0.5.dp)
+                    HorizontalDivider(color = MaxBorderHairline, thickness = MaxDimensions.borderHairline)
 
-                    // Bottom info with Developer Credit
+                    // Footer with Developer Credit
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp, vertical = 14.dp)
+                            .padding(horizontal = 20.dp, vertical = 16.dp)
                     ) {
                         Text(
-                            text = "Created by Yaswanth",
-                            fontSize = 12.5.sp,
+                            text = "MAX AI • Royal Edition",
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
-                            color = MaxPrimary
+                            color = MaxPrimaryRoyal
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
-                            text = "v1.0 • Autonomous AI Companion",
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaxTextMuted
+                            text = "Created by Yaswanth • Autonomous AI Companion",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Normal,
+                            color = MaxTextTertiary
                         )
                     }
                 }
@@ -189,3 +220,4 @@ fun MaxApp(
         }
     }
 }
+

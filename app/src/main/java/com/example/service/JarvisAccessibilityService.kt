@@ -56,11 +56,24 @@ class JarvisAccessibilityService : AccessibilityService() {
         var testRootProvider: (() -> AccessibilityNodeInfo?)? = null
         var testWindowsProvider: (() -> List<android.view.accessibility.AccessibilityWindowInfo>?)? = null
         var testGestureDispatcher: ((android.accessibilityservice.GestureDescription) -> Boolean)? = null
+        var testShellExecutor: ((String) -> Unit)? = null
 
         fun isServiceRunning(): Boolean = instance != null || testRootProvider != null
 
         fun getActiveRoot(): AccessibilityNodeInfo? {
-            return instance?.rootInActiveWindow ?: testRootProvider?.invoke()
+            val root = instance?.rootInActiveWindow ?: testRootProvider?.invoke()
+            if (root != null) return root
+
+            try {
+                val windows = instance?.windows ?: testWindowsProvider?.invoke()
+                if (windows != null) {
+                    val activeWin = windows.firstOrNull { it.isActive } ?: windows.firstOrNull { it.isFocused } ?: windows.lastOrNull()
+                    val winRoot = activeWin?.root
+                    if (winRoot != null) return winRoot
+                }
+            } catch (_: Exception) {}
+
+            return null
         }
 
         fun getActiveWindows(): List<android.view.accessibility.AccessibilityWindowInfo>? {
@@ -70,11 +83,67 @@ class JarvisAccessibilityService : AccessibilityService() {
         fun dispatchGestureAction(gesture: android.accessibilityservice.GestureDescription): Boolean {
             return instance?.dispatchGesture(gesture, null, null) ?: testGestureDispatcher?.invoke(gesture) ?: false
         }
+
+        fun runShell(cmd: String): Boolean {
+            if (!com.example.automation.computeruse.ShellCommandPolicy.isCommandAllowed(cmd)) {
+                android.util.Log.w("JarvisAccessibility", "[SHELL_POLICY_BLOCKED] Shell command rejected by security policy: '$cmd'")
+                return false
+            }
+            val executor = testShellExecutor
+            if (executor != null) {
+                return try {
+                    executor.invoke(cmd)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            if (com.example.automation.ShizukuManager.isShizukuAvailable() && com.example.automation.ShizukuManager.isPermissionGranted()) {
+                return try {
+                    com.example.automation.ShizukuShellPlugin.runCommand(cmd)
+                    true
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            return false
+        }
+
+        fun triggerAssistantLaunch(context: android.content.Context, source: String = "accessibility") {
+            try {
+                val intent = Intent(context, com.example.MainActivity::class.java).apply {
+                    action = Intent.ACTION_ASSIST
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                    putExtra("extra_start_listening", true)
+                    putExtra("trigger_source", source)
+                    putExtra("extra_open_reveal", true)
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                Log.e("JarvisAccessibility", "Failed to trigger assistant launch", e)
+            }
+        }
     }
 
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private var isWaiting = false
     private var directClickTime = 0L
+
+    override fun onKeyEvent(event: android.view.KeyEvent?): Boolean {
+        if (event == null) return super.onKeyEvent(event)
+        val keyCode = event.keyCode
+        val action = event.action
+
+        if (action == android.view.KeyEvent.ACTION_DOWN) {
+            if (keyCode == android.view.KeyEvent.KEYCODE_VOICE_ASSIST ||
+                keyCode == android.view.KeyEvent.KEYCODE_ASSIST ||
+                keyCode == android.view.KeyEvent.KEYCODE_SEARCH) {
+                triggerAssistantLaunch(this, "power_button")
+                return true
+            }
+        }
+        return super.onKeyEvent(event)
+    }
 
     override fun onServiceConnected() {
         super.onServiceConnected()

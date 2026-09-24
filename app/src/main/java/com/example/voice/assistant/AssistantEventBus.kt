@@ -18,6 +18,8 @@ sealed class AssistantEvent {
     ) : AssistantEvent()
     data class ErrorOccurred(val errorType: ErrorType, val message: String) : AssistantEvent()
     data class ConnectionStateChanged(val state: com.example.network.ConnectionState) : AssistantEvent()
+    data class ThoughtSummaryDelta(val delta: String, val fullSummary: String) : AssistantEvent()
+    data class InteractionStatusChanged(val status: String) : AssistantEvent()
 }
 
 

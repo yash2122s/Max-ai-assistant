@@ -1,0 +1,138 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // 1. Users collection:
+    // Each user can read and update their own user profile document.
+    // They cannot delete user profiles or access other users' profiles.
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && request.resource.data.userId == userId;
+      allow update: if isOwner(userId)
+        && request.resource.data.userId == userId;
+      allow delete: if false;
+
+      // Devices subcollection:
+      // Track active registered devices per user.
+      match /devices/{deviceId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.deviceId == deviceId;
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // 2. Licenses collection:
+    // Authoritative cloud license for each user.
+    // - Client can read their own license.
+    // - A newly authenticated user can only CREATE an initial TRIAL license if one does NOT exist.
+    // - Client cannot arbitrarily forge LIFETIME or extend TRIAL dates.
+    // - Upgrading to LIFETIME requires a valid, claimed key in licenseKeys/{keyHash}.
+    // - Client CANNOT delete their license to reset their trial counter.
+    match /licenses/{userId} {
+      allow read: if isOwner(userId);
+
+      // Initial trial creation or direct LIFETIME activation
+      allow create: if isOwner(userId)
+        && request.resource.data.userId == userId
+        && (
+          (
+            request.resource.data.plan == 'TRIAL'
+            && request.resource.data.status == 'TRIAL'
+            && (!('licenseId' in request.resource.data) || request.resource.data.licenseId == null)
+          ) || (
+            request.resource.data.plan == 'LIFETIME'
+            && request.resource.data.status == 'ACTIVE'
+            && request.resource.data.licenseId != null
+            && exists(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId))
+            && (
+              get(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId)).data.status == 'UNUSED'
+              || get(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId)).data.claimedBy == userId
+            )
+          )
+        );
+
+      // Upgrading to LIFETIME or non-privilege metadata update
+      allow update: if isOwner(userId)
+        && request.resource.data.userId == userId
+        && (
+          // Case A: Upgrading to LIFETIME via claimed/claiming license key
+          (
+            request.resource.data.plan == 'LIFETIME'
+            && request.resource.data.status == 'ACTIVE'
+            && request.resource.data.licenseId != null
+            && exists(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId))
+            && (
+              get(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId)).data.status == 'UNUSED'
+              || get(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId)).data.claimedBy == userId
+            )
+          )
+          // Case B: Safe metadata update (cannot modify plan, status, or trial dates)
+          || (
+            request.resource.data.plan == resource.data.plan
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.trialStartedAt == resource.data.trialStartedAt
+            && request.resource.data.trialExpiresAt == resource.data.trialExpiresAt
+          )
+        );
+
+      allow delete: if false;
+
+      // Daily usage subcollection:
+      // Track AI message consumption per 24h period.
+      // - Max 10 messages for trial users.
+      // - Client cannot decrease counter or reset early.
+      match /dailyUsage/{period} {
+        allow read: if isOwner(userId);
+
+        // Can create today's usage doc starting at 1 on first message
+        allow create: if isOwner(userId)
+          && request.resource.data.period == period
+          && request.resource.data.messageCount == 1;
+
+        // Can only increment messageCount
+        allow update: if isOwner(userId)
+          && request.resource.data.period == resource.data.period
+          && request.resource.data.messageCount == resource.data.messageCount + 1;
+
+        allow delete: if false;
+      }
+    }
+
+    // 3. License Keys collection:
+    // licenseKeys/{keyHash}
+    // High-entropy hashed keys generated only by owner/admin.
+    match /licenseKeys/{keyHash} {
+      // Disallow collection queries/listing to prevent enumeration of keys
+      allow list: if false;
+      // Allow reading a specific key if user knows its hash (for activation transaction)
+      allow get: if isAuthenticated();
+
+      // Only allow transitioning an UNUSED key to CLAIMED by the current user
+      allow update: if isAuthenticated()
+        && resource.data.status == 'UNUSED'
+        && request.resource.data.status == 'CLAIMED'
+        && request.resource.data.claimedBy == request.auth.uid
+        && request.resource.data.claimedAt == request.time
+        && request.resource.data.type == resource.data.type;
+
+      // Normal clients cannot create or delete keys
+      allow create, delete: if false;
+    }
+
+    // Catch-all: deny all other paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

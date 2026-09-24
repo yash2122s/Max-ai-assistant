@@ -1,25 +1,41 @@
 package com.example.voice.ui
 
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.NeonPink
+import com.example.ui.theme.MaxIOSColors
 import com.example.voice.assistant.AssistantVoiceController
 import com.example.voice.assistant.SessionState
 
+/**
+ * Apple Intelligence (iOS 18+) Siri-style Assistant HUD.
+ * Completely eliminates bulky bottom sheets, dark scrims, and obtrusive cards.
+ * Provides a pure, translucent edge glow around the entire perimeter that pulses
+ * dynamically with voice RMS and transitions across LISTENING, THINKING, and SPEAKING states.
+ * Underneath, the user's active screen/app remains 100% visible.
+ * Features an ultra-minimal floating frosted capsule at the bottom for captions and responses.
+ */
 @Composable
 fun AssistantHud(
     onDismiss: () -> Unit,
@@ -27,12 +43,21 @@ fun AssistantHud(
 ) {
     val controller = remember { AssistantVoiceController() }
     val uiState by controller.uiState.collectAsState()
-    val context = LocalContext.current
+
+    // Determine current Siri glow state
+    val siriState = remember(uiState.isRecording, uiState.sessionState, uiState.isThinking, uiState.isAiSpeaking) {
+        when {
+            uiState.isRecording || uiState.sessionState == SessionState.LISTENING -> SiriGlowState.LISTENING
+            uiState.isThinking || uiState.sessionState == SessionState.WAITING_FOR_MODEL || uiState.sessionState == SessionState.TOOL_EXECUTION -> SiriGlowState.THINKING
+            uiState.isAiSpeaking || uiState.sessionState == SessionState.STREAMING_AUDIO -> SiriGlowState.SPEAKING
+            else -> SiriGlowState.IDLE
+        }
+    }
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.4f))
+            .background(Color.Transparent)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null
@@ -41,70 +66,201 @@ fun AssistantHud(
             },
         contentAlignment = Alignment.BottomCenter
     ) {
-        LiquidScreenEdges()
+        // Full Display Perimeter Apple Intelligence Siri Edge Lighting
+        LiquidScreenEdges(
+            state = siriState,
+            rms = uiState.visualizerRms
+        )
 
-        Column(
+        // Ultra-minimal floating capsule for captions & live status
+        val showCaption = uiState.error != null ||
+                uiState.activeToolName != null ||
+                uiState.userTranscription.isNotBlank() ||
+                uiState.geminiResponse.isNotBlank() ||
+                siriState != SiriGlowState.IDLE
+
+        AnimatedVisibility(
+            visible = showCaption,
+            enter = fadeIn(animationSpec = tween(300)) + slideInVertically(initialOffsetY = { it / 2 }, animationSpec = tween(300)),
+            exit = fadeOut(animationSpec = tween(200)) + slideOutVertically(targetOffsetY = { it / 2 }, animationSpec = tween(200)),
             modifier = Modifier
                 .navigationBarsPadding()
-                .imePadding()
-                .fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Bottom
+                .padding(bottom = 36.dp, start = 24.dp, end = 24.dp)
         ) {
-            uiState.error?.let { err ->
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = NeonPink.copy(alpha = 0.2f)),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text(
-                        text = "Error: $err",
-                        color = NeonPink,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(12.dp)
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(Color(0xCC0D0F17))
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.25f),
+                                Color.White.copy(alpha = 0.08f)
+                            )
+                        ),
+                        shape = RoundedCornerShape(26.dp)
                     )
-                }
-            }
-
-
-
-            if (uiState.sessionState == SessionState.TOOL_EXECUTION) {
-                Card(
-                    modifier = Modifier.padding(bottom = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.1f)),
-                    shape = RoundedCornerShape(16.dp)
-                ) {
-                    Text(
-                        text = uiState.statusText,
-                        color = Color.White,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-                    )
-                }
-            }
-
-            // Real-Time Agent Activity / Execution Trace Card
-            com.example.ui.components.AgentActivityCard(onDismiss = onDismiss)
-
-            BottomPill(
-                isRecording = uiState.isRecording,
-                statusText = uiState.statusText,
-                visualizerRms = uiState.visualizerRms,
-                onToggleMic = { controller.toggleMic() },
-                onSendMessage = { controller.sendTextMessage(it) },
-                onAddClick = {
-                    val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-                    if (launchIntent != null) {
-                        launchIntent.flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP
-                        context.startActivity(launchIntent)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        // If AI is speaking, tapping stops speech; otherwise keep active
+                        if (uiState.isAiSpeaking) {
+                            controller.interruptSpeaking()
+                        }
                     }
-                    onDismiss()
+                    .padding(horizontal = 20.dp, vertical = 12.dp)
+                    .widthIn(min = 120.dp, max = 340.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                when {
+                    uiState.error != null -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(MaxIOSColors.SystemRed)
+                            )
+                            Text(
+                                text = "Unable to connect",
+                                color = MaxIOSColors.SystemRed,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Retry",
+                                color = MaxIOSColors.SystemBlue,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.clickable { controller.reconnect() }
+                            )
+                        }
+                    }
+                    uiState.activeToolName != null -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(MaxIOSColors.SystemAmber)
+                            )
+                            Text(
+                                text = "Executing ${uiState.activeToolName}…",
+                                color = Color.White,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    uiState.geminiResponse.isNotBlank() -> {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = uiState.geminiResponse,
+                                color = Color.White,
+                                fontSize = 14.5.sp,
+                                lineHeight = 20.sp,
+                                textAlign = TextAlign.Center,
+                                maxLines = 5,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            if (uiState.isAiSpeaking) {
+                                Row(
+                                    modifier = Modifier
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.12f))
+                                        .clickable { controller.interruptSpeaking() }
+                                        .padding(horizontal = 10.dp, vertical = 3.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Stop,
+                                        contentDescription = "Stop",
+                                        tint = MaxIOSColors.SystemRed,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                    Text(
+                                        text = "Stop",
+                                        color = MaxIOSColors.SystemRed,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    uiState.userTranscription.isNotBlank() -> {
+                        Text(
+                            text = "“${uiState.userTranscription}”",
+                            color = Color.White.copy(alpha = 0.95f),
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Normal,
+                            textAlign = TextAlign.Center,
+                            maxLines = 4,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    siriState == SiriGlowState.THINKING -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(MaxIOSColors.SystemPurple)
+                            )
+                            Text(
+                                text = if (uiState.thoughtSummary.isNotBlank()) uiState.thoughtSummary.take(40) + "…" else "Thinking…",
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    siriState == SiriGlowState.LISTENING -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(MaxIOSColors.SystemBlue)
+                            )
+                            Text(
+                                text = "Listening…",
+                                color = Color.White.copy(alpha = 0.9f),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    }
+                    else -> {
+                        // Minimal ambient indicator
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.5f))
+                        )
+                    }
                 }
-            )
+            }
         }
     }
 }

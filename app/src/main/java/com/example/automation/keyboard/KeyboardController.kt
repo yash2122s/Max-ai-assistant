@@ -495,21 +495,18 @@ object KeyboardController {
             }
         }
 
-        // Tier 4: Shizuku / ADB Shell Input Keyevent 66 Fallback
-        if (ShizukuExecutor.isSafeCommand("input keyevent 66")) {
-            val sent = ShizukuExecutor.sendKeyEvent(KeyEvent.KEYCODE_ENTER)
-            if (sent) {
-                Log.d(TAG, "Dispatched KEYCODE_ENTER via Shizuku shell keyevent")
-                if (service != null) {
-                    InputVerifier.verifyKeyboardActionExecuted(initialSignature, service)
-                }
-                return ToolResult(
-                    success = true,
-                    toolName = "press_enter",
-                    verificationRequired = true,
-                    message = "Dispatched Enter key via shell"
-                )
+        // Tier 4: Shell Input Keyevent 66 Fallback
+        if (JarvisAccessibilityService.runShell("input keyevent 66")) {
+            Log.d(TAG, "Dispatched KEYCODE_ENTER via Shell keyevent 66")
+            if (service != null) {
+                InputVerifier.verifyKeyboardActionExecuted(initialSignature, service)
             }
+            return ToolResult(
+                success = true,
+                toolName = "press_enter",
+                verificationRequired = true,
+                message = "Dispatched Enter key via shell"
+            )
         }
 
         return ToolResult(

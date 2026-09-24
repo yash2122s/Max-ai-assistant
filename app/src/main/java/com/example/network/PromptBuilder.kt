@@ -323,8 +323,10 @@ object PromptBuilder {
             • ALWAYS invoke 'set_timer' tool with seconds duration.
             • NEVER invoke 'set_reminder' when the user explicitly asks for a TIMER.
 
-            If the user asks to search, browse, view reels, open DMs, or message on Instagram:
-            • ALWAYS target Instagram using 'task_intent' (or 'open_app' if simply opening Instagram).
+            If the user asks to search inside apps, find profiles, open accounts, navigate screens, or perform multi-step UI automation (e.g. "Instagram lo max_ai_assistant search chesi profile open chey", "search for coffee on Maps", "open profile on Instagram", "screen meeda action chey"):
+            • ALWAYS invoke 'computer_use' with 'goal' (e.g. "Search for max_ai_assistant on Instagram and open profile") and 'target_app' (e.g. "Instagram", "Google Maps", "YouTube", "Chrome").
+            • DO NOT answer conversationally without calling 'computer_use'.
+            • NEVER claim the action was completed or failed until 'computer_use' returns the verified result from the device.
             • NEVER route Instagram requests to WhatsApp!
 
             If the user asks you to forget, remove, or delete a saved fact or memory (e.g. "forget my name", "naa peru marchipo", "delete that memory"):

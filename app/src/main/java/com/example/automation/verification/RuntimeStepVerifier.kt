@@ -86,6 +86,12 @@ object RuntimeStepVerifier {
         while (System.currentTimeMillis() - startTime < timeoutMs) {
             val root = rootNode ?: JarvisAccessibilityService.getActiveRoot()
             if (root != null) {
+                val rootText = root.text?.toString() ?: ""
+                if (rootText.contains(expectedText, ignoreCase = true)) {
+                    Log.d(TAG, "✓ Text verified directly on root node: '$rootText'")
+                    return true
+                }
+
                 val focused = try { root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Exception) { null }
                 val focusedText = focused?.text?.toString() ?: ""
                 if (focusedText.contains(expectedText, ignoreCase = true)) {

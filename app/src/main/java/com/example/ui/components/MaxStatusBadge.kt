@@ -1,13 +1,21 @@
 package com.example.ui.components
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -22,24 +30,41 @@ fun MaxStatusBadge(
     isMaxEnabled: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val (bgColor, dotColor, text) = when {
-        !isMaxEnabled -> Triple(Color(0xFF2D1B20), MaxError, "MAX OFF")
-        connectionState == ConnectionState.CONNECTED -> Triple(Color(0xFF132A1C), MaxSuccess, "LIVE ONLINE")
-        connectionState == ConnectionState.CONNECTING -> Triple(Color(0xFF2C2413), AccentAmber, "CONNECTING...")
-        else -> Triple(Color(0xFF1B232D), MaxTextMuted, "STANDALONE")
+    val (bgColor, dotColor, text, isLive) = when {
+        !isMaxEnabled -> Quadruple(Color(0x2BFF453A), MaxDestructiveApple, "MAX OFF", false)
+        connectionState == ConnectionState.CONNECTED -> Quadruple(Color(0x2B30D158), MaxSuccessApple, "AUTONOMOUS LIVE", true)
+        connectionState == ConnectionState.CONNECTING -> Quadruple(Color(0x2BFF9F0A), MaxWarningApple, "CONNECTING...", true)
+        else -> Quadruple(Color(0x2B64748B), MaxTextTertiary, "STANDALONE", false)
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by if (isLive) {
+        infiniteTransition.animateFloat(
+            initialValue = 1f,
+            targetValue = 0.35f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulseAlpha"
+        )
+    } else {
+        androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
     }
 
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(MaxDimensions.radiusPill))
             .background(bgColor)
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .border(MaxDimensions.borderHairline, dotColor.copy(alpha = 0.35f), RoundedCornerShape(MaxDimensions.radiusPill))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(7.dp)
+                .size(6.dp)
+                .alpha(pulseAlpha)
                 .clip(CircleShape)
                 .background(dotColor)
         )
@@ -48,7 +73,7 @@ fun MaxStatusBadge(
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = dotColor,
-            letterSpacing = 0.5.sp
+            letterSpacing = 0.6.sp
         )
     }
 }
@@ -56,20 +81,21 @@ fun MaxStatusBadge(
 @Composable
 fun MaxStatusBadge(
     label: String,
-    color: Color = MaxPrimary,
+    color: Color = MaxPrimaryRoyal,
     modifier: Modifier = Modifier
 ) {
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(MaxDimensions.radiusPill))
-            .background(color.copy(alpha = 0.15f))
-            .padding(horizontal = 10.dp, vertical = 5.dp),
+            .background(color.copy(alpha = 0.12f))
+            .border(MaxDimensions.borderHairline, color.copy(alpha = 0.30f), RoundedCornerShape(MaxDimensions.radiusPill))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(7.dp)
+                .size(6.dp)
                 .clip(CircleShape)
                 .background(color)
         )
@@ -78,7 +104,10 @@ fun MaxStatusBadge(
             fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = color,
-            letterSpacing = 0.5.sp
+            letterSpacing = 0.6.sp
         )
     }
 }
+
+private data class Quadruple<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+

@@ -1,10 +1,17 @@
 package com.example.ui.onboarding
 
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -37,6 +44,12 @@ fun OnboardingScreen(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val scrollState = rememberScrollState()
+
+    val micPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { _ ->
+        viewModel.refreshPermissions()
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -76,6 +89,22 @@ fun OnboardingScreen(
             verticalArrangement = Arrangement.Center
         ) {
             when (uiState.currentStep) {
+                OnboardingStep.AUTH -> {
+                    AuthStepView(
+                        uiState = uiState,
+                        onSignIn = {
+                            val activity = context as? Activity
+                            if (activity != null) {
+                                viewModel.signInWithGoogle(activity)
+                            } else {
+                                Toast.makeText(context, "Activity context unavailable", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onContinue = {
+                            viewModel.goToStep(OnboardingStep.WELCOME)
+                        }
+                    )
+                }
                 OnboardingStep.WELCOME -> {
                     WelcomeStepView(onGetStarted = { viewModel.goToStep(OnboardingStep.PERMISSIONS) })
                 }
@@ -84,6 +113,7 @@ fun OnboardingScreen(
                         uiState = uiState,
                         onRequestAccessibility = { viewModel.requestAccessibility() },
                         onRequestOverlay = { viewModel.requestOverlay() },
+                        onRequestMicrophone = { micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) },
                         onRequestBattery = { viewModel.requestBatteryOptimization() },
                         onContinue = { viewModel.goToStep(OnboardingStep.AI_CONFIG) }
                     )
@@ -94,6 +124,193 @@ fun OnboardingScreen(
                         onApiKeyChanged = { viewModel.updateGeminiApiKey(it) },
                         onVoiceSelected = { viewModel.updateLiveVoiceName(it) },
                         onFinish = { viewModel.completeOnboarding() }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AuthStepView(
+    uiState: OnboardingUiState,
+    onSignIn: () -> Unit,
+    onContinue: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
+
+        Box(
+            modifier = Modifier
+                .size(80.dp)
+                .clip(RoundedCornerShape(MaxDimensions.radiusXl))
+                .background(Brush.linearGradient(listOf(MaxPrimary, MaxSecondary))),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.Shield,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(42.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
+
+        Text(
+            text = "Welcome to MAX",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Black,
+            color = MaxTextPrimary
+        )
+
+        Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
+
+        Text(
+            text = "Google Sign-In & License Activation Required",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = MaxPrimary
+        )
+
+        Spacer(modifier = Modifier.height(MaxDimensions.spaceLg))
+
+        // Feature Highlights
+        MaxCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(MaxDimensions.spaceMd),
+                verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+            ) {
+                FeatureBullet("Instant 7-Day Free Trial", "Full autonomous tools, real-time voice, and memory.")
+                FeatureBullet("Cloud License & Firestore Sync", "Your device license is encrypted and backed up in Firestore.")
+                FeatureBullet("Zero Manual Configuration", "Google Identity automatically registers and activates your device.")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
+
+        // Auth Action / Status Card
+        MaxCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(MaxDimensions.spaceMd),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+            ) {
+                if (uiState.isAuthenticating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(36.dp),
+                        color = MaxPrimary,
+                        strokeWidth = 3.dp
+                    )
+                    Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
+                    Text(
+                        text = "Authenticating with Google...",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaxTextPrimary
+                    )
+                    Text(
+                        text = "Activating cloud license and registering device",
+                        fontSize = 12.sp,
+                        color = MaxTextMuted
+                    )
+                } else if (uiState.userAccount != null) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF10B981).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Color(0xFF10B981),
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = uiState.userAccount.displayName ?: "Google User",
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaxTextPrimary
+                            )
+                            Text(
+                                text = uiState.userAccount.email ?: "",
+                                fontSize = 12.sp,
+                                color = MaxTextMuted
+                            )
+                            val planName = uiState.cloudLicense?.plan?.name ?: "TRIAL"
+                            val statusName = uiState.cloudLicense?.status?.name ?: "ACTIVE"
+                            Text(
+                                text = "License: $planName ($statusName)",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF10B981)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
+
+                    MaxButton(
+                        text = "Continue to Setup",
+                        onClick = onContinue,
+                        variant = MaxButtonVariant.PRIMARY,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    if (uiState.authError != null) {
+                        Surface(
+                            shape = RoundedCornerShape(MaxDimensions.radiusMd),
+                            color = Color(0xFFEF4444).copy(alpha = 0.12f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(MaxDimensions.spaceSm),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceXs)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = Color(0xFFEF4444),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = uiState.authError,
+                                    fontSize = 12.sp,
+                                    color = Color(0xFFEF4444)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
+                    }
+
+                    Text(
+                        text = "Sign in to unlock MAX Assistant",
+                        fontSize = 13.sp,
+                        color = MaxTextMuted
+                    )
+
+                    Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
+
+                    MaxButton(
+                        text = "Sign in with Google",
+                        onClick = onSignIn,
+                        variant = MaxButtonVariant.PRIMARY,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             }
@@ -178,11 +395,20 @@ private fun FeatureBullet(title: String, subtitle: String) {
             imageVector = Icons.Default.CheckCircle,
             contentDescription = null,
             tint = MaxPrimary,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(20.dp)
         )
         Column {
-            Text(text = title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaxTextPrimary)
-            Text(text = subtitle, fontSize = 11.sp, color = MaxTextMuted)
+            Text(
+                text = title,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaxTextPrimary
+            )
+            Text(
+                text = subtitle,
+                fontSize = 12.sp,
+                color = MaxTextMuted
+            )
         }
     }
 }
@@ -192,66 +418,16 @@ private fun PermissionsStepView(
     uiState: OnboardingUiState,
     onRequestAccessibility: () -> Unit,
     onRequestOverlay: () -> Unit,
+    onRequestMicrophone: () -> Unit,
     onRequestBattery: () -> Unit,
     onContinue: () -> Unit
 ) {
-    var showA11yDisclosureDialog by remember { mutableStateOf(false) }
-
-    if (showA11yDisclosureDialog) {
-        AlertDialog(
-            onDismissRequest = { showA11yDisclosureDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Icon(Icons.Default.Accessibility, contentDescription = null, tint = MaxPrimary)
-                    Text("Accessibility Service Disclosure", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaxTextPrimary)
-                }
-            },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = "MAX uses the Accessibility Service API strictly to execute your voice commands and autonomous tasks on your behalf.",
-                        fontSize = 13.sp,
-                        color = MaxTextPrimary
-                    )
-                    Text(
-                        text = "• Click on UI elements & navigate apps\n• Type text into search and chat inputs\n• Answer/reject calls via voice\n• Scroll and interact with screens",
-                        fontSize = 12.sp,
-                        color = MaxTextSecondary
-                    )
-                    Text(
-                        text = "Privacy Guarantee: MAX does NOT monitor your personal data, does NOT collect keystrokes, and does NOT share screen contents.",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaxPrimary
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showA11yDisclosureDialog = false
-                        onRequestAccessibility()
-                    }
-                ) {
-                    Text("Agree & Enable", fontWeight = FontWeight.Bold, color = MaxPrimary)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showA11yDisclosureDialog = false }) {
-                    Text("Cancel", color = MaxTextMuted)
-                }
-            },
-            containerColor = MaxSurface,
-            shape = RoundedCornerShape(MaxDimensions.radiusLg)
-        )
-    }
-
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "System Setup",
+            text = "Required Permissions",
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = MaxTextPrimary
@@ -260,39 +436,44 @@ private fun PermissionsStepView(
         Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
 
         Text(
-            text = "Grant required Android permissions for MAX automation",
+            text = "MAX needs these permissions to automate actions for you",
             fontSize = 13.sp,
             color = MaxTextMuted
         )
 
-        Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
+        Spacer(modifier = Modifier.height(MaxDimensions.spaceLg))
 
-        MaxCard(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                modifier = Modifier.padding(MaxDimensions.spaceMd),
-                verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
-            ) {
-                OnboardingPermissionRow(
-                    title = "Accessibility Service",
-                    subtitle = "Required for autonomous clicking, typing & UI control",
-                    isGranted = uiState.isAccessibilityGranted,
-                    onGrant = { showA11yDisclosureDialog = true }
-                )
-                HorizontalDivider(color = MaxBorder, thickness = 0.5.dp)
-                OnboardingPermissionRow(
-                    title = "Display Over Other Apps",
-                    subtitle = "Required for dynamic floating HUD capsule",
-                    isGranted = uiState.isOverlayGranted,
-                    onGrant = onRequestOverlay
-                )
-                HorizontalDivider(color = MaxBorder, thickness = 0.5.dp)
-                OnboardingPermissionRow(
-                    title = "Ignore Battery Optimizations",
-                    subtitle = "Prevents Android from killing AI background tasks",
-                    isGranted = uiState.isBatteryOptimizationsIgnored,
-                    onGrant = onRequestBattery
-                )
-            }
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+        ) {
+            PermissionCard(
+                title = "Accessibility Service",
+                description = "Required to inspect UI elements and perform autonomous actions.",
+                isGranted = uiState.isAccessibilityGranted,
+                onRequest = onRequestAccessibility
+            )
+
+            PermissionCard(
+                title = "Display Over Other Apps",
+                description = "Required to show the MAX voice orb and visual execution feedback.",
+                isGranted = uiState.isOverlayGranted,
+                onRequest = onRequestOverlay
+            )
+
+            PermissionCard(
+                title = "Microphone",
+                description = "Required for real-time voice communication and wake-word detection.",
+                isGranted = uiState.isMicrophoneGranted,
+                onRequest = onRequestMicrophone
+            )
+
+            PermissionCard(
+                title = "Ignore Battery Optimizations",
+                description = "Keeps MAX responsive in the background when your screen is locked.",
+                isGranted = uiState.isBatteryOptimizationsIgnored,
+                onRequest = onRequestBattery
+            )
         }
 
         Spacer(modifier = Modifier.height(MaxDimensions.spaceXl))
@@ -307,48 +488,63 @@ private fun PermissionsStepView(
 }
 
 @Composable
-private fun OnboardingPermissionRow(
+private fun PermissionCard(
     title: String,
-    subtitle: String? = null,
+    description: String,
     isGranted: Boolean,
-    onGrant: () -> Unit
+    onRequest: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+    MaxCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = !isGranted) { onRequest() }
     ) {
-        Column(modifier = Modifier.weight(1f).padding(end = MaxDimensions.spaceSm)) {
-            Text(
-                text = title,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaxTextPrimary
-            )
-            if (subtitle != null) {
-                Spacer(modifier = Modifier.height(2.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(MaxDimensions.spaceMd),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = subtitle,
+                    text = title,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaxTextPrimary
+                )
+                Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
+                Text(
+                    text = description,
                     fontSize = 11.sp,
-                    color = MaxTextMuted,
-                    lineHeight = 14.sp
+                    color = MaxTextMuted
                 )
             }
-        }
-        if (isGranted) {
-            Icon(
-                imageVector = Icons.Default.CheckCircle,
-                contentDescription = "Granted",
-                tint = MaxSuccess,
-                modifier = Modifier.size(20.dp)
-            )
-        } else {
-            MaxButton(
-                text = "Grant",
-                onClick = onGrant,
-                variant = MaxButtonVariant.PRIMARY,
-                modifier = Modifier.height(30.dp)
-            )
+
+            Spacer(modifier = Modifier.width(MaxDimensions.spaceSm))
+
+            if (isGranted) {
+                Surface(
+                    shape = RoundedCornerShape(MaxDimensions.radiusPill),
+                    color = Color(0xFF10B981).copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF10B981).copy(alpha = 0.3f))
+                ) {
+                    Text(
+                        text = "GRANTED",
+                        color = Color(0xFF10B981),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            } else {
+                MaxButton(
+                    text = "Grant",
+                    onClick = onRequest,
+                    variant = MaxButtonVariant.SECONDARY,
+                    modifier = Modifier.height(30.dp)
+                )
+            }
         }
     }
 }
@@ -382,8 +578,12 @@ private fun AiConfigStepView(
 
         Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
 
+        val context = LocalContext.current
         MaxCard(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(MaxDimensions.spaceMd)) {
+            Column(
+                modifier = Modifier.padding(MaxDimensions.spaceMd),
+                verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+            ) {
                 MaxTextField(
                     value = uiState.geminiApiKey,
                     onValueChange = onApiKeyChanged,
@@ -393,6 +593,51 @@ private fun AiConfigStepView(
                     leadingIcon = { Icon(Icons.Default.Key, contentDescription = null, tint = MaxTextMuted) },
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(MaxDimensions.radiusMd))
+                        .background(MaxPrimary.copy(alpha = 0.12f))
+                        .clickable {
+                            try {
+                                val intent = Intent(
+                                    Intent.ACTION_VIEW,
+                                    Uri.parse("https://aistudio.google.com/app/apikey")
+                                )
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Cannot open browser: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            tint = MaxPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Get Free Key from Google AI Studio",
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaxPrimary
+                        )
+                    }
+                    Icon(
+                        imageVector = Icons.Default.ChevronRight,
+                        contentDescription = null,
+                        tint = MaxPrimary.copy(alpha = 0.7f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
 

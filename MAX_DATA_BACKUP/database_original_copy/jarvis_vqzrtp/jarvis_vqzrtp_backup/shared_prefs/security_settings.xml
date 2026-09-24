@@ -1,6 +1,0 @@
-<?xml version='1.0' encoding='utf-8' standalone='yes' ?>
-<map>
-    <boolean name="auto_unlock" value="true" />
-    <string name="pin_enc">NzM5NjY=&#10;    </string>
-    <string name="voice_unlock_code_word">open my phone</string>
-</map>

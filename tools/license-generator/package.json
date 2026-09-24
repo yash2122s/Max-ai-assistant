@@ -1,0 +1,27 @@
+{
+  "name": "max-license-generator",
+  "version": "1.0.0",
+  "description": "Owner CLI tool for generating and hashing MAX commercial lifetime license keys",
+  "main": "generate.js",
+  "bin": {
+    "license-generator": "./generate.js"
+  },
+  "scripts": {
+    "start": "node generate.js",
+    "generate": "node generate.js",
+    "create-key": "node generate.js --register"
+  },
+  "keywords": [
+    "max",
+    "license",
+    "generator",
+    "lifetime"
+  ],
+  "author": "MAX AI Assistant Owner",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {},
+  "optionalDependencies": {
+    "firebase-admin": "^12.0.0"
+  }
+}

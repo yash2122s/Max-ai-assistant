@@ -38,8 +38,7 @@
 | **Navigation Drawer & Gestures** | Full Material 3 `ModalNavigationDrawer` with smooth swipe, categorized destinations, and Android back button handling. |
 | **Permissions Manager Screen** | Dedicated Permissions Manager screen in Jetpack Compose (`PermissionsScreen.kt` via `MaxDestinations.PERMISSIONS`). Features active capabilities count, real-time status refresh, individual toggles/grant actions for all 11 capabilities, plus direct link to Android App Info settings. |
 | **Routine Automation Screen** | Dedicated Routines & Automation screen in Jetpack Compose (`RoutinesScreen.kt` via `MaxDestinations.ROUTINES`). Features system preset routines (Morning Wake-Up, Bedtime Sleep Mode, Focus/Work Mode, Gaming Turbo Mode) and custom macro routine creator modal dispatching directly to Kotlin `RoutineTool`. |
-| **Horizontal Quick Actions Carousel** | Horizontally scrollable Quick Actions carousel on Home Screen. Features 10 real hardware and backend tool triggers: Torch ON/OFF (`QuickActions.toggleFlashlight`), WhatsApp deep-link, Screenshot capture (`ExecutionEngine.TAKE_SCREENSHOT`), Send SMS dialog (`SEND_SMS`), Create Contact dialog (`CREATE_CONTACT`), Set Reminder modal (`addReminder`), Save Memory modal (`saveMemory`), GPS Location query (`GET_LOCATION`), and Camera launcher (`OPEN_CAMERA`). |
-| **Gemini Live Voice** | WebSocket to `gemini-3.1-flash-live-preview`. Audio in/out working. |
+| **Gemini 3.8 Live Dual-Model Routing (FAST + DEEP)** | Real-time WebSocket session with dynamic routing between **FAST MODE** (`gemini-3.8-live` for sub-500ms conversational voice and direct tools) and **DEEP MODE** (`gemini-3.8-live-extended-thinking` for complex reasoning, multi-step planning, code debugging, and desktop computer-use), with candidate fallback to `gemini-3.1-flash-live-preview`. Features `ModelRouter`, `ModelHandoffContext` seamless state transfer, royal Settings UI mode selector, and telemetry. |
 | **AssistantEngine** | Full session lifecycle, barge-in, audio stutter fix, WS keep-alive |
 | **Tool Calling (45 tools)** | All tools registered in MyApplication; ToolDispatcher wired to GeminiWebSocketClient |
 | **ActionDispatcher / ExecutionEngine** | Verified retry+verification loop, 25s timeout |
@@ -102,7 +101,7 @@
 
 | Issue | Severity | Location |
 |-------|----------|----------|
-| Hardcoded model name in `sanitizeModelName()` always returns `gemini-3.1-flash-live-preview` regardless of user setting | MEDIUM | `GeminiWebSocketClient.kt` |
+| Model selection in `GeminiWebSocketClient` respects `SettingsManager` preference, defaulting to `gemini-3.8-live` with fallback | RESOLVED ✅ | `GeminiWebSocketClient.kt` |
 | `fallbackToDestructiveMigration(dropAllTables=true)` will silently destroy all user data if migration fails | HIGH | `AppDatabase.kt` |
 | `ChatViewModel._instance` is a singleton anti-pattern — risks stale context leaks | MEDIUM | `ChatViewModel.kt` |
 | `pendingTask` in `JarvisAccessibilityService` is a static mutable var — not thread-safe | MEDIUM | `JarvisAccessibilityService.kt` |

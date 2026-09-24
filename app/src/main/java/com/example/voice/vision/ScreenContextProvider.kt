@@ -65,46 +65,28 @@ object ScreenContextProvider {
      * Retries once after a short delay if the first attempt returns null or a stale node.
      */
     private suspend fun obtainFreshRootNode(service: JarvisAccessibilityService): AccessibilityNodeInfo? {
-        // First attempt
-        var rootNode = try {
-            service.rootInActiveWindow
-        } catch (e: Exception) {
-            Log.w(TAG, "rootInActiveWindow threw on first attempt: ${e.message}")
-            null
-        }
-
-        // Validate and refresh the node to ensure it's not recycled/stale
+        // 1. Direct active root from service or active window
+        var rootNode = JarvisAccessibilityService.getActiveRoot()
         if (rootNode != null) {
             try {
-                if (rootNode.refresh()) {
-                    return rootNode
-                } else {
-                    Log.w(TAG, "Root node refresh() returned false, node may be stale")
-                    rootNode = null
-                }
+                // Try refresh if possible, but keep node if refresh returns false
+                rootNode.refresh()
+                return rootNode
             } catch (e: Exception) {
-                Log.w(TAG, "Root node refresh() threw (recycled node): ${e.message}")
+                Log.w(TAG, "Root node threw on initial check: ${e.message}")
                 rootNode = null
             }
         }
 
-        // Retry after a short delay
+        // 2. Retry after a short delay
         delay(NODE_RETRY_DELAY_MS)
-        rootNode = try {
-            service.rootInActiveWindow
-        } catch (e: Exception) {
-            Log.w(TAG, "rootInActiveWindow threw on retry: ${e.message}")
-            null
-        }
-
+        rootNode = JarvisAccessibilityService.getActiveRoot()
         if (rootNode != null) {
             try {
-                if (rootNode.refresh()) {
-                    Log.d(TAG, "Root node obtained on retry")
-                    return rootNode
-                }
+                rootNode.refresh()
+                return rootNode
             } catch (e: Exception) {
-                Log.w(TAG, "Root node refresh() threw on retry: ${e.message}")
+                Log.w(TAG, "Root node threw on retry: ${e.message}")
             }
         }
 

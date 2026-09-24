@@ -1,5 +1,7 @@
 package com.example.network
 
+import com.google.gson.annotations.SerializedName
+
 data class SetupMessage(
     val setup: SetupConfig
 )
@@ -11,7 +13,26 @@ data class SetupConfig(
 )
 
 data class GenerationConfig(
-    val responseModalities: List<String> = listOf("TEXT")
+    val responseModalities: List<String> = listOf("TEXT"),
+    val speechConfig: SpeechConfig? = null,
+    val thinkingConfig: ThinkingConfig? = null
+)
+
+data class SpeechConfig(
+    val voiceConfig: VoiceConfig? = null
+)
+
+data class VoiceConfig(
+    val prebuiltVoiceConfig: PrebuiltVoiceConfig? = null
+)
+
+data class PrebuiltVoiceConfig(
+    val voiceName: String
+)
+
+data class ThinkingConfig(
+    @SerializedName("thinkingLevel") val thinkingLevel: String? = "HIGH",
+    @SerializedName("thinkingBudget") val thinkingBudget: Int? = null
 )
 
 data class SystemInstruction(
@@ -51,7 +72,9 @@ data class ServerContent(
     val turnComplete: Boolean? = null,
     val inputTranscription: InputTranscription? = null,
     val outputTranscription: OutputTranscription? = null,
-    val interrupted: Boolean? = null
+    val interrupted: Boolean? = null,
+    @SerializedName(value = "interactionStatus", alternate = ["interaction_status"])
+    val interactionStatus: String? = null
 )
 
 data class InputTranscription(

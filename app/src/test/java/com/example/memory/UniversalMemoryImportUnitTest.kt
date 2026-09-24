@@ -458,6 +458,8 @@ class UniversalMemoryImportUnitTest {
 
         // 1. User modifies MAX_MEMORY.md externally
         val file = syncService.maxMemoryFile
+        file.parentFile?.mkdirs()
+        if (!file.exists()) file.writeText("# MAX Memory\n")
         file.appendText("\n\n## External Item\n- External Title: External Body Details.\n")
 
         // 2. Detect change & parse diff

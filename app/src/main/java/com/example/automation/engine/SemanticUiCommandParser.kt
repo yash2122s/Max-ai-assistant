@@ -72,19 +72,19 @@ object SemanticUiCommandParser {
 
     // 1. Tanglish / Telugu Compound App Search ("Google maps open chesi Palakollu ane search chey", "YouTube open chesi songs search chey")
     private val TANGLISH_APP_SEARCH_COMPOUND = Regex(
-        "^(.+?)\\s*(?:ni|nu|lo|ki|ను|ని)?\\s+(?:open|launch|స్టార్ట్|ఓపెన్|తెరువు)\\s*(?:chesi|chey|చేసి|చేయి|చేయ్)?\\s*(?:and|then|తర్వాత|మరియు|అలాగే|,)?\\s*(.+?)\\s*(?:ane|ani|ni|nu|kosam|gurinchi|అని|అనే|ని|ను|కోసం|గురించి)?\\s*(?:search|lookup|సెర్చ్|శోధించు)(?:\\s*(?:chey|cheyi|cheyyi|cheyyandi|చేయి|చేయ్|చేయండి|చేసుకో|చూడు))?$",
+        "^(.+?)\\s*(?:ni|nu|lo|ki|ను|ని)?\\s+(?:open|launch|స్టార్ట్|ఓపెన్|తెరువు)\\s*(?:cheyyandi|cheyyi|cheyi|chesi|chey|చేయండి|చేయి|చేయ్|చేసి)?\\s*(?:and|then|తర్వాత|మరియు|అలాగే|,)?\\s*(.+?)\\s*(?:ane|ani|ni|nu|kosam|gurinchi|అని|అనే|ని|ను|కోసం|గురించి)?\\s*(?:search|lookup|సెర్చ్|శోధించు)(?:\\s*(?:cheyyandi|cheyyi|cheyi|chey|చేయండి|చేయి|చేయ్|చేసుకో|చూడు))?$",
         RegexOption.IGNORE_CASE
     )
 
-    // 2. Tanglish / Telugu Compound App Type-and-Search ("Google maps open chesi Palakollu ani type chesi search chey")
+    // 2. Tanglish / Telugu Compound App Type-and-Search ("Google maps open chesi Palakollu ani type chesi search chey", "Instagram open cheyyi and search lo max_ai_assistant ani type cheyyi")
     private val TANGLISH_APP_TYPE_SEARCH_COMPOUND = Regex(
-        "^(.+?)\\s*(?:ni|nu|lo|ki|ను|ని)?\\s+(?:open|launch|స్టార్ట్|ఓపెన్|తెరువు)\\s*(?:chesi|chey|చేసి|చేయి|చేయ్)?\\s*(?:and|then|తర్వాత|మరియు|అలాగే|,)?\\s*(.+?)\\s*(?:ane|ani|ni|nu)?\\s*(?:type|write|రాయి|టైప్)\\s*(?:chesi|chey|చేసి|చేయి)?\\s*(?:and|then|తర్వాత|,)?\\s*(?:search|press enter|hit enter|సెర్చ్|శోధించు)(?:\\s*(?:chey|cheyi|cheyyi|cheyyandi|చేయి|చేయ్|చేయండి|చేసుకో|చూడు))?$",
+        "^(.+?)\\s*(?:ni|nu|lo|ki|ను|ని)?\\s+(?:open|launch|స్టార్ట్|ఓపెన్|తెరువు)\\s*(?:cheyyandi|cheyyi|cheyi|chesi|chey|చేయండి|చేయి|చేయ్|చేసి)?\\s*(?:and|then|తర్వాత|మరియు|అలాగే|,)?\\s*(.+?)\\s*(?:ane|ani|ni|nu)?\\s*(?:type|write|రాయి|టైప్)\\s*(?:cheyyandi|cheyyi|cheyi|chesi|chey|చేయండి|చేయి|చేయ్|చేసి)?(?:\\s*(?:and|then|తర్వాత|,)?\\s*(?:search|press enter|hit enter|సెర్చ్|శోధించు))?(?:\\s*(?:cheyyandi|cheyyi|cheyi|chey|చేయండి|చేయి|చేయ్|చేసుకో|చూడు))?$",
         RegexOption.IGNORE_CASE
     )
 
     // 3. Tanglish / Telugu In-App Search with 'lo' ("Google maps lo Palakollu search chey", "YouTube lo Telugu songs search chey")
     private val TANGLISH_IN_APP_SEARCH = Regex(
-        "^(.+?)\\s+(?:lo|లో)\\s+(.+?)\\s*(?:ane|ani|ni|nu|kosam|gurinchi|అని|అనే|ని|ను|కోసం|గురించి)?\\s*(?:search|lookup|సెర్చ్|శోధించు)(?:\\s*(?:chey|cheyi|cheyyi|cheyyandi|చేయి|చేయ్|చేయండి|చేసుకో|చూడు))?$",
+        "^(.+?)\\s+(?:lo|లో)\\s+(.+?)\\s*(?:ane|ani|ni|nu|kosam|gurinchi|అని|అనే|ని|ను|కోసం|గురించి)?\\s*(?:search|lookup|సెర్చ్|శోధించు)(?:\\s*(?:cheyyandi|cheyyi|cheyi|chey|చేయండి|చేయి|చేయ్|చేసుకో|చూడు))?$",
         RegexOption.IGNORE_CASE
     )
 
@@ -102,13 +102,13 @@ object SemanticUiCommandParser {
 
     // 6. Standalone Tanglish / Telugu Search ("Palakollu ane search chey", "Bhimavaram search chey", "Hyderabad ani search chey")
     private val TANGLISH_STANDALONE_SEARCH = Regex(
-        "^(.+?)\\s*(?:ane|ani|ni|nu|kosam|gurinchi|అని|అనే|ని|ను|కోసం|గురించి)?\\s*(?:search|lookup|సెర్చ్|శోధించు)(?:\\s*(?:chey|cheyi|cheyyi|cheyyandi|చేయి|చేయ్|చేయండి|చేసుకో|చూడు))?$",
+        "^(.+?)\\s*(?:ane|ani|ni|nu|kosam|gurinchi|అని|అనే|ని|ను|కోసం|గురించి)?\\s*(?:search|lookup|సెర్చ్|శోధించు)(?:\\s*(?:cheyyandi|cheyyi|cheyi|chey|చేయండి|చేయి|చేయ్|చేసుకో|చూడు))?$",
         RegexOption.IGNORE_CASE
     )
 
     // 7. Standalone Tanglish / Telugu Type-and-Search ("Palakollu ani type chesi search chey")
     private val TANGLISH_STANDALONE_TYPE_SEARCH = Regex(
-        "^(.+?)\\s*(?:ane|ani|ni|nu)?\\s*(?:type|write|రాయి|టైప్)\\s*(?:chesi|chey|చేసి|చేయి)?\\s*(?:and|then|తర్వాత|,)?\\s*(?:search|press enter|hit enter|సెర్చ్|శోధించు)(?:\\s*(?:chey|cheyi|cheyyi|cheyyandi|చేయి|చేయ్|చేయండి|చేసుకో|చూడు))?$",
+        "^(.+?)\\s*(?:ane|ani|ni|nu)?\\s*(?:type|write|రాయి|టైప్)\\s*(?:cheyyandi|cheyyi|cheyi|chesi|chey|చేయండి|చేయి|చేయ్|చేసి)?\\s*(?:and|then|తర్వాత|,)?\\s*(?:search|press enter|hit enter|సెర్చ్|శోధించు)(?:\\s*(?:cheyyandi|cheyyi|cheyi|chey|చేయండి|చేయి|చేయ్|చేసుకో|చూడు))?$",
         RegexOption.IGNORE_CASE
     )
 
@@ -135,7 +135,7 @@ object SemanticUiCommandParser {
     )
 
     private val TANGLISH_SOV_COMPOUND = Regex(
-        "^(.+?)\\s*(?:ni|nu|lo|ki|ను|ని)?\\s*(?:open|launch|స్టార్ట్|ఓపెన్|తెరువు)\\s*(?:chesi|chey|చేసి|చేయి|చేయ్)?\\s*(?:and|then|తర్వాత|మరియు|అలాగే|,)?\\s*(.+?)\\s*(?:meeda|lo|పై|మీద|ని|ను|ki)?\\s*(tap|click|press|find|search|select|type|నొక్కు|ట్యాప్|వెతుకు|రాయి|టైప్)(?:\\s*(?:chey|cheyi|చేయి|చేయ్|చేసుకో|చూడు))?$",
+        "^(.+?)\\s*(?:ni|nu|lo|ki|ను|ని)?\\s*(?:open|launch|స్టార్ట్|ఓపెన్|తెరువు)\\s*(?:cheyyandi|cheyyi|cheyi|chesi|chey|చేయండి|చేయి|చేయ్|చేసి)?\\s*(?:and|then|తర్వాత|మరియు|అలాగే|,)?\\s*(.+?)\\s*(?:meeda|lo|పై|మీద|ని|ను|ki)?\\s*(tap|click|press|find|search|select|type|నొక్కు|ట్యాప్|వెతుకు|రాయి|టైప్)(?:\\s*(?:cheyyandi|cheyyi|cheyi|chey|చేయండి|చేయి|చేయ్|చేసుకో|చూడు))?$",
         RegexOption.IGNORE_CASE
     )
 
@@ -167,6 +167,7 @@ object SemanticUiCommandParser {
                             trimmed.startsWith("టైప్ ", ignoreCase = true)
 
         var clean = trimmed
+            .replaceFirst(Regex("^(?:hey\\s+|hi\\s+|ok\\s+)?(?:max|jarvis)[,\\s:]*", RegexOption.IGNORE_CASE), "")
             .replace(Regex("^.*?(?:చేసావ్ కాబట్టి|చేసావు కాబట్టి|ఓపెన్ చేసావ్ కాబట్టి|ఓపెన్ చేసావు కాబట్టి|కాబట్టి|అందుకని|అందువల్ల)\\s+", RegexOption.IGNORE_CASE), "")
             .replace(Regex("^(?:so|now|then)\\s+", RegexOption.IGNORE_CASE), "")
 
@@ -515,9 +516,9 @@ object SemanticUiCommandParser {
         val cleanApp = cleanAppTarget(rawApp)
         if (cleanApp.isBlank() || cleanApp.contains(",") || containsActionVerb(cleanApp)) return null
 
-        val split = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.splitArgumentAndTrailingClauses(rawQuery)
-        val actualQuery = split?.argument ?: rawQuery
-        val cleanQuery = cleanSearchQuery(actualQuery)
+        val preCleaned = cleanSearchQuery(rawQuery)
+        val split = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.splitArgumentAndTrailingClauses(preCleaned)
+        val cleanQuery = cleanSearchQuery(split?.argument ?: preCleaned)
 
         if (cleanQuery.isBlank()) return null
 
@@ -555,9 +556,9 @@ object SemanticUiCommandParser {
     }
 
     private fun buildStandaloneSearchCommand(rawQuery: String): SemanticUiCommand? {
-        val split = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.splitArgumentAndTrailingClauses(rawQuery)
-        val actualQuery = split?.argument ?: rawQuery
-        val cleanQuery = cleanSearchQuery(actualQuery)
+        val preCleaned = cleanSearchQuery(rawQuery)
+        val split = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.splitArgumentAndTrailingClauses(preCleaned)
+        val cleanQuery = cleanSearchQuery(split?.argument ?: preCleaned)
         if (cleanQuery.isBlank()) return null
         if (containsActionVerb(cleanQuery)) return null
 

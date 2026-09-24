@@ -36,7 +36,10 @@ except Exception:
     LOG_PATH = os.path.join(LOG_DIR, "agent.log")
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = "gemini-3.1-flash-live-preview"  # Gemini Live API model for Google AI Studio
+GEMINI_MODEL_FAST = "gemini-3.8-live"
+GEMINI_MODEL_DEEP = "gemini-3.8-live-extended-thinking"
+GEMINI_MODEL = GEMINI_MODEL_FAST  # Default Gemini Live API model
+DEFAULT_MODEL_MODE = os.getenv("DEFAULT_MODEL_MODE", "AUTO")
 
 # ─── Audio Settings ───────────────────────────────────────────────────────────
 INPUT_SAMPLE_RATE = 16000

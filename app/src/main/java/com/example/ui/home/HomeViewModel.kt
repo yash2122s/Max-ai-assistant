@@ -42,6 +42,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiEvents = MutableSharedFlow<HomeUiEvent>(extraBufferCapacity = 20)
     val uiEvents: SharedFlow<HomeUiEvent> = _uiEvents.asSharedFlow()
 
+    private val _edgeRevealTrigger = MutableStateFlow<Long?>(null)
+    val edgeRevealTrigger: StateFlow<Long?> = _edgeRevealTrigger.asStateFlow()
+
+    val cloudLicense: StateFlow<com.example.firebase.model.CloudLicense> =
+        (application as com.example.MyApplication).maxLicenseManager.currentLicense
+    val dailyUsage: StateFlow<Long> =
+        (application as com.example.MyApplication).maxLicenseManager.dailyUsageCount
+
     private var persistedChatItems: List<ChatMessageItem> = emptyList()
     private val streamingResponseBuilder = StringBuilder()
     @Volatile
@@ -49,6 +57,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile
     private var lastPersistedUserText: String = ""
     private var captionClearJob: Job? = null
+    private var thinkingTimeoutJob: Job? = null
+    private var isModelIdle: Boolean = true
 
     init {
         // 1. Observe master runtime enabled state
@@ -85,6 +95,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         val isUser = event.role.equals("You", ignoreCase = true) || event.role.equals("user", ignoreCase = true)
                         if (isUser) {
                             val userText = event.text.trim()
+                            isModelIdle = false
                             if (userText.isNotEmpty() && userText != lastPersistedUserText) {
                                 lastPersistedUserText = userText
                                 persistChatMessage("user", userText)
@@ -100,6 +111,23 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                                     isThinking = true
                                 )
                             }
+                        } else {
+                            val aiText = event.text.trim()
+                            if (aiText.isNotEmpty()) {
+                                persistChatMessage("jarvis", aiText)
+                            }
+                            isModelIdle = true
+                            thinkingTimeoutJob?.cancel()
+                            _liveAiCaption.value = aiText
+                            _uiState.update { state ->
+                                state.copy(
+                                    liveAiCaption = aiText,
+                                    isAiSpeaking = false,
+                                    isThinking = false
+                                )
+                            }
+                            scheduleCaptionClear()
+                            _uiEvents.tryEmit(HomeUiEvent.ScrollToBottom)
                         }
                     }
                     is AssistantEvent.ResponseChunk -> {
@@ -114,6 +142,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     is AssistantEvent.ConnectionStateChanged -> {
                         val isDisconnected = event.state == ConnectionState.DISCONNECTED || event.state == ConnectionState.FAILED
+                        if (isDisconnected) {
+                            isModelIdle = true
+                        }
                         _uiState.update { 
                             it.copy(
                                 connectionState = event.state,
@@ -122,16 +153,30 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                     is AssistantEvent.ErrorOccurred -> {
+                        isModelIdle = true
                         _uiState.update { it.copy(error = event.message, isThinking = false) }
                         _uiEvents.tryEmit(HomeUiEvent.ShowSnackbar("Assistant error: ${event.message}"))
                     }
                     is AssistantEvent.NeedsUserInput -> {
+                        isModelIdle = true
                         persistChatMessage("jarvis", event.question)
                         _uiState.update { it.copy(isThinking = false, liveAiCaption = event.question) }
                         _uiEvents.tryEmit(HomeUiEvent.ScrollToBottom)
                     }
                     is AssistantEvent.ToolProgress -> {
                         // Tool execution feedback
+                    }
+                    is AssistantEvent.ThoughtSummaryDelta -> {
+                        // Extended thinking summary received
+                    }
+                    is AssistantEvent.InteractionStatusChanged -> {
+                        val isIdle = event.status.equals("IDLE", ignoreCase = true)
+                        isModelIdle = isIdle
+                        _uiState.update { state ->
+                            state.copy(
+                                isThinking = if (isIdle) false else (!state.isAiSpeaking)
+                            )
+                        }
                     }
                 }
             }
@@ -171,8 +216,18 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
 
-        // Initial connection state
-        _uiState.update { it.copy(connectionState = assistantUseCase.getConnectionState()) }
+        // Initial connection state & immediate connection trigger on screen load
+        val initialState = assistantUseCase.getConnectionState()
+        _uiState.update { it.copy(connectionState = initialState) }
+        viewModelScope.launch {
+            assistantUseCase.ensureConnected()
+        }
+    }
+
+    fun ensureConnected() {
+        viewModelScope.launch {
+            assistantUseCase.ensureConnected()
+        }
     }
 
     fun sendTextMessage(text: String) {
@@ -191,6 +246,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // Immediately persist user message
         persistChatMessage("user", trimmed)
         interruptSpeech()
+        isModelIdle = false
 
         _uiState.update { it.copy(
             isThinking = true,
@@ -198,6 +254,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             liveAiCaption = "",
             error = null
         )}
+
+        // Safety timeout (8s): ensure isThinking is never stuck permanently on dropped turns or blocked tools
+        thinkingTimeoutJob?.cancel()
+        thinkingTimeoutJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(8000)
+            if (_uiState.value.isThinking) {
+                isModelIdle = true
+                _uiState.update { it.copy(isThinking = false) }
+            }
+        }
 
         // P1.2 — typed reply to a pending approval (Allow / Cancel)
         if (com.example.automation.approval.ApprovalCoordinator.hasPending()) {
@@ -264,7 +330,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     // If resumePlanWithInput yielded another NeedsInput, it already emitted NeedsUserInput event.
                     // Only persist final completion/stop reply if no new NeedsInput was requested.
                     if (com.example.automation.engine.GoalPlanner.getWaitingInputState() == null) {
-                        val reply = res.errorMessage ?: if (res.success) "Action completed." else "Action stopped."
+                        val reply = res.errorMessage ?: if (res.success) "Task completed and verified." else "Action stopped."
                         persistChatMessage("jarvis", reply)
                     }
                     _uiState.update { it.copy(isThinking = false) }
@@ -280,9 +346,14 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 val offlineResult = assistantUseCase.sendTextMessage(trimmed)
 
                 if (offlineResult != null) {
-                    val reply = offlineResult.message ?: if (offlineResult.success) "Action completed." else "Action failed."
+                    val reply = offlineResult.message ?: if (offlineResult.success) "Task completed and verified." else "Action failed."
                     persistChatMessage("jarvis", reply)
-                    _uiState.update { it.copy(isThinking = false) }
+                    thinkingTimeoutJob?.cancel()
+                    isModelIdle = true
+                    _liveAiCaption.value = reply
+                    _uiState.update { it.copy(isThinking = false, liveAiCaption = reply) }
+                    scheduleCaptionClear()
+                    _uiEvents.tryEmit(HomeUiEvent.ScrollToBottom)
 
                     if (offlineResult.toolName == "security_gate" && !offlineResult.success) {
                         _uiEvents.tryEmit(HomeUiEvent.ShowSnackbar("API key required. Redirecting to Settings..."))
@@ -290,6 +361,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             } catch (e: Exception) {
+                thinkingTimeoutJob?.cancel()
+                isModelIdle = true
                 _uiState.update { it.copy(isThinking = false, error = e.message) }
             }
         }
@@ -319,6 +392,47 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             assistantUseCase.startListening()
             _uiState.update { it.copy(isRecording = true, liveUserCaption = "Listening...") }
         }
+    }
+
+    /**
+     * Handles hardware Power-button double-press, System Assistant, or Voice-key triggers.
+     * Launches HomeScreen directly into active listening state and triggers open animation.
+     */
+    fun handleAssistantTrigger(
+        triggerSource: String = "power_button",
+        startListening: Boolean = true,
+        openReveal: Boolean = true
+    ) {
+        val app = getApplication<Application>()
+        if (!MaxRuntimeManager.isMaxEnabled(app)) {
+            MaxRuntimeManager.enableMax(app)
+        }
+
+        if (openReveal) {
+            _edgeRevealTrigger.value = System.currentTimeMillis()
+        }
+
+        if (startListening) {
+            startListeningDirectly()
+        }
+    }
+
+    fun startListeningDirectly() {
+        val app = getApplication<Application>()
+        if (!MaxRuntimeManager.isMaxEnabled(app)) {
+            MaxRuntimeManager.enableMax(app)
+        }
+        val settings = com.example.data.preferences.SettingsManager(app)
+        if (!settings.hasValidGeminiApiKey()) {
+            _uiState.update { it.copy(error = "Gemini API key required for voice assistant.") }
+            _uiEvents.tryEmit(HomeUiEvent.ShowSnackbar("Gemini API key required. Redirecting to Settings..."))
+            _uiEvents.tryEmit(HomeUiEvent.NavigateTo(com.example.ui.navigation.MaxDestinations.SETTINGS))
+            return
+        }
+
+        interruptSpeech()
+        assistantUseCase.startListening()
+        _uiState.update { it.copy(isRecording = true, liveUserCaption = "Listening...") }
     }
 
     fun stopRecording() {
@@ -419,6 +533,8 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun handleAiTurnComplete(turnText: String) {
         captionClearJob?.cancel()
+        thinkingTimeoutJob?.cancel()
+        isModelIdle = true
         val textToPersist = synchronized(streamingResponseBuilder) {
             val res = if (turnText.isNotBlank()) turnText else streamingResponseBuilder.toString()
             streamingResponseBuilder.setLength(0)
@@ -431,7 +547,9 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             activeStreamingMessage = null
         }
         updateMergedMessages()
-        _uiState.update { it.copy(isThinking = false) }
+        _uiState.update { state ->
+            state.copy(isThinking = false)
+        }
         scheduleCaptionClear()
     }
 
@@ -466,7 +584,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                     _uiEvents.tryEmit(HomeUiEvent.ShowSnackbar(result))
                 }
                 "RECONNECT" -> {
-                    _uiEvents.tryEmit(HomeUiEvent.ShowSnackbar("Reconnecting to Gemini Live..."))
+                    _uiEvents.tryEmit(HomeUiEvent.ShowSnackbar("Reconnecting to AI Voice Engine..."))
                     assistantUseCase.reconnect()
                 }
             }
@@ -519,5 +637,6 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         super.onCleared()
         assistantUseCase.stopListening()
         captionClearJob?.cancel()
+        thinkingTimeoutJob?.cancel()
     }
 }

@@ -153,8 +153,8 @@ fun AboutScreen(
 
             FeatureCard(
                 icon = Icons.Default.Mic,
-                title = "Gemini Live Realtime Voice",
-                description = "Bi-directional PCM audio streaming with sub-second audio turn completion over WebSocket.",
+                title = "Realtime Voice Intelligence",
+                description = "Ultra-low latency conversational neural voice processing with seamless hands-free interaction.",
                 tint = MaxPrimary
             )
 

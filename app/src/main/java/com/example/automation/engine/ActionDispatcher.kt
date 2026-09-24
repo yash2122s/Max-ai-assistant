@@ -2,6 +2,7 @@ package com.example.automation.engine
 
 import android.content.Context
 import android.util.Log
+import com.example.automation.computeruse.ComputerUseEngine
 import com.example.automation.engine.planning.TaskIntent
 import com.example.automation.engine.planning.TaskPlanner
 import com.example.automation.engine.execution.CapabilityRouter
@@ -79,15 +80,45 @@ object ActionDispatcher {
     }
 
     suspend fun dispatch(context: Context, json: JSONObject): Boolean {
-        Log.d(TAG, "dispatch() - payload: $json")
+        Log.d(TAG, "[DISPATCH] RECEIVED payload=$json")
         val normalized = normalizeJson(json)
         val actionName = normalized.optString("action", "NONE")
         if (actionName == "NONE") return false
+
+        if (actionName == "COMPUTER_USE" || actionName == "UI_AGENT") {
+            Log.i(TAG, "[DISPATCH] COMPUTER_USE_RECEIVED actionName=$actionName")
+            val goal = normalized.optString("goal").ifEmpty {
+                normalized.optString("task").ifEmpty {
+                    normalized.optString("query", "Perform requested UI action")
+                }
+            }
+            val targetApp = normalized.optString("target_app").ifEmpty {
+                normalized.optString("app").ifEmpty {
+                    normalized.optString("target_entity").ifEmpty { null }
+                }
+            }
+            Log.i(TAG, "[DISPATCH] COMPUTER_USE_STARTED goal='$goal' targetApp='$targetApp'")
+            val result = ComputerUseEngine.execute(context, goal, targetApp)
+            Log.i(TAG, "[DISPATCH] COMPUTER_USE_RETURNED success=${result.success} error=${result.error} steps=${result.stepsExecuted} message='${result.message}'")
+            return result.success
+        }
 
         if (actionName == "TASK_INTENT") {
             val goal = normalized.optString("goal", "")
             val targetEntity = normalized.optString("target_entity").ifEmpty { null }
             val requiredOutcome = normalized.optString("required_outcome").ifEmpty { null }
+
+            val isUiNavigationTask = targetEntity?.lowercase() in setOf("instagram", "maps", "google maps", "youtube", "chrome", "twitter", "x", "play store", "settings") ||
+                goal.contains("search", ignoreCase = true) ||
+                goal.contains("profile", ignoreCase = true) ||
+                goal.contains("account", ignoreCase = true) ||
+                goal.contains("screen", ignoreCase = true) ||
+                goal.contains("inspect", ignoreCase = true)
+
+            if (isUiNavigationTask) {
+                val result = ComputerUseEngine.execute(context, goal, targetEntity)
+                return result.success
+            }
 
             val parametersMap = mutableMapOf<String, String>()
             val paramsObj = normalized.optJSONObject("parameters")
@@ -111,6 +142,7 @@ object ActionDispatcher {
             val taskRecoveryEngine = TaskRecoveryEngine()
             val taskPlanner = TaskPlanner()
             val longTaskOrchestrator = LongTaskOrchestrator(
+                context = context,
                 capabilityRouter = capabilityRouter,
                 verificationEngine = verificationEngine,
                 recoveryEngine = taskRecoveryEngine,
@@ -120,10 +152,10 @@ object ActionDispatcher {
             val originalUtterance = normalized.optString("last_input_transcription").ifEmpty { goal }
             val plan = taskPlanner.createPlan(originalUtterance = originalUtterance, taskIntent = taskIntent)
 
-            CoroutineScope(Dispatchers.IO).launch {
+            val taskResult = withContext(Dispatchers.IO) {
                 longTaskOrchestrator.executeTask(plan)
             }
-            return true
+            return taskResult.success
         }
 
         if (actionName == "CALL_PHONE") {
@@ -177,7 +209,7 @@ object ActionDispatcher {
     }
 
     suspend fun dispatchWithResult(context: Context, json: JSONObject): String {
-        Log.d(TAG, "dispatchWithResult() - payload: $json")
+        Log.d(TAG, "[DISPATCH] DISPATCH_WITH_RESULT_RECEIVED payload=$json")
         val normalized = normalizeJson(json)
         val actionName = normalized.optString("action", "NONE")
         if (actionName == "NONE") {
@@ -224,10 +256,78 @@ object ActionDispatcher {
             }
         }
 
+        if (actionName == "COMPUTER_USE" || actionName == "UI_AGENT") {
+            Log.i(TAG, "[DISPATCH] DWR_COMPUTER_USE_RECEIVED actionName=$actionName")
+            val goal = normalized.optString("goal").ifEmpty {
+                normalized.optString("task").ifEmpty {
+                    normalized.optString("query", "Perform requested UI action")
+                }
+            }
+            val targetApp = normalized.optString("target_app").ifEmpty {
+                normalized.optString("app").ifEmpty {
+                    normalized.optString("target_entity").ifEmpty { null }
+                }
+            }
+            Log.i(TAG, "[DISPATCH] DWR_COMPUTER_USE_STARTED goal='$goal' targetApp='$targetApp'")
+            val result = ComputerUseEngine.execute(context, goal, targetApp)
+            Log.i(TAG, "[DISPATCH] DWR_COMPUTER_USE_RETURNED success=${result.success} error=${result.error} steps=${result.stepsExecuted}")
+            return JSONObject().apply {
+                put("status", if (result.success) "success" else "error")
+                put("success", result.success)
+                put("executionState", if (result.success) "COMPLETED" else "FAILED")
+                put("message", result.message ?: (if (result.success) "Success" else "Execution failed"))
+                if (!result.success) {
+                    put("error", JSONObject().apply {
+                        put("code", result.error ?: "COMPUTER_USE_FAILED")
+                        put("message", result.message ?: "Execution failed")
+                    })
+                } else {
+                    put("error", JSONObject.NULL)
+                }
+                put("data", JSONObject().apply {
+                    put("stepsExecuted", result.stepsExecuted)
+                    if (result.verifiedOutcome != null) {
+                        put("verifiedOutcome", result.verifiedOutcome)
+                    }
+                })
+            }.toString()
+        }
+
         if (actionName == "TASK_INTENT") {
             val goal = normalized.optString("goal", "")
             val targetEntity = normalized.optString("target_entity").ifEmpty { null }
             val requiredOutcome = normalized.optString("required_outcome").ifEmpty { null }
+
+            val isUiNavigationTask = targetEntity?.lowercase() in setOf("instagram", "maps", "google maps", "youtube", "chrome", "twitter", "x", "play store", "settings") ||
+                goal.contains("search", ignoreCase = true) ||
+                goal.contains("profile", ignoreCase = true) ||
+                goal.contains("account", ignoreCase = true) ||
+                goal.contains("screen", ignoreCase = true) ||
+                goal.contains("inspect", ignoreCase = true)
+
+            if (isUiNavigationTask) {
+                val result = ComputerUseEngine.execute(context, goal, targetEntity)
+                return JSONObject().apply {
+                    put("status", if (result.success) "success" else "error")
+                    put("success", result.success)
+                    put("executionState", if (result.success) "COMPLETED" else "FAILED")
+                    put("message", result.message ?: (if (result.success) "Success" else "Execution failed"))
+                    if (!result.success) {
+                        put("error", JSONObject().apply {
+                            put("code", result.error ?: "TASK_FAILED")
+                            put("message", result.message ?: "Execution failed")
+                        })
+                    } else {
+                        put("error", JSONObject.NULL)
+                    }
+                    put("data", JSONObject().apply {
+                        put("stepsExecuted", result.stepsExecuted)
+                        if (result.verifiedOutcome != null) {
+                            put("verifiedOutcome", result.verifiedOutcome)
+                        }
+                    })
+                }.toString()
+            }
 
             val parametersMap = mutableMapOf<String, String>()
             val paramsObj = normalized.optJSONObject("parameters")
@@ -251,30 +351,29 @@ object ActionDispatcher {
             val taskRecoveryEngine = TaskRecoveryEngine()
             val taskPlanner = TaskPlanner()
             val longTaskOrchestrator = LongTaskOrchestrator(
+                context = context,
                 capabilityRouter = capabilityRouter,
                 verificationEngine = verificationEngine,
                 recoveryEngine = taskRecoveryEngine,
                 taskPlanner = taskPlanner
             )
 
-            // 1. Generate 3-Tier Plan
             val originalUtterance = normalized.optString("last_input_transcription").ifEmpty { goal }
             val plan = taskPlanner.createPlan(originalUtterance = originalUtterance, taskIntent = taskIntent)
 
-            // 2. Dispatch to LongTaskOrchestrator without blocking TTS
-            CoroutineScope(Dispatchers.IO).launch {
+            val taskResult = withContext(Dispatchers.IO) {
                 longTaskOrchestrator.executeTask(plan)
             }
 
-            // 3. Immediately unblock Gemini Live with explicit RUNNING status (success=false because it is not completed)
             return JSONObject().apply {
-                put("status", "RUNNING")
-                put("success", false)
-                put("executionState", "RUNNING")
-                put("message", "Task dispatched to background orchestrator.")
+                put("status", if (taskResult.success) "success" else "error")
+                put("success", taskResult.success)
+                put("executionState", if (taskResult.success) "COMPLETED" else "FAILED")
+                put("message", taskResult.message ?: (if (taskResult.success) "Task completed" else "Task failed"))
                 put("data", JSONObject().apply {
                     put("taskId", plan.id)
-                    put("status", "RUNNING")
+                    put("executedSteps", taskResult.executedSteps)
+                    put("totalSteps", taskResult.totalSteps)
                 })
             }.toString()
         }

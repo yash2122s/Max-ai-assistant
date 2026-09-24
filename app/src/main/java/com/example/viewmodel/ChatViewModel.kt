@@ -46,6 +46,7 @@ class ChatViewModel : ViewModel() {
     private var chatHistoryJob: Job? = null
     private var eventObservationJob: Job? = null
     private var captionClearJob: Job? = null
+    private var thinkingTimeoutJob: Job? = null
 
     private var engine: AssistantEngine? = null
     
@@ -122,7 +123,9 @@ class ChatViewModel : ViewModel() {
                     when (event) {
                         is AssistantEvent.TextTranscribed -> {
                             persistChatMessage(event.role, event.text)
-                            if (event.role == "Gemini") {
+                            val isUser = event.role.equals("You", ignoreCase = true) || event.role.equals("user", ignoreCase = true)
+                            if (!isUser) {
+                                thinkingTimeoutJob?.cancel()
                                 try {
                                     val jsonStart = event.text.indexOf("{")
                                     val jsonEnd = event.text.lastIndexOf("}")
@@ -144,7 +147,7 @@ class ChatViewModel : ViewModel() {
                                         isThinking = false,
                                         liveUserCaption = "",
                                         liveAiCaption = updatedAiText,
-                                        isAiSpeaking = true
+                                        isAiSpeaking = false
                                     )
                                 }
                                 scheduleCaptionClear()
@@ -163,7 +166,8 @@ class ChatViewModel : ViewModel() {
                             // Handled via TextTranscribed / streaming
                         }
                         is AssistantEvent.TurnComplete -> {
-                            // Turn complete
+                            thinkingTimeoutJob?.cancel()
+                            _uiState.update { it.copy(isThinking = false) }
                         }
                         is AssistantEvent.AudioRmsChanged -> {
                             updateRms(event.rms)
@@ -172,7 +176,8 @@ class ChatViewModel : ViewModel() {
                             _uiState.update { it.copy(connectionState = event.state) }
                         }
                         is AssistantEvent.ErrorOccurred -> {
-                            _uiState.update { it.copy(error = event.message) }
+                            thinkingTimeoutJob?.cancel()
+                            _uiState.update { it.copy(error = event.message, isThinking = false) }
                         }
                         is AssistantEvent.NeedsUserInput -> {
                             persistChatMessage("Gemini", event.question)
@@ -180,6 +185,17 @@ class ChatViewModel : ViewModel() {
                         }
                         is AssistantEvent.ToolProgress -> {
                             // Tool progress event handling
+                        }
+                        is AssistantEvent.ThoughtSummaryDelta -> {
+                            // Thought summary update
+                        }
+                        is AssistantEvent.InteractionStatusChanged -> {
+                            val isIdle = event.status.equals("IDLE", ignoreCase = true)
+                            _uiState.update { state ->
+                                state.copy(
+                                    isThinking = if (isIdle) false else state.isThinking
+                                )
+                            }
                         }
                     }
                 }
@@ -224,6 +240,15 @@ class ChatViewModel : ViewModel() {
             liveUserCaption = text,
             liveAiCaption = ""
         )}
+
+        // Safety timeout (8s): ensure isThinking is never stuck permanently on dropped turns or blocked tools
+        thinkingTimeoutJob?.cancel()
+        thinkingTimeoutJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(8000)
+            if (_uiState.value.isThinking) {
+                _uiState.update { it.copy(isThinking = false) }
+            }
+        }
 
         // P1.4 — typed reply to a pending habit routine suggestion
         if (com.example.automation.habits.HabitSuggestionCoordinator.hasPending()) {
@@ -293,6 +318,7 @@ class ChatViewModel : ViewModel() {
                     val rawMsg = offlineResult.message ?: if (offlineResult.success) "Action executed." else "Action failed."
                     val replyText = if (offlineResult.success) rawMsg else "Failed: $rawMsg"
                     persistChatMessage("Gemini", replyText)
+                    thinkingTimeoutJob?.cancel()
                     _uiState.update { state ->
                         state.copy(
                             messages = listOf(ChatMessage("MAX (Offline)", replyText)) + state.messages,
@@ -300,6 +326,44 @@ class ChatViewModel : ViewModel() {
                         )
                     }
                     return@launch
+                }
+
+                // Check memory save directly
+                val saveResult = com.example.memory.retrieval.MemoryFactResolver.extractAndSaveMemoryFact(ctx, text)
+                if (saveResult != null) {
+                    val app = ctx as? com.example.MyApplication
+                    app?.entitlementGate?.checkAndConsumeQuota()
+                    persistChatMessage("Gemini", saveResult)
+                    thinkingTimeoutJob?.cancel()
+                    _uiState.update { state ->
+                        state.copy(
+                            messages = listOf(ChatMessage("Gemini", saveResult)) + state.messages,
+                            isThinking = false,
+                            liveAiCaption = saveResult
+                        )
+                    }
+                    scheduleCaptionClear()
+                    return@launch
+                }
+
+                // Check memory retrieval directly
+                if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(text)) {
+                    val factResult = com.example.memory.retrieval.MemoryFactResolver.resolve(ctx, text)
+                    if (factResult != null && factResult.found) {
+                        val app = ctx as? com.example.MyApplication
+                        app?.entitlementGate?.checkAndConsumeQuota()
+                        persistChatMessage("Gemini", factResult.responseText)
+                        thinkingTimeoutJob?.cancel()
+                        _uiState.update { state ->
+                            state.copy(
+                                messages = listOf(ChatMessage("Gemini", factResult.responseText)) + state.messages,
+                                isThinking = false,
+                                liveAiCaption = factResult.responseText
+                            )
+                        }
+                        scheduleCaptionClear()
+                        return@launch
+                    }
                 }
 
                 // If not handled offline, delegate prompt to canonical AssistantEngine
@@ -342,6 +406,7 @@ class ChatViewModel : ViewModel() {
         eventObservationJob?.cancel()
         chatHistoryJob?.cancel()
         captionClearJob?.cancel()
+        thinkingTimeoutJob?.cancel()
     }
 
     fun onSpeechInterrupted() {

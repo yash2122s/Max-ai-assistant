@@ -76,7 +76,7 @@ class AssistantEngineService : Service() {
         val notification: Notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("MAX Digital Assistant")
             .setContentText(statusMessage)
-            .setSmallIcon(android.R.drawable.ic_btn_speak_now)
+            .setSmallIcon(com.example.R.drawable.ic_max_notification)
             .setOngoing(true)
             .build()
 

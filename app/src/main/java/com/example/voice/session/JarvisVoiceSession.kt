@@ -24,6 +24,14 @@ class JarvisVoiceSession(context: Context) : VoiceInteractionSession(context) {
         super.onCreate()
         Log.i("JarvisVoiceSession", "onCreate")
         composeViewLifecycleOwner.onCreate()
+        try {
+            window?.window?.apply {
+                setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+                clearFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
+            }
+        } catch (e: Exception) {
+            Log.w("JarvisVoiceSession", "Failed to configure transparent window: ${e.message}")
+        }
     }
 
     override fun onPrepareShow(args: Bundle?, showFlags: Int) {

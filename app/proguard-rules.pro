@@ -40,3 +40,9 @@
 # Preserve Jetpack Compose runtime and animation metadata
 -keep class androidx.compose.runtime.** { *; }
 -keep class androidx.compose.animation.** { *; }
+
+# Preserve Offline Licensing & Cryptographic Verification
+-keep class com.example.license.** { *; }
+-keep class kotlinx.serialization.** { *; }
+-keep class com.google.crypto.tink.** { *; }
+

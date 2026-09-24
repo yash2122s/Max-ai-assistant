@@ -30,6 +30,9 @@ from google.genai import types
 from config import (
     GEMINI_API_KEY,
     GEMINI_MODEL,
+    GEMINI_MODEL_FAST,
+    GEMINI_MODEL_DEEP,
+    DEFAULT_MODEL_MODE,
     SYSTEM_PROMPT,
     JARVIS_VOICE,
     INPUT_SAMPLE_RATE,

@@ -2,77 +2,106 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// MAX Official Design System (Premium White Light Theme)
-val MaxPrimary = Color(0xFF0066FF)         // Vibrant Royal Electric Blue
-val MaxSecondary = Color(0xFF6366F1)       // Vivid Indigo
-val MaxAccent = Color(0xFF6366F1)          // Vivid Indigo
-val MaxBgDark = Color(0xFFF8FAFC)          // Clean Off-White Slate Background
-val MaxBgLight = Color(0xFFFFFFFF)         // Pure White Background
-val MaxSurface = Color(0xFFFFFFFF)         // Clean White Cards & Containers
-val MaxSurfaceDark = Color(0xFFFFFFFF)     // Clean White Cards & Containers
-val MaxSurfaceVariant = Color(0xFFF1F5F9)  // Soft Slate for Inputs & Elevated Cards
-val MaxTextPrimary = Color(0xFF0F172A)     // Deep Charcoal / Black for crisp readability
-val MaxTextSecondary = Color(0xFF334155)   // Deep Slate Secondary Text
-val MaxTextMuted = Color(0xFF64748B)       // Medium Slate Muted Text
-val MaxBorder = Color(0xFFE2E8F0)          // Crisp Card & Divider Border
-val MaxSuccess = Color(0xFF10B981)         // Modern Emerald
-val MaxError = Color(0xFFEF4444)           // Modern Crimson
+// ============================================================================
+// MAX "ROYAL OBSIDIAN & TITANIUM CYAN" DESIGN SYSTEM (iOS-Native Dark Luxury)
+// ============================================================================
 
-// Map legacy tokens to MAX Light Theme equivalents
-val BgDark = MaxBgDark
-val SurfaceDark = MaxSurfaceDark
-val SurfaceDarker = MaxSurfaceVariant
-val BorderDark = MaxBorder
+// Base Layers & Surfaces
+val MaxBaseDark = Color(0xFF07090E)          // Deepest True Obsidian Black
+val MaxSurfaceCard = Color(0xFF111622)       // Inset Grouped Section / Card Surface
+val MaxSurfaceElevated = Color(0xFF182030)   // Elevated Sheet / Modal / Input Surface
+val MaxSurfaceGlass = Color(0xEB111622)      // 92% Frosted Obsidian Glass for Bars & Pills
+val MaxSurfaceGlassBorder = Color(0x3300D2FF)// Frosted Glass Specular Outline
+
+// Royal & Cyber Accent Colors
+val MaxPrimaryRoyal = Color(0xFF0A84FF)      // iOS Cyber Royal Blue (Primary Accent)
+val MaxAccentCyan = Color(0xFF00D2FF)        // Titanium Cyan (Specular Sheen & Active Glow)
+val MaxRoyalGold = Color(0xFFFFD700)         // Royal Amber Gold (Premium Sovereignty)
+val MaxGold = MaxRoyalGold                   // Alias for Royal Gold
+val MaxRoyalGoldDark = Color(0xFFB8860B)     // Dark Royal Gold for muted badges
+val MaxRoyalIndigo = Color(0xFF5E5CE6)       // iOS Indigo
+
+// Text & Content Hierarchy (iOS High-Contrast Scale)
+val MaxTextPrimary = Color(0xFFFFFFFF)       // 100% Crisp White (Titles & Key Content)
+val MaxTextSecondary = Color(0xFF94A3B8)     // Slate 400 (Body, Subheadings, Descriptions)
+val MaxTextTertiary = Color(0xFF64748B)      // Slate 500 (Captions, Footnotes, Placeholders)
+val MaxTextMuted = Color(0xFF64748B)         // Alias for Tertiary
+
+// Hairline Borders & Specular Edges
+val MaxBorderHairline = Color(0xFF232D42)    // Crisp 0.5dp/1dp Inset Section Divider
+val MaxBorderSpecular = Color(0xFF384968)    // Top Light-Catching Specular Edge
+val MaxBorder = MaxBorderHairline
+
+// iOS Semantic States
+val MaxSuccessApple = Color(0xFF30D158)      // iOS Emerald Green (Online / Verified)
+val MaxWarningApple = Color(0xFFFF9F0A)      // iOS Amber Gold (Trial / Warning)
+val MaxDestructiveApple = Color(0xFFFF453A)  // iOS Coral Red (Revoked / Error / Delete)
+
+val MaxSuccess = MaxSuccessApple
+val MaxError = MaxDestructiveApple
+
+// ============================================================================
+// Backward-Compatible Aliases (Theme Smooth Transition)
+// ============================================================================
+val MaxPrimary = MaxPrimaryRoyal
+val MaxSecondary = MaxAccentCyan
+val MaxAccent = MaxAccentCyan
+val MaxBgDark = MaxBaseDark
+val MaxBgLight = MaxBaseDark
+val MaxSurface = MaxSurfaceCard
+val MaxSurfaceDark = MaxSurfaceCard
+val MaxSurfaceVariant = MaxSurfaceElevated
+
+val BgDark = MaxBaseDark
+val SurfaceDark = MaxSurfaceCard
+val SurfaceDarker = MaxSurfaceElevated
+val BorderDark = MaxBorderHairline
 val TextLight = MaxTextPrimary
-val TextMuted = MaxTextMuted
-val PrimaryIndigo = MaxPrimary
-val PrimaryLight = MaxPrimary
-val OnPrimaryDark = Color.White
-
-val BgLight = MaxBgLight
-val SurfaceLight = MaxSurface
-val SurfaceLighter = MaxSurfaceVariant
-val BorderLight = MaxBorder
 val TextDark = MaxTextPrimary
+val TextMuted = MaxTextMuted
 val TextMutedDark = MaxTextMuted
-val PrimaryIndigoLight = MaxPrimary
+val PrimaryIndigo = MaxPrimaryRoyal
+val PrimaryLight = MaxPrimaryRoyal
+val OnPrimaryDark = Color.White
 val OnPrimaryLight = Color.White
 
-val Emerald400 = MaxSuccess
-val Blue600 = MaxPrimary
-val Purple600 = MaxAccent
-val GradientStart = MaxPrimary
-val GradientEnd = MaxAccent
+val BgLight = MaxBaseDark
+val SurfaceLight = MaxSurfaceCard
+val SurfaceLighter = MaxSurfaceElevated
+val BorderLight = MaxBorderHairline
+val PrimaryIndigoLight = MaxPrimaryRoyal
 
-// Aesthetic Colors (Light Mode Adjusted)
-val NeonPink = MaxError
-val NeonBlue = MaxPrimary
-val NeonGreen = MaxSuccess
-val NeonGold = Color(0xFFD97706)
-val GradientBorderColors = listOf(MaxPrimary, MaxAccent, MaxPrimary)
+val Emerald400 = MaxSuccessApple
+val Blue600 = MaxPrimaryRoyal
+val Purple600 = MaxRoyalIndigo
+val GradientStart = MaxPrimaryRoyal
+val GradientEnd = MaxAccentCyan
 
-// Professional Theme Tokens
-val SlateBackground = MaxBgDark
-val SlateSurface = MaxSurface
-val SlateBorder = MaxBorder
+// Aesthetic & Jarvis Tokens
+val NeonPink = MaxDestructiveApple
+val NeonBlue = MaxAccentCyan
+val NeonGreen = MaxSuccessApple
+val NeonGold = MaxRoyalGold
+val GradientBorderColors = listOf(MaxAccentCyan, MaxPrimaryRoyal, MaxAccentCyan)
 
-// Category Accent Colors
-val AccentCyan = Color(0xFF0284C7)
-val AccentTeal = Color(0xFF0D9488)
-val AccentAmber = Color(0xFFD97706)
-val AccentPurple = MaxAccent
-val AccentIndigo = MaxPrimary
-val AccentBlue = MaxPrimary
+val SlateBackground = MaxBaseDark
+val SlateSurface = MaxSurfaceCard
+val SlateBorder = MaxBorderHairline
 
-// Status Colors
-val StatusGrantedBg = Color(0xFFECFDF5)
-val StatusGrantedText = Color(0xFF059669)
+val AccentCyan = MaxAccentCyan
+val AccentTeal = Color(0xFF00C7BE)
+val AccentAmber = MaxWarningApple
+val AccentPurple = MaxRoyalIndigo
+val AccentIndigo = MaxPrimaryRoyal
+val AccentBlue = MaxPrimaryRoyal
 
-// Theme Tokens
-val JarvisAmber = NeonGold
-val JarvisGold = NeonGold
-val JarvisBrightGold = NeonGold
-val JarvisFieryOrange = MaxError
-val JarvisDarkBg = MaxBgDark
-val JarvisCardBg = MaxSurface
-val JarvisBorderAmber = MaxBorder
+val StatusGrantedBg = Color(0x1F30D158)
+val StatusGrantedText = MaxSuccessApple
+
+val JarvisAmber = MaxRoyalGold
+val JarvisGold = MaxRoyalGold
+val JarvisBrightGold = Color(0xFFFFE600)
+val JarvisFieryOrange = Color(0xFFFF6B00)
+val JarvisDarkBg = MaxBaseDark
+val JarvisCardBg = MaxSurfaceCard
+val JarvisBorderAmber = Color(0x40FFD700)

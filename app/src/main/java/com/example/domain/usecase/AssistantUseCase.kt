@@ -94,16 +94,35 @@ class AssistantUseCase(private val context: Context) {
     suspend fun sendTextMessage(text: String): ToolResult? {
         val offlineResult = OfflineCommandEngine.executeIfMatched(appContext, text)
         if (offlineResult != null) {
+            val app = appContext as? com.example.MyApplication
+            app?.entitlementGate?.checkAndConsumeQuota()
             return offlineResult
         }
 
-        val savedFact = checkAndSaveMemoryFact(text)
-        if (savedFact != null) {
+        // Direct memory save
+        val savedFactMsg = com.example.memory.retrieval.MemoryFactResolver.extractAndSaveMemoryFact(appContext, text)
+        if (savedFactMsg != null) {
+            val app = appContext as? com.example.MyApplication
+            app?.entitlementGate?.checkAndConsumeQuota()
             return ToolResult(
                 success = true,
                 toolName = "save_memory",
-                message = savedFact.confirmation
+                message = savedFactMsg
             )
+        }
+
+        // Direct memory retrieval
+        if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(text)) {
+            val factResult = com.example.memory.retrieval.MemoryFactResolver.resolve(appContext, text)
+            if (factResult != null && factResult.found) {
+                val app = appContext as? com.example.MyApplication
+                app?.entitlementGate?.checkAndConsumeQuota()
+                return ToolResult(
+                    success = true,
+                    toolName = "retrieve_memory",
+                    message = factResult.responseText
+                )
+            }
         }
 
         val settings = com.example.data.preferences.SettingsManager(appContext)
@@ -128,10 +147,12 @@ class AssistantUseCase(private val context: Context) {
             android.util.Log.d("PLANNER_ROUTE", "unmatched complex typed goal -> GoalPlanner.planAndExecute")
             val planResult = com.example.automation.engine.GoalPlanner.planAndExecute(appContext, text)
             if (planResult.success) {
+                val isTelugu = com.example.automation.computeruse.isTeluguGoal(text)
+                val defaultMsg = if (isTelugu) "Task poorthi ayyindi. Verify chesanu." else "Task completed and verified."
                 return ToolResult(
                     success = true,
                     toolName = "planner",
-                    message = planResult.errorMessage ?: "Action completed."
+                    message = planResult.stepResults.lastOrNull()?.message ?: planResult.errorMessage ?: defaultMsg
                 )
             }
             if (planResult.isWaitingForInput) {
@@ -349,5 +370,22 @@ class AssistantUseCase(private val context: Context) {
      */
     fun reconnect() {
         getEngine().reconnect()
+    }
+
+    /**
+     * Ensures Gemini WebSocket connection is active if MAX is enabled and a valid API key exists.
+     */
+    fun ensureConnected() {
+        val settings = com.example.data.preferences.SettingsManager(appContext)
+        if (com.example.core.lifecycle.MaxRuntimeManager.isMaxEnabled(appContext) &&
+            settings.hasValidGeminiApiKey()
+        ) {
+            val engine = getEngine()
+            val connState = engine.getConnectionState()
+            if (connState == ConnectionState.DISCONNECTED || connState == ConnectionState.FAILED) {
+                android.util.Log.i("AssistantUseCase", "ensureConnected: Valid API Key found & MAX enabled. Starting AssistantEngine connection...")
+                engine.start()
+            }
+        }
     }
 }

@@ -180,8 +180,14 @@ object ActionAuthorizer {
         val action = actionType.uppercase()
         val targetLower = (target ?: "").trim().lowercase()
 
-        // 1. Pure conversational intents should NEVER execute unsolicited device actions
-        if (isPureConversation(intent)) {
+        // 1. Memory and cognitive actions are internal assistant state operations, NOT invasive device UI automations.
+        val isMemoryAction = action in setOf(
+            "SAVE_MEMORY", "SEARCH_MEMORY", "RECALL_MEMORY", 
+            "GET_USER_PREFERENCE", "STORE_PREFERENCE", "FORGET_MEMORY", "DELETE_MEMORY"
+        )
+
+        // Pure conversational intents should NEVER execute unsolicited device actions (screen, calls, whatsapp, apps, clicks)
+        if (!isMemoryAction && isPureConversation(intent)) {
             return AuthorizationResult(false, "Action '$action' is not required for conversational request '$userIntent'.")
         }
 
@@ -190,7 +196,8 @@ object ActionAuthorizer {
             "GET_SCREEN_CONTEXT", "TAKE_SCREENSHOT" -> {
                 val screenKeywords = listOf(
                     "screen", "display", "what's on", "what is on", "read this", "read screen",
-                    "screenshot", "looking at", "which app", "what app", "visible", "స్క్రీన్", "డిస్ప్లే", "చూడు"
+                    "screenshot", "looking at", "which app", "what app", "visible", "స్క్రీన్", "డిస్ప్లే", "చూడు",
+                    "inspect", "identify", "search", "profile", "verify", "open", "cheyyi", "ui", "results"
                 )
                 val isScreenRequested = screenKeywords.any { intent.contains(it) }
                 if (isScreenRequested) {
@@ -275,6 +282,8 @@ object ActionAuthorizer {
                 if (requestedPackage != null && plannedPackage.isNotBlank()) {
                     if (plannedPackage.equals(requestedPackage, ignoreCase = true)) {
                         return AuthorizationResult(true, "Canonical app entity '$plannedPackage' authorized by user intent.")
+                    } else if (intent.contains(targetLower) || (plannedPackage.contains("instagram") && (intent.contains("instagram") || intent.contains("insta")))) {
+                        return AuthorizationResult(true, "App entity '$target' explicitly mentioned in user intent.")
                     } else {
                         return AuthorizationResult(false, "Opening '$target' not requested in '$userIntent' (conflicts with requested '$requestedPackage').")
                     }
@@ -337,11 +346,37 @@ object ActionAuthorizer {
             }
 
             "SAVE_MEMORY" -> {
+                val normalizedIntent = intent.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ").replace(Regex("\\s+"), " ").trim()
+
+                val isQuery = normalizedIntent.startsWith("what is") ||
+                              normalizedIntent.startsWith("what s") ||
+                              normalizedIntent.startsWith("who is") ||
+                              (normalizedIntent.startsWith("tell me") && (normalizedIntent.contains("what") || normalizedIntent.contains("who"))) ||
+                              intent.endsWith("?") ||
+                              normalizedIntent.endsWith("enti") ||
+                              normalizedIntent.endsWith("telusa") ||
+                              (normalizedIntent.endsWith("cheppu") && !normalizedIntent.contains("save") && !normalizedIntent.contains("gurthu") && !normalizedIntent.contains("gurtu"))
+
+                if (isQuery) {
+                    return AuthorizationResult(false, "Utterance is a query, not a memory storage command: '$userIntent'.")
+                }
+
+                val isUnrelatedSave = normalizedIntent.startsWith("save the ") || 
+                                     normalizedIntent.contains("save the file") || 
+                                     normalizedIntent.contains("save the screenshot") ||
+                                     normalizedIntent.contains("save this document") ||
+                                     normalizedIntent.contains("save the document")
+
+                if (isUnrelatedSave) {
+                    return AuthorizationResult(false, "Unrelated file/document save intent: '$userIntent'.")
+                }
+
                 val explicitMemoryPhrases = listOf(
                     // English
                     "remember",
                     "remember this",
                     "remember that",
+                    "remind",
                     "note this",
                     "note down",
                     "keep in mind",
@@ -350,17 +385,44 @@ object ActionAuthorizer {
                     "save that",
                     "save it",
                     "store in memory",
+                    "save my",
+                    "save info",
+
+                    // Personal identity / facts statements
+                    "my name is",
+                    "naa peru",
+                    "na peru",
+                    "mera naam",
+                    "call me",
+                    "i am ",
+                    "nenu ",
 
                     // Romanized Telugu / Tanglish
                     "save chey",
                     "save cheyi",
                     "save chesko",
-                    "memory lo save",
-                    "memory lo save chey",
+                    "save chesuko",
+                    "save cheyyi",
+                    "save cheyandi",
                     "gurthupettuko",
+                    "gurtupettuko",
                     "gurthunchuko",
+                    "gurtunchuko",
+                    "gurthupettukonna",
+                    "gurtupettukonna",
+                    "gurthupettukoni",
+                    "gurtupettukoni",
+                    "gurthupettukovali",
+                    "gurtupettukovali",
+                    "gurthupettu",
+                    "gurtupettu",
+                    "gurthundi",
+                    "gurtundi",
+                    "gurthu",
+                    "gurtu",
 
                     // Telugu Script
+                    "గుర్తు",
                     "గుర్తుపెట్టుకో",
                     "గుర్తుంచుకో",
                     "నోట్ చేసుకో",
@@ -368,20 +430,33 @@ object ActionAuthorizer {
                     "సేవ్ చేసుకో",
                     "మెమరీలో సేవ్ చేయి",
                     "దీన్ని గుర్తుపెట్టుకో",
-                    "దీన్ని సేవ్ చేయి"
+                    "దీన్ని సేవ్ చేయి",
+                    "నా పేరు"
                 )
 
-                val normalizedIntent = intent.replace(Regex("[^\\p{L}\\p{Nd}\\s]"), " ").replace(Regex("\\s+"), " ").trim()
+                val isMemoryContext = normalizedIntent.contains("memory") && (
+                    normalizedIntent.contains("save") ||
+                    normalizedIntent.contains("chesko") ||
+                    normalizedIntent.contains("chesuko") ||
+                    normalizedIntent.contains("chey") ||
+                    normalizedIntent.contains("pettu") ||
+                    normalizedIntent.contains("pettuko") ||
+                    normalizedIntent.contains("unchu") ||
+                    normalizedIntent.contains("unchuko") ||
+                    normalizedIntent.contains("store") ||
+                    normalizedIntent.contains("add") ||
+                    normalizedIntent.contains("note")
+                )
 
-                val isUnrelatedSave = normalizedIntent.startsWith("save the ") || 
-                                     normalizedIntent.contains("save the file") || 
-                                     normalizedIntent.contains("save the screenshot") ||
-                                     normalizedIntent.contains("save this document") ||
-                                     normalizedIntent.contains("save the document")
+                val isTeluguRemember = normalizedIntent.contains("gurthu") || 
+                                       normalizedIntent.contains("gurtu") || 
+                                       intent.contains("గుర్తు")
 
-                val isExplicitMemory = !isUnrelatedSave && explicitMemoryPhrases.any { phrase ->
-                    intent.contains(phrase) || normalizedIntent.contains(phrase)
-                }
+                val isExplicitMemory = isMemoryContext ||
+                                       isTeluguRemember ||
+                                       explicitMemoryPhrases.any { phrase ->
+                                           intent.contains(phrase) || normalizedIntent.contains(phrase)
+                                       }
 
                 if (isExplicitMemory) {
                     AuthorizationResult(true, "Memory creation explicitly requested by user.")

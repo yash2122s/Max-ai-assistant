@@ -9,7 +9,13 @@ import org.json.JSONObject
 class YoutubeTool : Tool {
     private val TAG = "YoutubeTool"
     override val name: String = "youtube"
-    override val supportedActions: Set<String> = setOf("YOUTUBE_SEARCH", "OPEN_YOUTUBE", "SEARCH_YOUTUBE", "PLAY_YOUTUBE")
+    override val supportedActions: Set<String> = setOf(
+        "YOUTUBE_SEARCH", "OPEN_YOUTUBE", "SEARCH_YOUTUBE", "PLAY_YOUTUBE",
+        "LAUNCH_YOUTUBE", "PAUSE_YOUTUBE", "YOUTUBE_PAUSE",
+        "RESUME_YOUTUBE", "YOUTUBE_RESUME", "NEXT_YOUTUBE_VIDEO", "YOUTUBE_NEXT",
+        "PREVIOUS_YOUTUBE_VIDEO", "YOUTUBE_PREVIOUS", "SKIP_AD", "YOUTUBE_SKIP_AD",
+        "FULLSCREEN_YOUTUBE", "YOUTUBE_FULLSCREEN"
+    )
     override val retryPolicy: RetryPolicy = RetryPolicy.NoRetry
     override val capabilities: ToolCapabilities = ToolCapabilities(
         supportsPlanner = true,
@@ -19,7 +25,16 @@ class YoutubeTool : Tool {
     )
 
     override fun validate(request: ExecutionRequest): Boolean {
-        if (request.action == "OPEN_YOUTUBE") return true
+        val nonQueryActions = setOf(
+            "OPEN_YOUTUBE", "LAUNCH_YOUTUBE",
+            "PAUSE_YOUTUBE", "YOUTUBE_PAUSE",
+            "RESUME_YOUTUBE", "YOUTUBE_RESUME",
+            "NEXT_YOUTUBE_VIDEO", "YOUTUBE_NEXT",
+            "PREVIOUS_YOUTUBE_VIDEO", "YOUTUBE_PREVIOUS",
+            "SKIP_AD", "YOUTUBE_SKIP_AD",
+            "FULLSCREEN_YOUTUBE", "YOUTUBE_FULLSCREEN"
+        )
+        if (request.action in nonQueryActions) return true
         val query = (request.arguments.get("query")?.asString
             ?: request.arguments.get("search_query")?.asString
             ?: "").trim()
@@ -27,8 +42,10 @@ class YoutubeTool : Tool {
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
-        if (request.action == "OPEN_YOUTUBE") {
-            Log.d(TAG, "Executing OPEN_YOUTUBE action")
+        val action = request.action.uppercase()
+        Log.d(TAG, "Executing YouTube action: '$action'")
+
+        if (action == "OPEN_YOUTUBE" || action == "LAUNCH_YOUTUBE") {
             val launchIntent = context.packageManager.getLaunchIntentForPackage("com.google.android.youtube")
             return if (launchIntent != null) {
                 launchIntent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -37,7 +54,7 @@ class YoutubeTool : Tool {
                     success = true,
                     toolName = name,
                     verificationRequired = true,
-                    metadata = JSONObject().put("action", "OPEN_YOUTUBE").put("package", "com.google.android.youtube")
+                    metadata = JSONObject().put("action", action).put("package", "com.google.android.youtube")
                 )
             } else {
                 ToolResult(
@@ -49,35 +66,94 @@ class YoutubeTool : Tool {
             }
         }
 
-        val query = (request.arguments.get("query")?.asString
-            ?: request.arguments.get("search_query")?.asString
-            ?: "").trim()
-
-        if (query.isBlank()) {
-            return ToolResult(
-                success = false,
-                toolName = name,
-                errorCode = "INVALID_ARGUMENTS",
-                message = "YouTube search query cannot be empty"
-            )
-        }
-
         return try {
-            val success = com.example.automation.YoutubeAutomation.searchAndPlay(context, query)
-            if (success) {
-                ToolResult(
-                    success = true,
-                    toolName = name,
-                    verificationRequired = true,
-                    metadata = JSONObject().put("query", query).put("action", request.action)
-                )
-            } else {
-                ToolResult(
-                    success = false,
-                    toolName = name,
-                    errorCode = "YOUTUBE_SEARCH_FAILED",
-                    message = "YouTube automation failed to locate or play results for '$query'"
-                )
+            when (action) {
+                "PAUSE_YOUTUBE", "YOUTUBE_PAUSE" -> {
+                    val success = com.example.automation.YoutubeAutomation.pausePlayback(context)
+                    ToolResult(
+                        success = success,
+                        toolName = name,
+                        verificationRequired = true,
+                        metadata = JSONObject().put("action", action)
+                    )
+                }
+                "RESUME_YOUTUBE", "YOUTUBE_RESUME" -> {
+                    val success = com.example.automation.YoutubeAutomation.resumePlayback(context)
+                    ToolResult(
+                        success = success,
+                        toolName = name,
+                        verificationRequired = true,
+                        metadata = JSONObject().put("action", action)
+                    )
+                }
+                "NEXT_YOUTUBE_VIDEO", "YOUTUBE_NEXT" -> {
+                    val success = com.example.automation.YoutubeAutomation.nextVideo(context)
+                    ToolResult(
+                        success = success,
+                        toolName = name,
+                        verificationRequired = true,
+                        metadata = JSONObject().put("action", action)
+                    )
+                }
+                "PREVIOUS_YOUTUBE_VIDEO", "YOUTUBE_PREVIOUS" -> {
+                    val success = com.example.automation.YoutubeAutomation.previousVideo(context)
+                    ToolResult(
+                        success = success,
+                        toolName = name,
+                        verificationRequired = true,
+                        metadata = JSONObject().put("action", action)
+                    )
+                }
+                "SKIP_AD", "YOUTUBE_SKIP_AD" -> {
+                    val success = com.example.automation.YoutubeAutomation.skipAdIfPresent(context)
+                    ToolResult(
+                        success = success,
+                        toolName = name,
+                        verificationRequired = false,
+                        metadata = JSONObject().put("action", action)
+                    )
+                }
+                "FULLSCREEN_YOUTUBE", "YOUTUBE_FULLSCREEN" -> {
+                    val success = com.example.automation.YoutubeAutomation.toggleFullscreen(context)
+                    ToolResult(
+                        success = success,
+                        toolName = name,
+                        verificationRequired = true,
+                        metadata = JSONObject().put("action", action)
+                    )
+                }
+                else -> {
+                    // Search & Play actions
+                    val query = (request.arguments.get("query")?.asString
+                        ?: request.arguments.get("search_query")?.asString
+                        ?: "").trim()
+
+                    if (query.isBlank()) {
+                        return ToolResult(
+                            success = false,
+                            toolName = name,
+                            errorCode = "INVALID_ARGUMENTS",
+                            message = "YouTube search query cannot be empty"
+                        )
+                    }
+
+                    val success = com.example.automation.YoutubeAutomation.searchAndPlay(context, query)
+                    if (success) {
+                        ToolResult(
+                            success = true,
+                            toolName = name,
+                            verificationRequired = true,
+                            metadata = JSONObject().put("query", query).put("action", request.action)
+                        )
+                    } else {
+                        ToolResult(
+                            success = false,
+                            toolName = name,
+                            errorCode = "YOUTUBE_SEARCH_FAILED",
+                            message = "YouTube automation failed to locate or play results for '$query'"
+                        )
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "YouTube execution threw exception", e)
@@ -90,3 +166,4 @@ class YoutubeTool : Tool {
         }
     }
 }
+

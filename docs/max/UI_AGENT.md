@@ -44,12 +44,13 @@ MAX strictly adheres to the **Token-Efficiency Rule**:
   - `stealth/ox-alpha` (Preferred default for MAX)
   - `anthropic/claude-3.5-sonnet`
   - `openai/gpt-4o`
-  - `google/gemini-2.0-flash-001`
+  - `google/gemini-2.5-flash`
   - `qwen/qwen-2.5-vl-72b-instruct`
 
 ### 2. Fallback Provider: Google Gemini (`GeminiUiAgentProvider`)
 - Activated automatically when OpenRouter is unconfigured, rate-limited, or encounters network failure.
-- Uses `gemini-2.0-flash` with direct function calling.
+- Uses `gemini-2.5-flash` (with secondary fallback to `gemini-1.5-flash`) via direct REST `generateContent` function calling.
+- Model names are centralized in `UiAgentModels.kt` / `GeminiModelConfig.kt` and strictly separated from Gemini Live voice models (`gemini-3.8-live`).
 
 ---
 

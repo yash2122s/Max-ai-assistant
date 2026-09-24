@@ -26,8 +26,8 @@ fun PrivacyScreen(
 
     val privacyItems = listOf(
         "Data Stored on Your Device" to "MAX stores everything locally on YOUR phone: settings, long-term memories, cycle logs, reminders, and conversation history. Nothing is uploaded to any proprietary server — MAX has no servers.",
-        "Your Gemini API Key" to "Your API key is stored strictly on-device in Android Keystore-backed encrypted storage and is only used to establish a secure direct TLS connection with Google Gemini Live endpoints.",
-        "Voice & Screen Capture" to "When interacting via voice, raw microphone PCM audio (and screen capture frames, strictly when explicitly requested) stream directly to Gemini Live for response synthesis. No audio is persisted to disk.",
+        "Your AI API Key" to "Your API key is stored strictly on-device in Android Keystore-backed encrypted storage and is only used to establish a secure direct TLS connection with the configured AI provider.",
+        "Voice & Screen Capture" to "When interacting via voice, microphone audio (and screen capture frames, strictly when explicitly requested) stream directly to the neural assistant engine for response synthesis. No audio is persisted to disk.",
         "Notifications, Contacts & Calls" to "Notification content, contact identities, and phone call state are inspected ON-DEVICE only when an action requires them (such as announcing an incoming call). Disabled apps are dropped instantly in memory.",
         "Zero Analytics & Zero Ads" to "This application contains zero tracking SDKs, zero telemetry collectors, zero third-party analytics libraries, and zero advertising frameworks.",
         "Absolute User Control" to "You can wipe MAX memories at any time (via Memory Wallet or voice command), clear health logs, clear application data from Android Settings, or revoke any runtime permission at will."

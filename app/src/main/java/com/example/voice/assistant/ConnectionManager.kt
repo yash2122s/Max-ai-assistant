@@ -23,6 +23,8 @@ class ConnectionManager(
     private val onExecuteAutomation: suspend (String) -> String,
     private val onUserTranscription: ((String) -> Unit)? = null,
     private val onTurnComplete: (() -> Unit)? = null,
+    private val onThoughtSummaryDelta: ((String, String) -> Unit)? = null,
+    private val onInteractionStatusChanged: ((String) -> Unit)? = null,
     private val emotionEngine: com.example.emotion.engine.EmotionEngine? = null
 ) {
     private var webSocketClient: GeminiWebSocketClient? = null
@@ -76,7 +78,11 @@ class ConnectionManager(
         createNewConnection(isNew = false)
     }
 
-    @Synchronized
+    private val modelRouter: com.example.network.router.ModelRouter = com.example.network.router.DefaultModelRouter()
+    private var activeHandoffContext: com.example.network.model.ModelHandoffContext? = null
+    var currentModelMode: com.example.network.model.GeminiModelMode = com.example.network.model.GeminiModelMode.AUTO
+        private set
+
     fun connect() {
         ServiceRegistry.register(ServiceType.VOICE, this)
         isExplicitlyDisconnected = false
@@ -86,18 +92,34 @@ class ConnectionManager(
     }
 
     @Synchronized
-    private fun createNewConnection(isNew: Boolean = isNewSession) {
+    fun switchModeAndReconnect(targetMode: com.example.network.model.GeminiModelMode, handoff: com.example.network.model.ModelHandoffContext? = null) {
+        Log.i("ConnectionManager", "Switching Gemini Model Mode to: $targetMode | Handoff task: ${handoff?.taskId}")
+        currentModelMode = targetMode
+        activeHandoffContext = handoff
+        val settings = com.example.data.preferences.SettingsManager(context)
+        val targetModel = modelRouter.modelFor(targetMode)
+        settings.liveVoiceModelName = targetModel
+        createNewConnection(isNew = false, forcedModel = targetModel, handoff = handoff)
+    }
+
+    @Synchronized
+    private fun createNewConnection(
+        isNew: Boolean = isNewSession,
+        forcedModel: String? = null,
+        handoff: com.example.network.model.ModelHandoffContext? = null
+    ) {
         destroyOldConnection()
 
         val settings = com.example.data.preferences.SettingsManager(context)
         val savedKey = settings.geminiApiKey.trim()
         val savedVoice = settings.liveVoiceName
         val savedLanguage = settings.languagePreference
-        val savedModel = settings.liveVoiceModelName
+        val routingPreference = com.example.network.model.GeminiModelMode.fromString(settings.modelRoutingMode)
+        val resolvedModel = forcedModel ?: modelRouter.resolveModel(routingPreference, "", null)
         val apiKey = savedKey
 
         val keyPresent = apiKey.isNotEmpty()
-        Log.d("GeminiFlow", "[GeminiFlow] key_present=$keyPresent")
+        Log.d("GeminiFlow", "[GeminiFlow] key_present=$keyPresent | model=$resolvedModel | mode=$routingPreference")
 
         if (!keyPresent) {
             Log.w("ConnectionManager", "[SECURITY_GATE] Gemini API Key is missing. Connection blocked. User must configure key in Settings or Onboarding.")
@@ -122,10 +144,11 @@ class ConnectionManager(
                     apiKey = apiKey,
                     voiceName = savedVoice,
                     responseLanguage = savedLanguage,
-                    preferredModel = savedModel,
+                    preferredModel = resolvedModel,
                     memoriesMarkdown = markdown,
                     isNewSession = isNew,
                     emotionState = currentEmotion,
+                    handoffContext = handoff ?: activeHandoffContext,
                     onMessageReceived = { msg -> 
                         synchronized(this@ConnectionManager) {
                             if (currentGen == connectionGeneration) {
@@ -154,6 +177,21 @@ class ConnectionManager(
                     onUserTranscription = { transcription ->
                         synchronized(this@ConnectionManager) {
                             if (currentGen == connectionGeneration) {
+                                // Dynamic task classification and explicit override check
+                                val explicitOverride = modelRouter.detectExplicitModeOverride(transcription)
+                                if (explicitOverride != null) {
+                                    val targetModelName = modelRouter.modelFor(explicitOverride)
+                                    if (targetModelName != resolvedModel) {
+                                        Log.i("ConnectionManager", "Voice command triggered mode transition: $explicitOverride ($targetModelName)")
+                                        val handoffCtx = com.example.network.model.ModelHandoffContext(
+                                            currentObjective = transcription,
+                                            conversationSummary = "User requested mode change to $explicitOverride."
+                                        )
+                                        scope.launch {
+                                            switchModeAndReconnect(explicitOverride, handoffCtx)
+                                        }
+                                    }
+                                }
                                 onUserTranscription?.invoke(transcription)
                             }
                         }
@@ -162,6 +200,20 @@ class ConnectionManager(
                         synchronized(this@ConnectionManager) {
                             if (currentGen == connectionGeneration) {
                                 onTurnComplete?.invoke()
+                            }
+                        }
+                    },
+                    onThoughtSummaryDelta = { delta, fullSummary ->
+                        synchronized(this@ConnectionManager) {
+                            if (currentGen == connectionGeneration) {
+                                onThoughtSummaryDelta?.invoke(delta, fullSummary)
+                            }
+                        }
+                    },
+                    onInteractionStatusChanged = { status ->
+                        synchronized(this@ConnectionManager) {
+                            if (currentGen == connectionGeneration) {
+                                onInteractionStatusChanged?.invoke(status)
                             }
                         }
                     }
@@ -244,6 +296,11 @@ class ConnectionManager(
     @Synchronized
     fun commitAudioTurn() {
         webSocketClient?.commitAudioTurn()
+    }
+
+    @Synchronized
+    fun sendInterruptionSignal() {
+        webSocketClient?.sendInterruptionSignalToServer()
     }
 
     @Synchronized

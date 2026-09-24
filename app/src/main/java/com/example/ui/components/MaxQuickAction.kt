@@ -2,7 +2,6 @@ package com.example.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -24,29 +23,41 @@ fun MaxQuickAction(
     icon: ImageVector,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    accentColor: Color = MaxPrimary
+    accentColor: Color = MaxAccentCyan
 ) {
+    val pillShape = RoundedCornerShape(MaxDimensions.radiusPill)
+
     Row(
         modifier = modifier
-            .clip(RoundedCornerShape(MaxDimensions.radiusPill))
-            .background(MaxSurfaceVariant)
-            .border(1.dp, BorderDark, RoundedCornerShape(MaxDimensions.radiusPill))
-            .clickable { onClick() }
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .clip(pillShape)
+            .background(MaxSurfaceElevated)
+            .border(MaxDimensions.borderHairline, MaxBorderHairline, pillShape)
+            .iosPressEffect(scalePressed = 0.94f, alphaPressed = 0.85f, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = label,
-            tint = accentColor,
-            modifier = Modifier.size(16.dp)
-        )
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(accentColor.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = accentColor,
+                modifier = Modifier.size(14.dp)
+            )
+        }
         Text(
             text = label,
             fontSize = 13.sp,
-            fontWeight = FontWeight.Medium,
-            color = MaxTextPrimary
+            fontWeight = FontWeight.SemiBold,
+            color = MaxTextPrimary,
+            letterSpacing = (-0.2).sp
         )
     }
 }
+

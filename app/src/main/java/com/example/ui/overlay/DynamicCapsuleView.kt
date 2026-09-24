@@ -180,19 +180,29 @@ class DynamicCapsuleView @JvmOverloads constructor(
     }
 
     private fun setupTouchHandling() {
+        var downTime = 0L
         setOnTouchListener { v, event ->
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    downTime = System.currentTimeMillis()
                     v.animate().scaleX(0.96f).scaleY(0.96f).setDuration(80).start()
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(120).start()
-                    val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
-                    }
-                    if (launchIntent != null) {
-                        context.startActivity(launchIntent)
+                    val holdDuration = System.currentTimeMillis() - downTime
+                    if (holdDuration > 500L) {
+                        // Long press → open MAX app
+                        val launchIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
+                            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        }
+                        if (launchIntent != null) context.startActivity(launchIntent)
+                    } else {
+                        // Tap → activate Voice Live
+                        val triggered = com.example.voice.session.JarvisVoiceInteractionService.triggerSession(android.os.Bundle(), 0)
+                        if (!triggered) {
+                            com.example.voice.assistant.AssistantSessionManager.startSystemAssistantSession(context)
+                        }
                     }
                     true
                 }

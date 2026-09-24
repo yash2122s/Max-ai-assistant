@@ -185,6 +185,7 @@ class MyApplication : Application() {
         ToolRegistry.register(com.example.automation.tools.ScrollTool())
         ToolRegistry.register(com.example.automation.tools.ScreenContextTool())
         ToolRegistry.register(com.example.automation.tools.UiAgentTool())
+        ToolRegistry.register(com.example.automation.tools.ComputerUseTool())
         ToolRegistry.register(com.example.automation.tools.KeyboardActionTool())
         ToolRegistry.register(com.example.automation.tools.ClearTextTool())
 
@@ -239,8 +240,51 @@ class MyApplication : Application() {
             override fun onActivityDestroyed(activity: android.app.Activity) {}
         })
 
-        Log.d("MyApplication", "MAX execution framework successfully initialized.")
+        // Initialize Firebase Licensing and Entitlement System
+        val database = com.example.data.local.AppDatabase.getDatabase(this)
+        maxLicenseManager = com.example.firebase.manager.MaxLicenseManager(this)
+        maxLicenseManager.initialize()
+        entitlementGate = com.example.firebase.manager.EntitlementGate(this, maxLicenseManager)
+
+        licenseStorage = com.example.license.storage.LicenseStorage(database.licenseStateDao())
+        licenseVerifier = com.example.license.licensing.LicenseVerifierImpl(com.example.license.LicenseConstants.MAX_PUBLIC_KEY)
+        val trialManager = com.example.license.trial.TrialManagerImpl(licenseStorage)
+        revocationProvider = com.example.license.revocation.GitHubRevocationProvider(licenseStorage, com.example.license.LicenseConstants.REVOCATION_URL)
+
+        entitlementManager = com.example.license.entitlement.EntitlementManagerImpl(
+            verifier = licenseVerifier,
+            storage = licenseStorage,
+            trialManager = trialManager,
+            revocationProvider = revocationProvider,
+            maxLicenseManagerProvider = { maxLicenseManager }
+        )
+        featureGate = com.example.license.entitlement.FeatureGate(entitlementManager)
+        
+        // Eagerly compute entitlement on startup and observe updates
+        entitlementManager.refresh()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+            maxLicenseManager.currentLicense.collect {
+                entitlementManager.refresh()
+            }
+        }
+
+        Log.d("MyApplication", "MAX execution framework and Firebase licensing successfully initialized.")
     }
+
+    lateinit var maxLicenseManager: com.example.firebase.manager.MaxLicenseManager
+        private set
+    lateinit var entitlementGate: com.example.firebase.manager.EntitlementGate
+        private set
+    lateinit var licenseStorage: com.example.license.storage.LicenseStorage
+        private set
+    lateinit var licenseVerifier: com.example.license.licensing.LicenseVerifier
+        private set
+    lateinit var revocationProvider: com.example.license.revocation.RevocationProvider
+        private set
+    lateinit var entitlementManager: com.example.license.entitlement.EntitlementManager
+        private set
+    lateinit var featureGate: com.example.license.entitlement.FeatureGate
+        private set
 
     companion object {
         private val _isMaxForeground = kotlinx.coroutines.flow.MutableStateFlow(false)

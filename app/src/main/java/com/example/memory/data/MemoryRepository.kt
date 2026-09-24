@@ -105,12 +105,10 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
                         val isTitleEncrypted = mem.title.startsWith("enc_v1:")
                         val isContentEncrypted = mem.content.startsWith("enc_v1:")
                         val isTagsEncrypted = mem.tags.startsWith("enc_v1:")
-                        val needsPrivateReset = mem.isPrivate
-
-                        if (!isTitleEncrypted || !isContentEncrypted || (mem.tags.isNotBlank() && !isTagsEncrypted) || needsPrivateReset) {
-                            val rawTitle = if (isTitleEncrypted) mem.title else mem.title
-                            val rawContent = if (isContentEncrypted) mem.content else mem.content
-                            val rawTags = if (isTagsEncrypted) mem.tags else mem.tags
+                        if (!isTitleEncrypted || !isContentEncrypted || (mem.tags.isNotBlank() && !isTagsEncrypted)) {
+                            val rawTitle = if (isTitleEncrypted) MemoryCryptography.decrypt(mem.title) else mem.title
+                            val rawContent = if (isContentEncrypted) MemoryCryptography.decrypt(mem.content) else mem.content
+                            val rawTags = if (isTagsEncrypted) MemoryCryptography.decrypt(mem.tags) else mem.tags
 
                             val encryptedTitle = if (!isTitleEncrypted) MemoryCryptography.encrypt(rawTitle) else rawTitle
                             val encryptedContent = if (!isContentEncrypted) MemoryCryptography.encrypt(rawContent) else rawContent
@@ -119,8 +117,7 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
                             val migrated = mem.copy(
                                 title = encryptedTitle,
                                 content = encryptedContent,
-                                tags = encryptedTags,
-                                isPrivate = false
+                                tags = encryptedTags
                             )
                             batchUpdates.add(migrated)
                         }

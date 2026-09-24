@@ -1,10 +1,14 @@
 package com.example.ui.settings
 
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,10 +29,16 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.*
 import com.example.ui.theme.*
 
+/**
+ * Flagship MAX Settings Screen — Apple Inset Grouped Redesign.
+ * Reorganizes all assistant, AI model, voice, automation, and privacy controls
+ * into beautiful iOS-style grouped cards with rounded colored square icons.
+ */
 @Composable
 fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToSkills: () -> Unit = {},
+    onNavigateToLicense: () -> Unit = {},
     viewModel: SettingsViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -60,483 +70,563 @@ fun SettingsScreen(
 
     Scaffold(
         topBar = {
-            MaxTopBar(
-                title = "Settings",
-                onBackClick = onNavigateBack,
-                actions = {
-                    MaxButton(
-                        text = "Save",
-                        onClick = { viewModel.saveAll() },
-                        variant = MaxButtonVariant.PRIMARY,
-                        modifier = Modifier.padding(end = MaxDimensions.spaceSm)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .background(MaxIOSColors.DarkBase)
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(MaxIOSShapes.ShapeSmall)
+                            .background(MaxIOSColors.DarkSurfaceElevated)
+                            .border(0.5.dp, MaxIOSColors.HairlineDark, MaxIOSShapes.ShapeSmall)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.ArrowBack,
+                            contentDescription = "Back",
+                            tint = MaxIOSColors.TextPrimaryDark,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    Text(
+                        text = "Settings",
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaxIOSColors.TextPrimaryDark,
+                        letterSpacing = (-0.41).sp
                     )
+
+                    Button(
+                        onClick = {
+                            MaxHaptics.successPattern(context)
+                            viewModel.saveAll()
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaxIOSColors.SystemBlue,
+                            contentColor = Color.White
+                        ),
+                        shape = MaxIOSShapes.ShapePill,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text("Save", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    }
                 }
-            )
+            }
         },
-        containerColor = MaxBgDark
+        containerColor = MaxIOSColors.DarkBase
     ) { padding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(scrollState)
-                .padding(horizontal = MaxDimensions.spaceMd, vertical = MaxDimensions.spaceSm),
-            verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceLg)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // Section 1: AI Engine & API Key
-            SettingsSection(title = "AI Engine & API Key", icon = Icons.Default.Key) {
-                MaxTextField(
-                    value = uiState.geminiApiKey,
-                    onValueChange = { viewModel.updateGeminiApiKey(it) },
-                    label = "Gemini API Key",
-                    placeholder = "AIzaSy...",
-                    isPassword = true,
-                    leadingIcon = { Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaxTextMuted) },
-                    modifier = Modifier.fillMaxWidth()
+            // ================================================================
+            // SECTION: MASTER SYSTEM CONTROL
+            // ================================================================
+            MaxIOSSettingsSection(title = "System Master State") {
+                MaxIOSSettingsRow(
+                    title = "MAX Master State",
+                    subtitle = "Controls all voice, automation, and background services",
+                    icon = Icons.Default.PowerSettingsNew,
+                    iconBg = if (uiState.isMaxEnabled) MaxIOSColors.SystemGreen else MaxIOSColors.SystemRed,
+                    trailingContent = {
+                        Switch(
+                            checked = uiState.isMaxEnabled,
+                            onCheckedChange = { viewModel.updateIsMaxEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaxIOSColors.SystemGreen
+                            )
+                        )
+                    },
+                    showDivider = false
                 )
             }
 
-            // Section 1.5: MAX System Assistant
-            SettingsSection(title = "MAX Assistant", icon = Icons.Default.RecordVoiceOver) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+            // ================================================================
+            // SECTION: AI ENGINE & MODEL ROUTING
+            // ================================================================
+            MaxIOSSettingsSection(
+                title = "AI Engine & Model Routing",
+                footer = "Auto mode dynamically selects Fast for quick voice queries and Deep for complex multi-step planning."
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Default Digital Assistant",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaxTextPrimary
-                        )
-                        Text(
-                            text = if (uiState.isDefaultAssistant) "MAX is your active system digital assistant" else "Set MAX as system default assistant",
-                            fontSize = 12.sp,
-                            color = MaxTextMuted
-                        )
-                    }
-                    Surface(
-                        color = if (uiState.isDefaultAssistant) NeonGreen.copy(alpha = 0.15f) else MaxSurfaceVariant,
-                        shape = RoundedCornerShape(MaxDimensions.radiusSm)
-                    ) {
-                        Text(
-                            text = if (uiState.isDefaultAssistant) "Default" else "Not Default",
-                            color = if (uiState.isDefaultAssistant) NeonGreen else MaxTextSecondary,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-
-                if (!uiState.isDefaultAssistant) {
-                    Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                    MaxButton(
-                        text = "Set MAX as Default Assistant",
-                        onClick = {
-                            val intent = com.example.voice.assistant.SystemAssistantManager.createSetDefaultAssistantIntent(context)
-                            context.startActivity(intent)
-                        },
-                        variant = MaxButtonVariant.PRIMARY,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "System Wake Word (\"Hey MAX\")",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaxTextPrimary
-                        )
-                        Text(
-                            text = "System invocation via assist gesture / shortcut active",
-                            fontSize = 12.sp,
-                            color = MaxTextMuted
-                        )
-                    }
-                    Surface(
-                        color = MaxSurfaceVariant,
-                        shape = RoundedCornerShape(MaxDimensions.radiusSm)
-                    ) {
-                        Text(
-                            text = uiState.wakeWordStatus,
-                            color = MaxTextMuted,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-
-            // Section 2: Automation Skills Management
-            SettingsSection(title = "Automation Skills", icon = Icons.Default.Extension) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(MaxDimensions.radiusMd))
-                        .background(MaxSurfaceVariant)
-                        .clickable(onClick = onNavigateToSkills)
-                        .padding(MaxDimensions.spaceMd),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Manage & Import Skills",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaxTextPrimary
-                        )
-                        Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
-                        Text(
-                            text = "Import declarative .json / .md skills, inspect capabilities, and toggle workflows",
-                            fontSize = 12.sp,
-                            color = MaxTextMuted
-                        )
-                    }
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = "Open Skills",
-                        tint = MaxPrimary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
-            }
-
-            // Section 3: Agentic Automation Limits
-            SettingsSection(title = "Agentic Automation", icon = Icons.Default.AutoMode) {
-                SettingsSwitchRow(
-                    title = "Agentic Autonomous Mode",
-                    subtitle = "Enable multi-step goal planning & UI loop execution",
-                    isChecked = uiState.isAgenticModeEnabled,
-                    onCheckedChange = { viewModel.updateIsAgenticModeEnabled(it) }
-                )
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                Text(
-                    text = "Max Iterations per Goal: ${uiState.agenticMaxIterations}",
-                    fontSize = 13.sp,
-                    color = MaxTextPrimary
-                )
-                Slider(
-                    value = uiState.agenticMaxIterations.toFloat(),
-                    onValueChange = { viewModel.updateAgenticMaxIterations(it.toInt()) },
-                    valueRange = 1f..15f,
-                    steps = 13,
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaxPrimary,
-                        activeTrackColor = MaxPrimary,
-                        inactiveTrackColor = MaxSurfaceVariant
-                    )
-                )
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                Text(
-                    text = "Daily Budget: ${uiState.agenticDailyBudget} iterations (Used: ${uiState.agenticIterationsUsedToday})",
-                    fontSize = 13.sp,
-                    color = MaxTextPrimary
-                )
-                Slider(
-                    value = uiState.agenticDailyBudget.toFloat(),
-                    onValueChange = { viewModel.updateAgenticDailyBudget(it.toInt()) },
-                    valueRange = 5f..200f,
-                    colors = SliderDefaults.colors(
-                        thumbColor = MaxSecondary,
-                        activeTrackColor = MaxSecondary,
-                        inactiveTrackColor = MaxSurfaceVariant
-                    )
-                )
-            }
-
-            // Section 4: Personalization & Identity
-            SettingsSection(title = "Identity & Persona", icon = Icons.Default.Person) {
-                MaxTextField(
-                    value = uiState.userName,
-                    onValueChange = { viewModel.updateUserName(it) },
-                    label = "Your Name / Call Sign",
-                    placeholder = "e.g., Yaswanth",
-                    leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null, tint = MaxTextMuted) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                MaxTextField(
-                    value = uiState.botPersona,
-                    onValueChange = { viewModel.updateBotPersona(it) },
-                    label = "Assistant Persona",
-                    placeholder = "Human Type Talking",
-                    leadingIcon = { Icon(Icons.Default.Psychology, contentDescription = null, tint = MaxTextMuted) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                MaxTextField(
-                    value = uiState.languagePreference,
-                    onValueChange = { viewModel.updateLanguagePreference(it) },
-                    label = "Language Policy",
-                    placeholder = "English / Telugu",
-                    leadingIcon = { Icon(Icons.Default.Translate, contentDescription = null, tint = MaxTextMuted) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            // Section 5: Integrations
-            SettingsSection(title = "Telegram Bridge", icon = Icons.Default.Send) {
-                SettingsSwitchRow(
-                    title = "Telegram Bot Integration",
-                    subtitle = "Receive commands & notifications over Telegram",
-                    isChecked = uiState.isTelegramBotEnabled,
-                    onCheckedChange = { viewModel.updateTelegramBotEnabled(it) }
-                )
-                if (uiState.isTelegramBotEnabled) {
-                    Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
                     MaxTextField(
-                        value = uiState.telegramBotToken,
-                        onValueChange = { viewModel.updateTelegramBotToken(it) },
-                        label = "Bot Token",
-                        placeholder = "123456:ABC-DEF...",
+                        value = uiState.geminiApiKey,
+                        onValueChange = { viewModel.updateGeminiApiKey(it) },
+                        label = "Gemini API Key",
+                        placeholder = "AIzaSy...",
                         isPassword = true,
-                        modifier = Modifier.fillMaxWidth()
+                        leadingIcon = {
+                            Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaxIOSColors.SystemTeal, modifier = Modifier.size(18.dp))
+                        }
                     )
-                    Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                    MaxTextField(
-                        value = uiState.telegramChatId,
-                        onValueChange = { viewModel.updateTelegramChatId(it) },
-                        label = "Allowed Chat ID",
-                        placeholder = "e.g., 987654321",
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
 
-            // Section 5.5: Native RAG Subsystem
-            SettingsSection(title = "Native Memory RAG", icon = Icons.Default.Search) {
-                SettingsSwitchRow(
-                    title = "RAG Knowledge Retrieval",
-                    subtitle = "Automatically augment AI responses with relevant memories",
-                    isChecked = uiState.isRagEnabled,
-                    onCheckedChange = { viewModel.updateIsRagEnabled(it) }
-                )
-                if (uiState.isRagEnabled) {
-                    Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                    SettingsSwitchRow(
-                        title = "Semantic Vector Search",
-                        subtitle = "Use vector embeddings for conceptual matching",
-                        isChecked = uiState.isSemanticSearchEnabled,
-                        onCheckedChange = { viewModel.updateIsSemanticSearchEnabled(it) }
-                    )
-                    Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                    SettingsSwitchRow(
-                        title = "Hybrid Rank Fusion",
-                        subtitle = "Combine semantic vectors and exact keyword search",
-                        isChecked = uiState.isHybridSearchEnabled,
-                        onCheckedChange = { viewModel.updateIsHybridSearchEnabled(it) }
-                    )
-                    Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                    Text(
-                        text = "Embedding Provider",
-                        fontSize = 12.sp,
-                        color = MaxTextMuted,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(MaxDimensions.spaceXs))
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaxIOSShapes.ShapeSmall)
+                            .background(MaxIOSColors.SystemBlue.copy(alpha = 0.12f))
+                            .border(0.5.dp, MaxIOSColors.SystemBlue.copy(alpha = 0.3f), MaxIOSShapes.ShapeSmall)
+                            .clickable {
+                                try {
+                                    val intent = Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://aistudio.google.com/app/apikey")
+                                    )
+                                    context.startActivity(intent)
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Cannot open browser: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        ProviderChoiceChip(
-                            label = "Local On-Device",
-                            isSelected = uiState.ragEmbeddingProvider.equals("local", ignoreCase = true),
-                            onClick = { viewModel.updateRagEmbeddingProvider("local") },
-                            modifier = Modifier.weight(1f)
-                        )
-                        ProviderChoiceChip(
-                            label = "Gemini Cloud (768d)",
-                            isSelected = uiState.ragEmbeddingProvider.equals("gemini", ignoreCase = true),
-                            onClick = { viewModel.updateRagEmbeddingProvider("gemini") },
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
-                    Surface(
-                        color = MaxSurfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(MaxDimensions.radiusMd),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(MaxDimensions.spaceSm)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.OpenInNew,
+                                contentDescription = null,
+                                tint = MaxIOSColors.SystemBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
                             Text(
-                                text = "Status: ${uiState.ragStatus} • Indexed: ${uiState.ragMemoriesIndexed} memories (${uiState.ragChunksIndexed} chunks)",
-                                fontSize = 12.sp,
-                                color = MaxTextSecondary
+                                text = "Get Free Key from Google AI Studio",
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaxIOSColors.SystemBlue
                             )
                         }
-                    }
-                    Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
-                    ) {
-                        MaxButton(
-                            text = "Rebuild Index",
-                            onClick = { viewModel.rebuildRagIndex() },
-                            variant = MaxButtonVariant.SECONDARY,
-                            modifier = Modifier.weight(1f)
+                        Icon(
+                            imageVector = Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = MaxIOSColors.SystemBlue.copy(alpha = 0.7f),
+                            modifier = Modifier.size(16.dp)
                         )
-                        MaxButton(
-                            text = "Clear Index",
-                            onClick = { viewModel.clearRagIndex() },
-                            variant = MaxButtonVariant.DANGER,
-                            modifier = Modifier.weight(1f)
+                    }
+                }
+
+                HorizontalDivider(color = MaxIOSColors.HairlineDark, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
+
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Real-Time AI Model Mode",
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaxIOSColors.TextPrimaryDark
+                    )
+
+                    IOSModelModeOption(
+                        title = "Auto (Recommended)",
+                        subtitle = "Dynamically routes between Fast and Deep thinking",
+                        badge = "SMART",
+                        isSelected = uiState.modelRoutingMode.equals("AUTO", ignoreCase = true),
+                        onClick = { viewModel.updateModelRoutingMode("AUTO") }
+                    )
+
+                    IOSModelModeOption(
+                        title = "Fast Mode (gemini-3.8-live)",
+                        subtitle = "Low latency real-time voice streaming (<500ms)",
+                        badge = "FAST",
+                        isSelected = uiState.modelRoutingMode.equals("FAST", ignoreCase = true),
+                        onClick = { viewModel.updateModelRoutingMode("FAST") }
+                    )
+
+                    IOSModelModeOption(
+                        title = "Deep Mode (Extended Thinking)",
+                        subtitle = "Multi-step reasoning & complex device automation",
+                        badge = "REASONING",
+                        isSelected = uiState.modelRoutingMode.equals("DEEP", ignoreCase = true),
+                        onClick = { viewModel.updateModelRoutingMode("DEEP") }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    MaxIOSSettingsRow(
+                        title = "Thinking Observability",
+                        subtitle = "Stream live AI reasoning thought summaries in UI",
+                        icon = Icons.Default.Psychology,
+                        iconBg = MaxIOSColors.SystemPurple,
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.isThinkingObservabilityEnabled,
+                                onCheckedChange = { viewModel.updateIsThinkingObservabilityEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaxIOSColors.SystemPurple,
+                                    uncheckedThumbColor = Color.LightGray,
+                                    uncheckedTrackColor = Color(0xFF333842)
+                                )
+                            )
+                        },
+                        showDivider = false
+                    )
+                }
+            }
+
+            // ================================================================
+            // SECTION: SYSTEM ASSISTANT & WAKE WORD
+            // ================================================================
+            MaxIOSSettingsSection(title = "System Assistant") {
+                MaxIOSSettingsRow(
+                    title = "Default Digital Assistant",
+                    subtitle = if (uiState.isDefaultAssistant) "MAX is active system assistant" else "Set MAX as system default assistant",
+                    icon = Icons.Default.RecordVoiceOver,
+                    iconBg = MaxIOSColors.SystemBlue,
+                    trailingContent = {
+                        if (uiState.isDefaultAssistant) {
+                            Text(
+                                text = "ACTIVE",
+                                color = MaxIOSColors.SystemGreen,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        } else {
+                            Button(
+                                onClick = {
+                                    val intent = com.example.voice.assistant.SystemAssistantManager.createSetDefaultAssistantIntent(context)
+                                    context.startActivity(intent)
+                                },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = MaxIOSColors.SystemBlue,
+                                    contentColor = Color.White
+                                ),
+                                shape = MaxIOSShapes.ShapePill,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Text("Set Default", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    },
+                    showDivider = true
+                )
+
+                MaxIOSSettingsRow(
+                    title = "Voice Assist Gesture",
+                    subtitle = "Power-button long press & digital assist trigger",
+                    icon = Icons.Default.Hearing,
+                    iconBg = MaxIOSColors.SystemIndigo,
+                    trailingContent = {
+                        Text(
+                            text = uiState.wakeWordStatus,
+                            color = MaxIOSColors.TextSecondaryDark,
+                            fontSize = 12.sp
+                        )
+                    },
+                    showDivider = false
+                )
+            }
+
+            // ================================================================
+            // SECTION: AUTOMATION & SKILLS
+            // ================================================================
+            MaxIOSSettingsSection(title = "Automation & Workflows") {
+                MaxIOSSettingsRow(
+                    title = "Automation Skills Index",
+                    subtitle = "Inspect installed skills & automation triggers",
+                    icon = Icons.Default.Extension,
+                    iconBg = MaxIOSColors.SystemPurple,
+                    onClick = onNavigateToSkills,
+                    showDivider = true
+                )
+
+                MaxIOSSettingsRow(
+                    title = "Agentic Autonomous Mode",
+                    subtitle = "Allow multi-step planning & autonomous UI navigation",
+                    icon = Icons.Default.AutoMode,
+                    iconBg = MaxIOSColors.SystemTeal,
+                    trailingContent = {
+                        Switch(
+                            checked = uiState.isAgenticModeEnabled,
+                            onCheckedChange = { viewModel.updateIsAgenticModeEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaxIOSColors.SystemBlue
+                            )
+                        )
+                    },
+                    showDivider = uiState.isAgenticModeEnabled
+                )
+
+                if (uiState.isAgenticModeEnabled) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(text = "Max Iterations per Goal", fontSize = 13.sp, color = MaxIOSColors.TextSecondaryDark)
+                            Text(text = "${uiState.agenticMaxIterations}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaxIOSColors.SystemBlue)
+                        }
+                        Slider(
+                            value = uiState.agenticMaxIterations.toFloat(),
+                            onValueChange = { viewModel.updateAgenticMaxIterations(it.toInt()) },
+                            valueRange = 1f..15f,
+                            steps = 13,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White,
+                                activeTrackColor = MaxIOSColors.SystemBlue,
+                                inactiveTrackColor = MaxIOSColors.DarkSurfaceElevated
+                            )
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(text = "Daily Iteration Budget", fontSize = 13.sp, color = MaxIOSColors.TextSecondaryDark)
+                            Text(text = "${uiState.agenticDailyBudget} (Used: ${uiState.agenticIterationsUsedToday})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaxIOSColors.SystemTeal)
+                        }
+                        Slider(
+                            value = uiState.agenticDailyBudget.toFloat(),
+                            onValueChange = { viewModel.updateAgenticDailyBudget(it.toInt()) },
+                            valueRange = 5f..200f,
+                            colors = SliderDefaults.colors(
+                                thumbColor = Color.White,
+                                activeTrackColor = MaxIOSColors.SystemTeal,
+                                inactiveTrackColor = MaxIOSColors.DarkSurfaceElevated
+                            )
                         )
                     }
                 }
             }
 
-            // Section 6: Master Operating Switch
-            SettingsSection(title = "System Control", icon = Icons.Default.PowerSettingsNew) {
-                SettingsSwitchRow(
-                    title = "MAX Master State",
-                    subtitle = "Global master enable/disable for all background services",
-                    isChecked = uiState.isMaxEnabled,
-                    onCheckedChange = { viewModel.updateIsMaxEnabled(it) }
+            // ================================================================
+            // SECTION: PERSONALIZATION & IDENTITY
+            // ================================================================
+            MaxIOSSettingsSection(title = "Identity & Persona") {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    MaxTextField(
+                        value = uiState.userName,
+                        onValueChange = { viewModel.updateUserName(it) },
+                        label = "Your Name / Call Sign",
+                        placeholder = "e.g., Yash",
+                        leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null, tint = MaxIOSColors.SystemBlue, modifier = Modifier.size(18.dp)) }
+                    )
+                    MaxTextField(
+                        value = uiState.botPersona,
+                        onValueChange = { viewModel.updateBotPersona(it) },
+                        label = "Assistant Persona",
+                        placeholder = "Autonomous High-Intelligence Companion",
+                        leadingIcon = { Icon(Icons.Default.Psychology, contentDescription = null, tint = MaxIOSColors.SystemPurple, modifier = Modifier.size(18.dp)) }
+                    )
+                    MaxTextField(
+                        value = uiState.languagePreference,
+                        onValueChange = { viewModel.updateLanguagePreference(it) },
+                        label = "Language Policy",
+                        placeholder = "English / Telugu",
+                        leadingIcon = { Icon(Icons.Default.Translate, contentDescription = null, tint = MaxIOSColors.SystemTeal, modifier = Modifier.size(18.dp)) }
+                    )
+                }
+            }
+
+            // ================================================================
+            // SECTION: MEMORY RAG ENGINE
+            // ================================================================
+            MaxIOSSettingsSection(title = "Memory & Knowledge") {
+                MaxIOSSettingsRow(
+                    title = "Memory Knowledge RAG",
+                    subtitle = "Augment prompts with episodic & semantic memory",
+                    icon = Icons.Default.Search,
+                    iconBg = MaxIOSColors.SystemPurple,
+                    trailingContent = {
+                        Switch(
+                            checked = uiState.isRagEnabled,
+                            onCheckedChange = { viewModel.updateIsRagEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaxIOSColors.SystemBlue
+                            )
+                        )
+                    },
+                    showDivider = uiState.isRagEnabled
+                )
+
+                if (uiState.isRagEnabled) {
+                    MaxIOSSettingsRow(
+                        title = "Semantic Vector Search",
+                        subtitle = "Conceptual embeddings retrieval",
+                        icon = Icons.Default.BlurOn,
+                        iconBg = MaxIOSColors.SystemTeal,
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.isSemanticSearchEnabled,
+                                onCheckedChange = { viewModel.updateIsSemanticSearchEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaxIOSColors.SystemBlue
+                                )
+                            )
+                        },
+                        showDivider = true
+                    )
+
+                    MaxIOSSettingsRow(
+                        title = "Hybrid Rank Fusion",
+                        subtitle = "Combine keyword + cosine similarity",
+                        icon = Icons.Default.Hub,
+                        iconBg = MaxIOSColors.SystemAmber,
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.isHybridSearchEnabled,
+                                onCheckedChange = { viewModel.updateIsHybridSearchEnabled(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaxIOSColors.SystemBlue
+                                )
+                            )
+                        },
+                        showDivider = true
+                    )
+
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "Status: ${uiState.ragStatus} • ${uiState.ragMemoriesIndexed} memories indexed",
+                            fontSize = 12.sp,
+                            color = MaxIOSColors.TextSecondaryDark
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Button(
+                                onClick = { viewModel.rebuildRagIndex() },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaxIOSColors.DarkSurfaceElevated, contentColor = MaxIOSColors.SystemBlue),
+                                shape = MaxIOSShapes.ShapeMedium,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Rebuild Index", fontSize = 13.sp)
+                            }
+                            Button(
+                                onClick = { viewModel.clearRagIndex() },
+                                colors = ButtonDefaults.buttonColors(containerColor = MaxIOSColors.SystemRed.copy(alpha = 0.15f), contentColor = MaxIOSColors.SystemRed),
+                                shape = MaxIOSShapes.ShapeMedium,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Clear Index", fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ================================================================
+            // SECTION: LICENSE & ENTITLEMENTS
+            // ================================================================
+            MaxIOSSettingsSection(title = "License & Entitlements") {
+                MaxIOSSettingsRow(
+                    title = "License & Subscription",
+                    subtitle = "Manage cloud license & premium status",
+                    icon = Icons.Default.Verified,
+                    iconBg = MaxIOSColors.SystemGreen,
+                    onClick = onNavigateToLicense,
+                    showDivider = false
                 )
             }
 
-            Spacer(modifier = Modifier.height(MaxDimensions.spaceXl))
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
 @Composable
-private fun SettingsSection(
-    title: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    content: @Composable ColumnScope.() -> Unit
-) {
-    MaxCard(
-        modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(MaxDimensions.radiusLg)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(MaxDimensions.spaceMd)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = MaxPrimary,
-                    modifier = Modifier.size(20.dp)
-                )
-                Text(
-                    text = title,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaxTextPrimary
-                )
-            }
-            Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
-            content()
-        }
-    }
-}
-
-@Composable
-private fun SettingsSwitchRow(
+private fun IOSModelModeOption(
     title: String,
     subtitle: String,
-    isChecked: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
+    badge: String,
+    isSelected: Boolean,
+    onClick: () -> Unit
 ) {
-    Row(
-        modifier = modifier
+    Box(
+        modifier = Modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!isChecked) },
-        verticalAlignment = Alignment.CenterVertically
+            .clip(MaxIOSShapes.ShapeMedium)
+            .background(if (isSelected) MaxIOSColors.SystemBlue.copy(alpha = 0.12f) else MaxIOSColors.DarkBase.copy(alpha = 0.5f))
+            .border(
+                0.5.dp,
+                if (isSelected) MaxIOSColors.SystemBlue else MaxIOSColors.HairlineDark,
+                MaxIOSShapes.ShapeMedium
+            )
+            .clickable(onClick = onClick)
+            .padding(12.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = MaxTextPrimary
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            RadioButton(
+                selected = isSelected,
+                onClick = onClick,
+                colors = RadioButtonDefaults.colors(
+                    selectedColor = MaxIOSColors.SystemBlue,
+                    unselectedColor = MaxIOSColors.TextTertiaryDark
+                )
             )
-            Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
-            Text(
-                text = subtitle,
-                fontSize = 12.sp,
-                color = MaxTextMuted
-            )
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = title,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isSelected) MaxIOSColors.SystemBlue else MaxIOSColors.TextPrimaryDark
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(MaxIOSShapes.ShapePill)
+                            .background(if (isSelected) MaxIOSColors.SystemBlue.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = badge,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) MaxIOSColors.SystemBlue else MaxIOSColors.TextSecondaryDark
+                        )
+                    }
+                }
+                Text(
+                    text = subtitle,
+                    fontSize = 12.sp,
+                    color = MaxIOSColors.TextSecondaryDark,
+                    lineHeight = 16.sp
+                )
+            }
         }
-        Switch(
-            checked = isChecked,
-            onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MaxBgDark,
-                checkedTrackColor = MaxPrimary,
-                uncheckedThumbColor = MaxTextMuted,
-                uncheckedTrackColor = MaxSurfaceVariant
-            )
-        )
-    }
-}
-
-@Composable
-private fun ProviderChoiceChip(
-    label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(MaxDimensions.radiusMd))
-            .background(if (isSelected) MaxPrimary.copy(alpha = 0.2f) else MaxSurfaceVariant)
-            .clickable(onClick = onClick)
-            .padding(vertical = MaxDimensions.spaceSm, horizontal = MaxDimensions.spaceSm),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = label,
-            fontSize = 12.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-            color = if (isSelected) MaxPrimary else MaxTextSecondary
-        )
-    }
-}
-
-@Composable
-private fun VoiceChip(
-    voice: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-            .background(if (isSelected) MaxPrimary else MaxSurfaceVariant)
-            .clickable(onClick = onClick)
-            .padding(vertical = MaxDimensions.spaceXs),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = voice,
-            fontSize = 11.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-            color = if (isSelected) MaxBgDark else MaxTextSecondary
-        )
     }
 }

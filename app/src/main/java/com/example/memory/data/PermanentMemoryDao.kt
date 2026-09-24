@@ -13,10 +13,10 @@ interface PermanentMemoryDao {
     @Query("SELECT * FROM permanent_memory ORDER BY pinned DESC, updatedAt DESC")
     fun getAllFlow(): Flow<List<PermanentMemory>>
 
-    @Query("SELECT * FROM permanent_memory ORDER BY pinned DESC, updatedAt DESC")
+    @Query("SELECT * FROM permanent_memory WHERE isPrivate = 0 ORDER BY pinned DESC, updatedAt DESC")
     fun getAgentMemoriesFlow(): Flow<List<PermanentMemory>>
 
-    @Query("SELECT * FROM permanent_memory ORDER BY pinned DESC, updatedAt DESC")
+    @Query("SELECT * FROM permanent_memory WHERE isPrivate = 1 ORDER BY pinned DESC, updatedAt DESC")
     fun getPrivateMemoriesFlow(): Flow<List<PermanentMemory>>
 
     @Query("SELECT * FROM permanent_memory WHERE enabled = 1 ORDER BY pinned DESC, updatedAt DESC")

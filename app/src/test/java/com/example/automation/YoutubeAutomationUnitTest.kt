@@ -161,5 +161,77 @@ class YoutubeAutomationUnitTest {
         // OPEN_YOUTUBE validates without query
         val openReq = ExecutionRequest(action = "OPEN_YOUTUBE")
         assertTrue("YoutubeTool must accept OPEN_YOUTUBE without query", tool.validate(openReq))
+
+        // Media controls validate without query
+        assertTrue("PAUSE_YOUTUBE must validate without query", tool.validate(ExecutionRequest(action = "PAUSE_YOUTUBE")))
+        assertTrue("RESUME_YOUTUBE must validate without query", tool.validate(ExecutionRequest(action = "RESUME_YOUTUBE")))
+        assertTrue("NEXT_YOUTUBE_VIDEO must validate without query", tool.validate(ExecutionRequest(action = "NEXT_YOUTUBE_VIDEO")))
+        assertTrue("PREVIOUS_YOUTUBE_VIDEO must validate without query", tool.validate(ExecutionRequest(action = "PREVIOUS_YOUTUBE_VIDEO")))
+        assertTrue("SKIP_AD must validate without query", tool.validate(ExecutionRequest(action = "SKIP_AD")))
+        assertTrue("FULLSCREEN_YOUTUBE must validate without query", tool.validate(ExecutionRequest(action = "FULLSCREEN_YOUTUBE")))
+    }
+
+    @Test
+    fun testYoutubeVerifier_MultilingualAndSurfaceDetection() {
+        val verifier = YoutubeVerifier()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val request = ExecutionRequest(action = "YOUTUBE_SEARCH", arguments = JsonObject().apply { addProperty("query", "RRR Songs") })
+        val result = ToolResult(success = true, toolName = "youtube")
+
+        // 1. Telugu description
+        val teluguSnapshot = DeviceContext(
+            ui = UiSnapshot(
+                packageName = "com.google.android.youtube",
+                nodes = listOf(
+                    UiNode(contentDescription = "వీడియో పాజ్ చేయండి", id = "com.google.android.youtube:id/player_control_play_pause")
+                )
+            )
+        )
+        assertTrue("Telugu playback controls should pass verification", verifier.verify(context, request, result, teluguSnapshot).success)
+
+        // 2. Hindi description
+        val hindiSnapshot = DeviceContext(
+            ui = UiSnapshot(
+                packageName = "com.google.android.youtube",
+                nodes = listOf(
+                    UiNode(contentDescription = "वीडियो रोकें", id = "com.google.android.youtube:id/player_control_play_pause")
+                )
+            )
+        )
+        assertTrue("Hindi playback controls should pass verification", verifier.verify(context, request, result, hindiSnapshot).success)
+
+        // 3. Faded controls with active SurfaceView / watch panel
+        val surfaceSnapshot = DeviceContext(
+            ui = UiSnapshot(
+                packageName = "com.google.android.youtube",
+                nodes = listOf(
+                    UiNode(id = "com.google.android.youtube:id/movie_player"),
+                    UiNode(className = "android.view.SurfaceView")
+                )
+            )
+        )
+        assertTrue("Faded controls with active SurfaceView/movie_player should pass verification", verifier.verify(context, request, result, surfaceSnapshot).success)
+    }
+
+    @Test
+    fun testYoutubeVerifier_MediaControlActions_SucceedWhenForeground() {
+        val verifier = YoutubeVerifier()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val result = ToolResult(success = true, toolName = "youtube")
+        val foregroundSnapshot = DeviceContext(
+            ui = UiSnapshot(
+                packageName = "com.google.android.youtube",
+                nodes = emptyList()
+            )
+        )
+
+        listOf(
+            "PAUSE_YOUTUBE", "RESUME_YOUTUBE", "NEXT_YOUTUBE_VIDEO",
+            "PREVIOUS_YOUTUBE_VIDEO", "SKIP_AD", "FULLSCREEN_YOUTUBE"
+        ).forEach { act ->
+            val req = ExecutionRequest(action = act)
+            val verification = verifier.verify(context, req, result, foregroundSnapshot)
+            assertTrue("Media action $act must succeed verification when YouTube is foreground", verification.success)
+        }
     }
 }

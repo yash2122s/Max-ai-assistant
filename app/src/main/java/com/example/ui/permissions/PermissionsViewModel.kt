@@ -62,9 +62,9 @@ class PermissionsViewModel(application: Application) : AndroidViewModel(applicat
         val items = listOf(
             PermissionItemState("accessibility", "Accessibility Service", "Required for UI tree analysis, clicking, typing, and app automation", isAccessibility, true, PermissionCategory.CORE_SYSTEM),
             PermissionItemState("overlay", "Display Over Other Apps", "Required for floating capsule HUD and instant AI overlay", isOverlay, true, PermissionCategory.CORE_SYSTEM),
-            PermissionItemState("battery", "Ignore Battery Optimizations", "Keeps Gemini Live WebSocket and automation loop active in background", isBattery, true, PermissionCategory.CORE_SYSTEM),
+            PermissionItemState("battery", "Ignore Battery Optimizations", "Keeps MAX voice engine and background automation loop active", isBattery, true, PermissionCategory.CORE_SYSTEM),
             PermissionItemState("notif_listener", "Notification Listener", "Allows MAX to read, summarize, and auto-reply to messages", isNotifListener, false, PermissionCategory.CORE_SYSTEM),
-            PermissionItemState("microphone", "Microphone", "Enables real-time duplex voice streaming with Gemini Live", isMic, true, PermissionCategory.VOICE_AND_VISION),
+            PermissionItemState("microphone", "Microphone", "Enables real-time duplex voice interaction and speech recognition", isMic, true, PermissionCategory.VOICE_AND_VISION),
             PermissionItemState("camera", "Camera & Vision", "Allows MAX to capture photos, analyze screenshots, and use flashlight", isCamera, false, PermissionCategory.VOICE_AND_VISION),
             PermissionItemState("notifications", "Post Notifications", "Shows ongoing status and task completion reminders", isNotif, false, PermissionCategory.CORE_SYSTEM),
             PermissionItemState("contacts", "Contacts Access", "Finds contact numbers when you say 'Call Mom' or 'Message Yash'", isContacts, false, PermissionCategory.COMMUNICATIONS),

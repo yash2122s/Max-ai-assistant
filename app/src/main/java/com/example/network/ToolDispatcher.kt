@@ -78,10 +78,14 @@ object ToolDispatcher {
         "type_text",
         "press_enter",
         "press_key",
-        "clear_text"
+        "clear_text",
+        "computer_use",
+        "ui_agent"
     )
 
     private val functionToActionMap = mapOf(
+        "computer_use" to "COMPUTER_USE",
+        "ui_agent" to "COMPUTER_USE",
         "task_intent" to "TASK_INTENT",
         "get_screen_context" to "GET_SCREEN_CONTEXT",
         "click_element" to "CLICK_TEXT",

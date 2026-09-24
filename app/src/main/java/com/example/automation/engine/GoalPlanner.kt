@@ -70,8 +70,10 @@ object GoalPlanner {
 
     fun getPlanningProvider(): com.example.network.provider.LLMPlanningProvider? = planningProvider
 
-    private fun getRequiredProvider(): com.example.network.provider.LLMPlanningProvider {
-        return planningProvider ?: throw IllegalStateException("LLMPlanningProvider not injected into GoalPlanner")
+    private fun getRequiredProvider(context: Context? = null): com.example.network.provider.LLMPlanningProvider {
+        return planningProvider ?: com.example.network.provider.GeminiPlanningProvider(context).also {
+            planningProvider = it
+        }
     }
 
     fun initializeGoalPlan(goalPrompt: String, steps: List<ActionStep>) {
@@ -679,7 +681,7 @@ object GoalPlanner {
         }
 
         // 3. Call injected LLM Planning Provider
-        val provider = getRequiredProvider()
+        val provider = getRequiredProvider(context)
         val planningRequest = com.example.network.provider.PlanningRequest(
             goal = goal,
             screenContext = screenContext

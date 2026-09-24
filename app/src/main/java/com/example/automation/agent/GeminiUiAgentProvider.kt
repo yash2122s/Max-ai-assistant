@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Base64
 import android.util.Log
 import com.example.data.preferences.SettingsManager
+import com.example.network.model.GeminiModelResolver
+import com.example.network.model.UiAgentModels
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -13,19 +15,21 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Fallback UI Automation Agent provider using Google Gemini REST API.
+ * UI Automation Agent provider using Google Gemini REST generateContent API.
+ * Uses gemini-2.5-flash by default with gemini-3.5-flash fallback.
  */
 class GeminiUiAgentProvider : UiAgentProvider {
 
     companion object {
         const val PROVIDER_ID = "gemini"
-        const val DEFAULT_MODEL = "gemini-2.0-flash"
+        const val DEFAULT_MODEL = UiAgentModels.GEMINI_UI_AGENT_DEFAULT
+        const val FALLBACK_MODEL = UiAgentModels.GEMINI_UI_AGENT_FALLBACK
         private const val TAG = "GeminiUiAgentProvider"
         private const val TIMEOUT_MS = 25_000
     }
 
     override val id: String = PROVIDER_ID
-    override val displayName: String = "Google Gemini (Fallback)"
+    override val displayName: String = "Google Gemini (UI Reasoning)"
 
     override suspend fun isConfigured(context: Context): Boolean {
         val settings = SettingsManager(context)
@@ -39,12 +43,12 @@ class GeminiUiAgentProvider : UiAgentProvider {
                 success = false,
                 message = "Gemini API Key is missing",
                 provider = id,
-                model = model.ifBlank { DEFAULT_MODEL },
+                model = UiAgentModels.sanitizeModelName(model),
                 errorCode = "MISSING_KEY"
             )
         }
 
-        val targetModel = model.ifBlank { DEFAULT_MODEL }
+        val targetModel = UiAgentModels.sanitizeModelName(model)
         val startTime = System.currentTimeMillis()
 
         try {
@@ -83,9 +87,16 @@ class GeminiUiAgentProvider : UiAgentProvider {
                 )
             } else {
                 val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
+                Log.w(TAG, "Gemini test connection failed with HTTP $responseCode ($targetModel): $errorBody")
+                val friendlyMessage = when (responseCode) {
+                    404 -> "Model '$targetModel' is unavailable on Gemini API."
+                    429 -> "Gemini API rate limit reached."
+                    401, 403 -> "Invalid Gemini API Key or authentication failed."
+                    else -> "Gemini API returned error ($responseCode)."
+                }
                 UiAgentTestResult(
                     success = false,
-                    message = "Gemini API error ($responseCode): $errorBody",
+                    message = friendlyMessage,
                     provider = id,
                     model = targetModel,
                     latencyMs = latency,
@@ -93,6 +104,7 @@ class GeminiUiAgentProvider : UiAgentProvider {
                 )
             }
         } catch (e: Exception) {
+            Log.e(TAG, "Gemini test connection error", e)
             UiAgentTestResult(
                 success = false,
                 message = "Network error: ${e.localizedMessage ?: "Failed to reach Gemini"}",
@@ -105,20 +117,47 @@ class GeminiUiAgentProvider : UiAgentProvider {
     }
 
     override suspend fun getCompatibleModels(context: Context, apiKey: String): List<UiAgentModelInfo> = withContext(Dispatchers.IO) {
+        val effectiveKey = apiKey.ifBlank { SettingsManager(context).geminiApiKey }
+        val dynamicallyDiscovered = if (effectiveKey.isNotBlank()) {
+            GeminiModelResolver.getAvailableGenerateContentModels(effectiveKey)
+        } else {
+            emptyList()
+        }
+
+        if (dynamicallyDiscovered.isNotEmpty()) {
+            return@withContext dynamicallyDiscovered.map { modelId ->
+                val isDefault = (modelId == UiAgentModels.GEMINI_UI_AGENT_DEFAULT)
+                UiAgentModelInfo(
+                    id = modelId,
+                    name = when (modelId) {
+                        "gemini-2.5-flash" -> "Gemini 2.5 Flash"
+                        "gemini-3.5-flash" -> "Gemini 3.5 Flash"
+                        "gemini-2.5-pro" -> "Gemini 2.5 Pro"
+                        else -> modelId.replace("-", " ").replaceFirstChar { it.uppercase() }
+                    },
+                    description = if (isDefault) "Primary multimodal agentic reasoning model" else "Discovered active account model",
+                    supportsVision = true,
+                    supportsToolCalling = true,
+                    contextLength = 1000000,
+                    isPreferred = isDefault
+                )
+            }.sortedByDescending { if (it.isPreferred) 1 else 0 }
+        }
+
         listOf(
             UiAgentModelInfo(
-                id = "gemini-2.0-flash",
-                name = "Gemini 2.0 Flash",
-                description = "Fast multimodal agentic reasoning",
+                id = UiAgentModels.GEMINI_UI_AGENT_DEFAULT,
+                name = "Gemini 2.5 Flash",
+                description = "Fast, state-of-the-art multimodal agentic reasoning and visual grounding",
                 supportsVision = true,
                 supportsToolCalling = true,
                 contextLength = 1000000,
                 isPreferred = true
             ),
             UiAgentModelInfo(
-                id = "gemini-1.5-flash",
-                name = "Gemini 1.5 Flash",
-                description = "Lightweight multimodal execution",
+                id = UiAgentModels.GEMINI_UI_AGENT_FALLBACK,
+                name = "Gemini 3.5 Flash",
+                description = "High-efficiency multimodal execution and reasoning fallback",
                 supportsVision = true,
                 supportsToolCalling = true,
                 contextLength = 1000000,
@@ -137,7 +176,7 @@ class GeminiUiAgentProvider : UiAgentProvider {
         val effectiveKey = apiKey.ifBlank {
             return@withContext UiAgentReasoningResult.Error("Gemini API key is missing", errorCode = "MISSING_KEY", retryable = false)
         }
-        val targetModel = model.ifBlank { DEFAULT_MODEL }
+        val targetModel = GeminiModelResolver.resolveBestUiModel(effectiveKey, model)
 
         try {
             val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$effectiveKey"
@@ -159,12 +198,71 @@ class GeminiUiAgentProvider : UiAgentProvider {
                 parseGeminiResponse(responseText)
             } else {
                 val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-                Log.w(TAG, "Gemini reasoning request failed with HTTP $responseCode: $errorBody")
-                UiAgentReasoningResult.Error("Gemini error ($responseCode): $errorBody", errorCode = "HTTP_$responseCode", retryable = true)
+                Log.w(TAG, "Gemini reasoning request failed with HTTP $responseCode ($targetModel): $errorBody")
+                
+                // If 404 (model not available) and targetModel wasn't already the fallback, attempt fallback model
+                if (responseCode == 404 && targetModel != UiAgentModels.GEMINI_UI_AGENT_FALLBACK) {
+                    Log.i(TAG, "Attempting automatic fallback to ${UiAgentModels.GEMINI_UI_AGENT_FALLBACK}...")
+                    return@withContext executeReasoningRequest(
+                        task, observation, stepHistory, effectiveKey, UiAgentModels.GEMINI_UI_AGENT_FALLBACK
+                    )
+                }
+
+                val userFriendlyMessage = when (responseCode) {
+                    404 -> "UI Agent model ($targetModel) is temporarily unavailable. Reconnecting with fallback..."
+                    429 -> "UI Agent reasoning rate limit reached. Retrying..."
+                    401, 403 -> "UI Agent authentication failed. Please verify API key."
+                    in 500..599 -> "UI Agent reasoning service is experiencing high load. Retrying..."
+                    else -> "UI Agent is temporarily unavailable. Reconnecting..."
+                }
+
+                UiAgentReasoningResult.Error(
+                    message = userFriendlyMessage,
+                    errorCode = "HTTP_$responseCode",
+                    retryable = (responseCode != 401 && responseCode != 403)
+                )
             }
         } catch (e: Exception) {
             Log.e(TAG, "Gemini reasoning network error", e)
-            UiAgentReasoningResult.Error("Network error: ${e.localizedMessage ?: "Failed to reach Gemini"}", errorCode = "NETWORK_ERROR", retryable = true)
+            UiAgentReasoningResult.Error(
+                message = "UI Agent network connection issue. Retrying...",
+                errorCode = "NETWORK_ERROR",
+                retryable = true
+            )
+        }
+    }
+
+    private fun executeReasoningRequest(
+        task: UiTask,
+        observation: UiObservation,
+        stepHistory: List<UiStepRecord>,
+        apiKey: String,
+        targetModel: String
+    ): UiAgentReasoningResult {
+        try {
+            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$apiKey"
+            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "POST"
+                connectTimeout = TIMEOUT_MS
+                readTimeout = TIMEOUT_MS
+                setRequestProperty("Content-Type", "application/json")
+                doOutput = true
+            }
+
+            val requestJson = buildGeminiPayload(task, observation, stepHistory)
+            OutputStreamWriter(connection.outputStream).use { it.write(requestJson.toString()) }
+
+            val responseCode = connection.responseCode
+            return if (responseCode in 200..299) {
+                val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                parseGeminiResponse(responseText)
+            } else {
+                val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
+                Log.w(TAG, "Fallback Gemini reasoning request failed with HTTP $responseCode ($targetModel): $errorBody")
+                UiAgentReasoningResult.Error("UI Agent is temporarily unavailable. Reconnecting...", errorCode = "HTTP_$responseCode")
+            }
+        } catch (e: Exception) {
+            return UiAgentReasoningResult.Error("UI Agent network connection issue.", errorCode = "NETWORK_ERROR")
         }
     }
 

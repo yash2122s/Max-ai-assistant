@@ -56,7 +56,8 @@ When `startListening()` is called while Gemini is speaking:
 
 ## Voice Settings (in SettingsManager)
 - `isLiveVoiceMode`: true = Gemini Live audio; false = text-only
-- `liveVoiceModelName`: model name (NOTE: currently ignored by `sanitizeModelName()`)
+- `modelRoutingMode`: `AUTO` (default), `FAST`, `DEEP`
+- `liveVoiceModelName`: model name (defaults to `gemini-3.8-live`, deep `gemini-3.8-live-extended-thinking`, fallback `gemini-3.1-flash-live-preview`)
 - `liveVoiceName`: Aoede (default), Kore, Fenrir, Puck, etc.
 
 ## Performance Targets
@@ -64,8 +65,9 @@ When `startListening()` is called while Gemini is speaking:
 - Audio stutter fix: WRITE_BLOCKING ensures full PCM chunks queued
 
 ## Current Status: IMPLEMENTED ✅
-Voice session working. Barge-in working. HUD components rendered.
+Voice session working with dual-model routing (`gemini-3.8-live` and `gemini-3.8-live-extended-thinking`). Barge-in working. HUD components rendered.
 
 ## Known Issues
 - No local wake word — user must manually trigger or use ASSIST intent
 - Two foreground services for microphone: `AssistantEngineService` and `VoiceForegroundService` — potential duplication
+

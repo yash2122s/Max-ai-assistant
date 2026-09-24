@@ -15,32 +15,54 @@ import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
 import androidx.core.app.NotificationCompat
+import com.example.MainActivity
 import com.example.MyApplication
 import com.example.R
+import com.example.automation.event.AutomationEvent
+import com.example.automation.event.AutomationEventBus
 import com.example.core.registry.ServiceRegistry
 import com.example.core.registry.ServiceType
-import com.example.ui.overlay.CapsuleState
-import com.example.ui.overlay.DynamicCapsuleView
+import com.example.data.preferences.SettingsManager
+import com.example.network.ConnectionState
+import com.example.network.model.GeminiModelMode
+import com.example.ui.overlay.hud.DynamicHudOverlayView
+import com.example.ui.overlay.hud.HudState
+import com.example.ui.overlay.hud.HudStateMapper
 import com.example.viewmodel.ChatViewModel
 import com.example.voice.assistant.AssistantEvent
 import com.example.voice.assistant.AssistantEventBus
 import com.example.voice.assistant.AssistantLifecycleManager
 import com.example.voice.assistant.SessionState
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.collectLatest
 
+/**
+ * Android Foreground Service hosting the redesigned 60 FPS Dynamic HUD Overlay.
+ * Shown on top of other apps with multi-state animations, gestures, and Gemini 3.8 Live integration.
+ */
 class MaxCapsuleOverlayService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var windowManager: WindowManager? = null
-    private var capsuleView: DynamicCapsuleView? = null
+    private var hudOverlayView: DynamicHudOverlayView? = null
     private var windowLayoutParams: WindowManager.LayoutParams? = null
 
-    private var temporaryCollapseJob: Job? = null
-    private var isTemporaryExpanded = false
-    private var temporaryTextPayload: String? = null
+    // Real-time State Trackers
     private var currentSessionState = SessionState.IDLE
+    private var currentConnectionState = ConnectionState.CONNECTED
+    private var currentModelMode = GeminiModelMode.AUTO
     private var isAiSpeaking = false
-    private var hasActiveError = false
+    private var activeError: String? = null
+    private var activeToolName: String? = null
+    private var activeToolDescription: String? = null
+    private var isWindowsAgent = false
+    private var toolProgress: Float? = null
+    private var currentRms: Float = 0f
+    private var aiCaption: String? = null
+    private var isReconnecting = false
+    private var isMaxForeground = false
+
+    private var temporaryErrorJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -64,7 +86,7 @@ class MaxCapsuleOverlayService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (capsuleView == null) {
+        if (hudOverlayView == null) {
             setupOverlayWindow()
         }
         return START_STICKY
@@ -72,7 +94,7 @@ class MaxCapsuleOverlayService : Service() {
 
     private fun startForegroundNotification() {
         val channelId = "max_capsule_channel"
-        val channelName = "MAX Dynamic Island Service"
+        val channelName = "MAX Dynamic HUD Service"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val chan = NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_LOW)
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -80,7 +102,7 @@ class MaxCapsuleOverlayService : Service() {
         }
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("MAX Capsule Active")
+            .setContentTitle("MAX AI Assistant Active")
             .setContentText("Dynamic HUD overlay is ready.")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -101,29 +123,58 @@ class MaxCapsuleOverlayService : Service() {
 
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         val density = resources.displayMetrics.density
-        val initialWidthPx = (125 * density).toInt()
-        val initialHeightPx = (38 * density).toInt()
+        val initialWidthPx = (110 * density).toInt()
+        val initialHeightPx = (36 * density).toInt()
         val topOffsetPx = getTopCutoutOffset(this)
 
         windowLayoutParams = buildLayoutParams(initialWidthPx, initialHeightPx, topOffsetPx)
 
-        val capsule = DynamicCapsuleView(this)
-        capsule.setOnBoundsChangeListener { widthPx, heightPx ->
-            updateWindowDimensions(widthPx, heightPx)
+        val hudView = DynamicHudOverlayView(this).apply {
+            onBoundsChangeListener = { wPx, hPx ->
+                updateWindowDimensions(wPx, hPx)
+            }
+            onPositionChangeListener = { dx, dy ->
+                updateWindowPosition(dx, dy)
+            }
+            onInterruptRequest = {
+                Log.d(TAG, "User tapped interrupt on Dynamic HUD Overlay")
+                ChatViewModel.instance.onSpeechInterrupted()
+            }
+            onToggleMicRequest = {
+                Log.d(TAG, "User toggled microphone from HUD Quick Controls")
+                ChatViewModel.instance.toggleRecording()
+            }
+            onToggleModelModeRequest = {
+                toggleFastDeepMode()
+            }
+            onOpenAppRequest = {
+                openMaxApp()
+            }
+            onCloseOverlayRequest = {
+                hudOverlayView?.visibility = View.GONE
+            }
+            onActivateVoiceLiveRequest = {
+                Log.i(TAG, "User tapped capsule -> activating Voice Live session")
+                val triggered = com.example.voice.session.JarvisVoiceInteractionService.triggerSession(android.os.Bundle(), 0)
+                if (!triggered) {
+                    Log.i(TAG, "JarvisVoiceInteractionService not bound, falling back to AssistantSessionManager")
+                    com.example.voice.assistant.AssistantSessionManager.startSystemAssistantSession(this@MaxCapsuleOverlayService)
+                }
+            }
         }
-        capsuleView = capsule
+        hudOverlayView = hudView
 
         try {
-            windowManager?.addView(capsuleView, windowLayoutParams)
-            Log.d(TAG, "Dynamic Capsule overlay view added successfully")
+            windowManager?.addView(hudOverlayView, windowLayoutParams)
+            Log.d(TAG, "Dynamic HUD Overlay view added successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Error adding Dynamic Capsule to WindowManager", e)
+            Log.e(TAG, "Error adding Dynamic HUD to WindowManager", e)
         }
     }
 
     private fun updateWindowDimensions(widthPx: Int, heightPx: Int) {
         val params = windowLayoutParams ?: return
-        val view = capsuleView ?: return
+        val view = hudOverlayView ?: return
         if (params.width != widthPx || params.height != heightPx) {
             params.width = widthPx
             params.height = heightPx
@@ -132,102 +183,182 @@ class MaxCapsuleOverlayService : Service() {
                     windowManager?.updateViewLayout(view, params)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Error updating capsule window bounds", e)
+                Log.w(TAG, "Error updating HUD window bounds", e)
             }
         }
     }
 
+    private fun updateWindowPosition(deltaX: Int, deltaY: Int) {
+        val params = windowLayoutParams ?: return
+        val view = hudOverlayView ?: return
+        params.x = (params.x + deltaX).coerceIn(-400, 400)
+        params.y = (params.y + deltaY).coerceIn(8, 2200)
+        try {
+            if (view.isAttachedToWindow) {
+                windowManager?.updateViewLayout(view, params)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error updating HUD position", e)
+        }
+    }
+
+    private fun toggleFastDeepMode() {
+        val settings = SettingsManager(this)
+        val current = GeminiModelMode.fromString(settings.modelRoutingMode)
+        val next = if (current == GeminiModelMode.DEEP) GeminiModelMode.FAST else GeminiModelMode.DEEP
+        settings.modelRoutingMode = next.name
+        currentModelMode = next
+        Log.i(TAG, "HUD toggled model mode to: $next")
+        pushStateUpdate()
+    }
+
+    private fun openMaxApp() {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        if (launchIntent != null) {
+            startActivity(launchIntent)
+        }
+    }
+
     private fun observeStateFlows() {
-        // 1. Observe Foreground/Background status
+        // 1. App Foreground status (Hide overlay when MAX app itself is foreground)
         serviceScope.launch {
-            MyApplication.isMaxForeground.collect { isForeground ->
-                refreshState()
+            MyApplication.isMaxForeground.collectLatest { isFg ->
+                isMaxForeground = isFg
+                hudOverlayView?.visibility = if (isFg) View.GONE else View.VISIBLE
             }
         }
 
-        // 2. Observe Voice Session State
+        // 2. Assistant Session State & Model Mode
         serviceScope.launch {
-            AssistantLifecycleManager.engine.collect { engine ->
-                engine?.stateMachine?.currentState?.collect { state ->
+            AssistantLifecycleManager.engine.collectLatest { engine ->
+                engine?.stateMachine?.currentState?.collectLatest { state ->
                     currentSessionState = state
-                    refreshState()
+                    pushStateUpdate()
                 }
             }
         }
 
-        // 3. Observe Assistant Events (Captions, Audio RMS, Errors)
+        // 3. Assistant Event Bus (Captions, Audio RMS, Errors, Connections)
         serviceScope.launch {
-            AssistantEventBus.events.collect { event ->
+            AssistantEventBus.events.collectLatest { event ->
                 when (event) {
                     is AssistantEvent.AudioRmsChanged -> {
-                        capsuleView?.updateRms(event.rms)
+                        currentRms = event.rms
+                        hudOverlayView?.updateRms(event.rms)
                     }
                     is AssistantEvent.TextTranscribed -> {
-                        if (event.role == "You" && event.text.isNotBlank()) {
-                            triggerTemporaryExpanded("You: ${event.text}")
+                        if (event.role == "Gemini") {
+                            isAiSpeaking = true
+                            aiCaption = event.text
+                            pushStateUpdate()
+                        } else {
+                            isAiSpeaking = false
+                            pushStateUpdate()
                         }
                     }
+                    is AssistantEvent.TurnComplete -> {
+                        isAiSpeaking = false
+                        aiCaption = null
+                        pushStateUpdate()
+                    }
+                    is AssistantEvent.ConnectionStateChanged -> {
+                        currentConnectionState = event.state
+                        isReconnecting = (event.state == ConnectionState.CONNECTING)
+                        pushStateUpdate()
+                    }
                     is AssistantEvent.ErrorOccurred -> {
-                        hasActiveError = true
-                        triggerTemporaryExpanded("Error: ${event.message}")
+                        activeError = event.message
+                        pushStateUpdate()
+                        temporaryErrorJob?.cancel()
+                        temporaryErrorJob = serviceScope.launch {
+                            delay(4000)
+                            activeError = null
+                            pushStateUpdate()
+                        }
                     }
                     else -> {}
                 }
             }
         }
 
-        // 4. Observe Live RMS Flow
+        // 4. Automation Event Bus (Android & Windows Actions)
         serviceScope.launch {
-            ChatViewModel.rmsFlow.collect { rms ->
-                capsuleView?.updateRms(rms)
+            AutomationEventBus.events.collectLatest { event ->
+                when (event) {
+                    is AutomationEvent.ActionStarted,
+                    is AutomationEvent.PlanningStarted,
+                    is AutomationEvent.ObservationStarted,
+                    is AutomationEvent.VerificationStarted,
+                    is AutomationEvent.TypingStarted -> {
+                        val parsed = HudStateMapper.parseAutomationEvent(event)
+                        activeToolName = parsed.first
+                        activeToolDescription = parsed.second
+                        isWindowsAgent = parsed.third
+                        pushStateUpdate()
+                    }
+                    is AutomationEvent.ExecutionFinished,
+                    is AutomationEvent.ExecutionCancelled -> {
+                        activeToolName = null
+                        activeToolDescription = null
+                        toolProgress = null
+                        pushStateUpdate()
+                    }
+                    else -> {}
+                }
+            }
+        }
+
+        // 5. Live RMS Flow from ChatViewModel
+        serviceScope.launch {
+            ChatViewModel.rmsFlow.collectLatest { rms ->
+                currentRms = rms
+                hudOverlayView?.updateRms(rms)
             }
         }
     }
 
-    private fun triggerTemporaryExpanded(caption: String) {
-        isTemporaryExpanded = true
-        temporaryTextPayload = caption
-        refreshState()
+    private fun pushStateUpdate() {
+        val settings = SettingsManager(this)
+        currentModelMode = GeminiModelMode.fromString(settings.modelRoutingMode)
 
-        temporaryCollapseJob?.cancel()
-        temporaryCollapseJob = serviceScope.launch {
-            delay(3500)
-            isTemporaryExpanded = false
-            hasActiveError = false
-            temporaryTextPayload = null
-            refreshState()
-        }
-    }
-
-    private fun refreshState() {
-        val resolved = resolveCapsuleState(
-            isMaxForeground = MyApplication.isMaxForeground.value,
+        val resolved = HudStateMapper.mapState(
             sessionState = currentSessionState,
+            connectionState = currentConnectionState,
+            currentModelMode = currentModelMode,
             isAiSpeaking = isAiSpeaking,
-            hasActiveError = hasActiveError,
-            isTemporaryExpanded = isTemporaryExpanded
+            activeError = activeError,
+            isReconnecting = isReconnecting,
+            reconnectingMessage = if (isReconnecting) "Reconnecting..." else null,
+            activeToolName = activeToolName,
+            activeToolDescription = activeToolDescription,
+            isWindowsAgent = isWindowsAgent,
+            toolProgress = toolProgress,
+            rms = currentRms,
+            aiCaption = aiCaption
         )
 
-        capsuleView?.updateState(resolved, temporaryTextPayload)
+        hudOverlayView?.updateState(resolved)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "Destroying MaxCapsuleOverlayService...")
         serviceScope.cancel()
-        temporaryCollapseJob?.cancel()
+        temporaryErrorJob?.cancel()
 
-        capsuleView?.destroy()
-        capsuleView?.let { view ->
+        hudOverlayView?.destroy()
+        hudOverlayView?.let { view ->
             try {
                 if (view.isAttachedToWindow) {
                     windowManager?.removeView(view)
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Error removing capsule view on destroy", e)
+                Log.w(TAG, "Error removing HUD view on destroy", e)
             }
         }
-        capsuleView = null
+        hudOverlayView = null
     }
 
     companion object {
@@ -273,13 +404,13 @@ class MaxCapsuleOverlayService : Service() {
             isAiSpeaking: Boolean,
             hasActiveError: Boolean,
             isTemporaryExpanded: Boolean
-        ): CapsuleState {
-            if (isMaxForeground) return CapsuleState.HIDDEN
-            if (isAiSpeaking || sessionState == SessionState.STREAMING_AUDIO) return CapsuleState.SPEAKING
-            if (isTemporaryExpanded || hasActiveError) return CapsuleState.EXPANDED
-            if (sessionState == SessionState.TOOL_EXECUTION) return CapsuleState.PROCESSING
-            if (sessionState == SessionState.LISTENING) return CapsuleState.LISTENING
-            return CapsuleState.IDLE
+        ): com.example.ui.overlay.CapsuleState {
+            if (isMaxForeground) return com.example.ui.overlay.CapsuleState.HIDDEN
+            if (isAiSpeaking || sessionState == SessionState.STREAMING_AUDIO) return com.example.ui.overlay.CapsuleState.SPEAKING
+            if (isTemporaryExpanded || hasActiveError) return com.example.ui.overlay.CapsuleState.EXPANDED
+            if (sessionState == SessionState.TOOL_EXECUTION) return com.example.ui.overlay.CapsuleState.PROCESSING
+            if (sessionState == SessionState.LISTENING) return com.example.ui.overlay.CapsuleState.LISTENING
+            return com.example.ui.overlay.CapsuleState.IDLE
         }
     }
 }

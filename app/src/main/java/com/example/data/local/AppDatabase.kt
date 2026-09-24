@@ -20,15 +20,20 @@ import com.example.memory.data.PermanentMemory
 import com.example.memory.data.PermanentMemoryDao
 import com.example.rag.data.RagChunkEntity
 import com.example.rag.data.RagChunkDao
+import com.example.license.storage.LicenseStateEntity
+import com.example.license.storage.LicenseStateDao
+import com.example.firebase.cache.FirebaseLicenseCacheEntity
+import com.example.firebase.cache.FirebaseLicenseCacheDao
 
 @Database(
     entities = [
         ChatMessage::class, Reminder::class, AutoReplyRule::class, 
         ActionReward::class, InstalledApp::class, ScheduledTask::class, 
         TaskExecutionLog::class, PeriodLog::class, PermanentMemory::class,
-        MemorySyncState::class, RagChunkEntity::class
+        MemorySyncState::class, RagChunkEntity::class, LicenseStateEntity::class,
+        FirebaseLicenseCacheEntity::class
     ], 
-    version = 16, 
+    version = 18, 
     exportSchema = false
 )
 @TypeConverters(SchedulerTypeConverters::class, MemoryTypeConverters::class)
@@ -43,6 +48,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun permanentMemoryDao(): PermanentMemoryDao
     abstract fun memorySyncStateDao(): MemorySyncStateDao
     abstract fun ragChunkDao(): RagChunkDao
+    abstract fun licenseStateDao(): LicenseStateDao
+    abstract fun firebaseLicenseCacheDao(): FirebaseLicenseCacheDao
 
     companion object {
         val MIGRATION_9_10 = object : Migration(9, 10) {
@@ -155,6 +162,41 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `license_state` (
+                        `id` INTEGER PRIMARY KEY NOT NULL,
+                        `rawSignedLicenseJson` TEXT,
+                        `lastSeenWallClockEpochMillis` INTEGER,
+                        `trialStartElapsedRealtime` INTEGER,
+                        `trialStartWallClockEpochMillis` INTEGER,
+                        `cachedRevokedIdsJson` TEXT NOT NULL
+                    )
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `firebase_license_cache` (
+                        `userId` TEXT NOT NULL,
+                        `plan` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `trialStartedAtEpochMillis` INTEGER,
+                        `trialExpiresAtEpochMillis` INTEGER,
+                        `expiresAtEpochMillis` INTEGER,
+                        `issuedAtEpochMillis` INTEGER NOT NULL,
+                        `updatedAtEpochMillis` INTEGER NOT NULL,
+                        `cachedAtEpochMillis` INTEGER NOT NULL,
+                        `integrityHash` TEXT NOT NULL,
+                        PRIMARY KEY(`userId`)
+                    )
+                """.trimIndent())
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -165,7 +207,12 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "jarvis_database"
                 )
-                .addMigrations(MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
+                .addMigrations(
+                    MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, 
+                    MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, 
+                    MIGRATION_17_18
+                )
+                .allowMainThreadQueries()
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance

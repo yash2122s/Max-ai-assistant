@@ -1,48 +1,49 @@
 package com.example.ui.theme
 
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.lightColorScheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.dp
 
 // MAX Official Design Tokens
 object MaxTokens {
-    val CardRadius = 16.dp
-    val ButtonRadius = 12.dp
-    val InputRadius = 12.dp
-    val ScreenPadding = 20.dp
-    val ElementSpacing = 12.dp
-    val ButtonHeight = 52.dp
+    val CardRadius = 20.dp
+    val ButtonRadius = 14.dp
+    val InputRadius = 14.dp
+    val ScreenPadding = 16.dp
+    val ElementSpacing = 14.dp
+    val ButtonHeight = 50.dp
 }
 
-private val LightColorScheme =
-    lightColorScheme(
-        primary = MaxPrimary,
-        onPrimary = OnPrimaryLight,
-        secondary = MaxAccent,
-        onSecondary = OnPrimaryLight,
-        background = MaxBgDark,
-        onBackground = MaxTextPrimary,
-        surface = MaxSurfaceDark,
-        onSurface = MaxTextPrimary,
-        surfaceVariant = MaxSurfaceVariant,
-        onSurfaceVariant = MaxTextSecondary,
-        outline = MaxBorder,
-        outlineVariant = MaxBorder,
-        error = MaxError,
-        onError = OnPrimaryLight
-    )
+private val RoyalDarkColorScheme = darkColorScheme(
+    primary = MaxPrimaryRoyal,
+    onPrimary = MaxTextPrimary,
+    secondary = MaxAccentCyan,
+    onSecondary = MaxBaseDark,
+    tertiary = MaxRoyalGold,
+    onTertiary = MaxBaseDark,
+    background = MaxBaseDark,
+    onBackground = MaxTextPrimary,
+    surface = MaxSurfaceCard,
+    onSurface = MaxTextPrimary,
+    surfaceVariant = MaxSurfaceElevated,
+    onSurfaceVariant = MaxTextSecondary,
+    outline = MaxBorderHairline,
+    outlineVariant = MaxBorderHairline,
+    error = MaxDestructiveApple,
+    onError = MaxTextPrimary
+)
 
 /**
- * Primary MAX Theme for Jetpack Compose.
- * Clean, high-contrast White Light Theme with vibrant royal blue & indigo accents.
+ * Flagship MAX iOS-Native Theme for Jetpack Compose.
+ * Deep obsidian dark luxury background with titanium cyan and cyber royal blue accents.
  */
 @Composable
 fun MaxTheme(
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
-        colorScheme = LightColorScheme,
+        colorScheme = RoyalDarkColorScheme,
         typography = Typography,
         content = content
     )
@@ -53,9 +54,10 @@ fun MaxTheme(
  */
 @Composable
 fun MyApplicationTheme(
-    darkTheme: Boolean = false,
+    darkTheme: Boolean = true,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     MaxTheme(content = content)
 }
+

@@ -4,6 +4,8 @@ import android.content.Context
 import android.util.Log
 import com.example.data.preferences.SettingsManager
 
+import com.example.network.model.UiAgentModels
+
 data class SelectedProvider(
     val provider: UiAgentProvider,
     val apiKey: String,
@@ -15,7 +17,7 @@ data class SelectedProvider(
  *
  * Priority:
  * 1. OpenRouter (Primary) -> stealth/ox-alpha or user-selected model
- * 2. Gemini Live (Fallback) -> gemini-2.0-flash
+ * 2. Gemini Live / REST (Fallback) -> gemini-2.5-flash (centralized in UiAgentModels)
  */
 class UiAgentRouter(private val context: Context) {
 
@@ -33,22 +35,27 @@ class UiAgentRouter(private val context: Context) {
 
         // 1. Primary: OpenRouter if configured
         if (openRouterKey.isNotBlank()) {
-            Log.d(TAG, "Routing to OpenRouter with model '$openRouterModel'")
+            val sanitizedModel = if (openRouterModel.contains("gemini", ignoreCase = true)) {
+                UiAgentModels.sanitizeModelName(openRouterModel)
+            } else {
+                openRouterModel
+            }
+            Log.d(TAG, "Routing to OpenRouter with model '$sanitizedModel'")
             return SelectedProvider(
                 provider = openRouterProvider,
                 apiKey = openRouterKey,
-                model = openRouterModel
+                model = sanitizedModel
             )
         }
 
         // 2. Fallback: Gemini UI Agent
         val geminiKey = settings.geminiApiKey
         if (geminiKey.isNotBlank()) {
-            Log.d(TAG, "OpenRouter unconfigured; Falling back to Gemini UI Agent")
+            Log.d(TAG, "OpenRouter unconfigured; Falling back to Gemini UI Agent (${UiAgentModels.GEMINI_UI_AGENT_DEFAULT})")
             return SelectedProvider(
                 provider = geminiProvider,
                 apiKey = geminiKey,
-                model = GeminiUiAgentProvider.DEFAULT_MODEL
+                model = UiAgentModels.GEMINI_UI_AGENT_DEFAULT
             )
         }
 

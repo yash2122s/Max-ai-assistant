@@ -171,15 +171,21 @@ class ActionAuthorizerUnitTest {
 
     @Test
     fun testSaveMemory_OrdinaryStatements_Blocked() {
-        assertFalse(ActionAuthorizer.authorizeAction("My name is Yashwanth", "SAVE_MEMORY").authorized)
-        assertFalse(ActionAuthorizer.authorizeAction("I am Yashwanth", "SAVE_MEMORY").authorized)
-        assertFalse(ActionAuthorizer.authorizeAction("Yashwanth", "SAVE_MEMORY").authorized)
         assertFalse(ActionAuthorizer.authorizeAction("What is my name?", "SAVE_MEMORY").authorized)
-        assertFalse(ActionAuthorizer.authorizeAction("I like mangoes", "SAVE_MEMORY").authorized)
-        assertFalse(ActionAuthorizer.authorizeAction("I prefer Android", "SAVE_MEMORY").authorized)
-        assertFalse(ActionAuthorizer.authorizeAction("My favorite color is blue", "SAVE_MEMORY").authorized)
-        assertFalse(ActionAuthorizer.authorizeAction("My phone is Samsung", "SAVE_MEMORY").authorized)
-        assertFalse(ActionAuthorizer.authorizeAction("I live in Bhimavaram", "SAVE_MEMORY").authorized)
+        assertFalse(ActionAuthorizer.authorizeAction("Naa peru enti?", "SAVE_MEMORY").authorized)
+        assertFalse(ActionAuthorizer.authorizeAction("What's the weather today?", "SAVE_MEMORY").authorized)
+        assertFalse(ActionAuthorizer.authorizeAction("What is on my screen?", "SAVE_MEMORY").authorized)
+        assertFalse(ActionAuthorizer.authorizeAction("Open WhatsApp", "SAVE_MEMORY").authorized)
+    }
+
+    @Test
+    fun testSaveMemory_NameAndUserIntroductions_Authorized() {
+        assertTrue(ActionAuthorizer.authorizeAction("My name is Yashwanth", "SAVE_MEMORY").authorized)
+        assertTrue(ActionAuthorizer.authorizeAction("Hello. My name is Yashwanth.", "SAVE_MEMORY").authorized)
+        assertTrue(ActionAuthorizer.authorizeAction("I am Yashwanth", "SAVE_MEMORY").authorized)
+        assertTrue(ActionAuthorizer.authorizeAction("memory lo na name save chesuko", "SAVE_MEMORY").authorized)
+        assertTrue(ActionAuthorizer.authorizeAction("Naa peru Ashwin, gurtupettuko.", "SAVE_MEMORY").authorized)
+        assertTrue(ActionAuthorizer.authorizeAction("gurthupettukonna name yaswanth", "SAVE_MEMORY").authorized)
     }
 
     @Test

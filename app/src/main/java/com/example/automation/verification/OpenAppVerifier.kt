@@ -128,6 +128,9 @@ class OpenAppVerifier : Verifier {
         if (snapshotPkg.isNotEmpty()) return snapshotPkg
 
         // Fallback 1: Live accessibility root node
+        val activeRootPkg = com.example.service.JarvisAccessibilityService.getActiveRoot()?.packageName?.toString()?.trim().orEmpty()
+        if (activeRootPkg.isNotEmpty()) return activeRootPkg
+
         val service = com.example.service.JarvisAccessibilityService.instance
         val livePkg = service?.rootInActiveWindow?.packageName?.toString()?.trim().orEmpty()
         if (livePkg.isNotEmpty()) return livePkg

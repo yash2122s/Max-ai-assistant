@@ -146,33 +146,56 @@ object InstalledAppsRepository {
         }
     }
 
+    private val IGNORED_ASSISTANT_NAMES = setOf("max", "jarvis", "max ai", "assistant", "ai assistant", "max assistant")
+    private val IGNORED_ASSISTANT_PACKAGES = setOf("com.maxaiagent.yash", "com.aistudio.jarvis.vqzrtp", "com.example", "com.example.max")
+
     fun extractAndMatchApp(context: Context? = null, intent: String): String? {
-        val cleanIntent = intent.trim().lowercase()
-        if (cleanIntent.isBlank()) return null
+        val rawClean = intent.trim().lowercase()
+        if (rawClean.isBlank()) return null
 
-        val apps = getApps(context)
+        // Strip common leading wake-words (e.g., "max, ", "hey max ", "jarvis: ")
+        val cleanIntent = rawClean
+            .replaceFirst(Regex("""^(?:hey\s+|hi\s+|ok\s+)?(?:max|jarvis)[,\s:]*"""), "")
+            .trim()
+            .ifEmpty { rawClean }
 
-        // 1. Direct package name or app name in intent
-        for (app in apps) {
-            val appNameLower = app.appName.lowercase()
-            val pkgLower = app.packageName.lowercase()
-            if (pkgLower.isNotBlank() && cleanIntent.contains(pkgLower)) {
-                return app.packageName
-            }
-            if (appNameLower.isNotBlank() && cleanIntent.contains(appNameLower)) {
-                return app.packageName
-            }
-        }
-
-        // 2. Check alias map matches within intent
+        // 1. Check alias map matches first (high precision curated aliases)
         for ((aliasKey, aliasPkg) in aliases) {
             val pattern = "\\b${Regex.escape(aliasKey)}\\b".toRegex(RegexOption.IGNORE_CASE)
-            if (pattern.containsMatchIn(cleanIntent) || cleanIntent.contains(aliasKey)) {
+            if (pattern.containsMatchIn(cleanIntent) || pattern.containsMatchIn(rawClean)) {
                 return aliasPkg
             }
         }
 
-        // 3. Fallback: try findApp on full intent
+        val apps = getApps(context).filter { app ->
+            val appNameLower = app.appName.lowercase().trim()
+            val pkgLower = app.packageName.lowercase().trim()
+            appNameLower !in IGNORED_ASSISTANT_NAMES &&
+            pkgLower !in IGNORED_ASSISTANT_PACKAGES &&
+            (context == null || pkgLower != context.packageName)
+        }
+
+        // 2. Match package names in intent
+        for (app in apps) {
+            val pkgLower = app.packageName.lowercase()
+            if (pkgLower.isNotBlank() && (cleanIntent.contains(pkgLower) || rawClean.contains(pkgLower))) {
+                return app.packageName
+            }
+        }
+
+        // 3. Match app names in intent (longer names first to prevent partial matches, using word boundaries)
+        val sortedApps = apps.sortedByDescending { it.appName.length }
+        for (app in sortedApps) {
+            val appNameLower = app.appName.lowercase()
+            if (appNameLower.length >= 3) {
+                val pattern = "\\b${Regex.escape(appNameLower)}\\b".toRegex(RegexOption.IGNORE_CASE)
+                if (pattern.containsMatchIn(cleanIntent) || pattern.containsMatchIn(rawClean)) {
+                    return app.packageName
+                }
+            }
+        }
+
+        // 4. Fallback: try findApp on clean intent
         return findApp(context, cleanIntent)
     }
 

@@ -32,7 +32,15 @@ data class HomeUiState(
     val messages: List<ChatMessageItem> = emptyList(),
     val error: String? = null,
     val pendingAutomation: JSONObject? = null
-)
+) {
+    val edgeLightingState: com.example.ui.theme.EdgeLightingState
+        get() = when {
+            isAiSpeaking -> com.example.ui.theme.EdgeLightingState.SPEAKING
+            isRecording -> com.example.ui.theme.EdgeLightingState.LISTENING
+            isThinking -> com.example.ui.theme.EdgeLightingState.THINKING
+            else -> com.example.ui.theme.EdgeLightingState.IDLE
+        }
+}
 
 /**
  * One-shot UI side-effect events emitted via SharedFlow.

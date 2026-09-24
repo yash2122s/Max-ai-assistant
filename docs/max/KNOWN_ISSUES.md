@@ -14,7 +14,7 @@
 | ID | Issue | Location | Impact |
 |----|-------|----------|--------|
 | H-01 | `JarvisAccessibilityService.pendingTask` is a static mutable var — not thread-safe; concurrent automation calls can corrupt task state | `service/JarvisAccessibilityService.kt:26` | Race condition / wrong task executed |
-| H-02 | `sanitizeModelName()` ignores `liveVoiceModelName` setting and always returns `gemini-3.1-flash-live-preview` — user model preference silently ignored | `network/GeminiWebSocketClient.kt:48-50` | Feature broken silently |
+| H-02 | [RESOLVED ✅] `sanitizeModelName()` now properly sanitizes and respects `liveVoiceModelName`, defaulting to `gemini-3.8-live` with fallback | `network/GeminiWebSocketClient.kt` | Resolved |
 | H-03 | `ActionDispatcher` uses `runBlocking` in some code paths — potential ANR on main thread if called from UI | `automation/engine/ActionDispatcher.kt` | ANR / freeze |
 | H-04 | `ChatViewModel._instance` is a static singleton with `Context` field — classic Android context leak | `viewmodel/ChatViewModel.kt:25-32` | Memory leak |
 

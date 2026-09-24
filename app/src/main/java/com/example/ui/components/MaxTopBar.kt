@@ -1,18 +1,24 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.ui.theme.MaxBgDark
-import com.example.ui.theme.MaxTextMuted
-import com.example.ui.theme.MaxTextPrimary
+import com.example.ui.theme.*
 
+/**
+ * iOS-Style Translucent Navigation Top Bar with SF Pro Typography and Hairline Border.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MaxTopBar(
@@ -24,59 +30,76 @@ fun MaxTopBar(
     navigationIcon: (@Composable () -> Unit)? = null,
     actions: @Composable RowScope.() -> Unit = {}
 ) {
-    TopAppBar(
-        title = {
-            if (subtitle != null) {
-                androidx.compose.foundation.layout.Column {
-                    Text(
-                        text = title,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp,
-                        color = MaxTextPrimary
-                    )
-                    Text(
-                        text = subtitle,
-                        fontWeight = FontWeight.Normal,
-                        fontSize = 12.sp,
-                        color = MaxTextMuted
-                    )
-                }
-            } else {
-                Text(
-                    text = title,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = MaxTextPrimary
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaxBaseDark
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            TopAppBar(
+                title = {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Text(
+                            text = title,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 18.sp,
+                            color = MaxTextPrimary,
+                            letterSpacing = (-0.3).sp
+                        )
+                        if (subtitle != null) {
+                            Text(
+                                text = subtitle,
+                                fontWeight = FontWeight.Normal,
+                                fontSize = 12.sp,
+                                color = MaxTextTertiary,
+                                letterSpacing = (-0.1).sp
+                            )
+                        }
+                    }
+                },
+                navigationIcon = {
+                    if (navigationIcon != null) {
+                        navigationIcon()
+                    } else if (onBackClick != null) {
+                        IconButton(
+                            onClick = onBackClick,
+                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f, onClick = onBackClick)
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
+                                contentDescription = "Back",
+                                tint = MaxPrimaryRoyal,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    } else if (onMenuClick != null) {
+                        IconButton(
+                            onClick = onMenuClick,
+                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f, onClick = onMenuClick)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Menu,
+                                contentDescription = "Menu",
+                                tint = MaxTextPrimary,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                    }
+                },
+                actions = actions,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaxBaseDark,
+                    titleContentColor = MaxTextPrimary,
+                    actionIconContentColor = MaxPrimaryRoyal
                 )
-            }
-        },
-        navigationIcon = {
-            if (navigationIcon != null) {
-                navigationIcon()
-            } else if (onBackClick != null) {
-                IconButton(onClick = onBackClick) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = MaxTextPrimary
-                    )
-                }
-            } else if (onMenuClick != null) {
-                IconButton(onClick = onMenuClick) {
-                    Icon(
-                        imageVector = Icons.Default.Menu,
-                        contentDescription = "Menu",
-                        tint = MaxTextPrimary
-                    )
-                }
-            }
-        },
-        actions = actions,
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaxBgDark,
-            titleContentColor = MaxTextPrimary,
-            actionIconContentColor = MaxTextPrimary
-        ),
-        modifier = modifier
-    )
+            )
+            HorizontalDivider(
+                color = MaxBorderHairline.copy(alpha = 0.6f),
+                thickness = MaxDimensions.borderHairline
+            )
+        }
+    }
 }
+

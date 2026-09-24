@@ -80,6 +80,7 @@ class AssistantEngine(private val context: Context) {
                             "send_whatsapp_message" -> "SEND_WHATSAPP"
                             "click_element" -> "CLICK_TEXT"
                             "scroll_screen" -> "SCROLL_SCREEN"
+                            "computer_use", "ui_agent" -> "COMPUTER_USE"
                             "flashlight" -> {
                                 val state = jsonObj.optBoolean("enabled", true)
                                 if (state) "FLASHLIGHT_ON" else "FLASHLIGHT_OFF"
@@ -128,7 +129,10 @@ class AssistantEngine(private val context: Context) {
                         com.example.automation.engine.GoalPlanner.resolveFastPathPlan(effectiveGoal, context)
                     } else null
 
-                    val executionResult = if (normalizedAction == "TASK_INTENT" || functionName == "task_intent") {
+                    val executionResult = if (normalizedAction == "COMPUTER_USE" || functionName == "computer_use" || functionName == "ui_agent") {
+                        android.util.Log.d("AssistantEngine", "[VOICE_COMPUTER_USE] Dispatching computer_use directly to ActionDispatcher.")
+                        com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, normalizedJson)
+                    } else if (normalizedAction == "TASK_INTENT" || functionName == "task_intent") {
                         android.util.Log.d("AssistantEngine", "[VOICE_TASK_INTENT] Dispatching task_intent directly to ActionDispatcher for background orchestration.")
                         com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, normalizedJson)
                     } else if (fastPathPlan != null && fastPathPlan.isNotEmpty()) {
@@ -285,6 +289,12 @@ class AssistantEngine(private val context: Context) {
                 responseTimeoutJob = null
                 audioProcessor.reset()
                 streamingResponseManager.handleTurnComplete()
+            },
+            onThoughtSummaryDelta = { delta, fullSummary ->
+                AssistantEventBus.emit(AssistantEvent.ThoughtSummaryDelta(delta, fullSummary))
+            },
+            onInteractionStatusChanged = { status ->
+                AssistantEventBus.emit(AssistantEvent.InteractionStatusChanged(status))
             }
         )
 
@@ -357,9 +367,40 @@ class AssistantEngine(private val context: Context) {
         conversationManager.addMessage("You", userText)
         AssistantEventBus.emit(AssistantEvent.TextTranscribed("You", userText))
 
-        // Check real-time Memory Fact retrieval
-        if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(userText)) {
-            CoroutineScope(Dispatchers.IO).launch {
+        val app = context.applicationContext as? com.example.MyApplication
+        val gate = app?.entitlementGate
+
+        // Voice quota gate check and real-time Memory Fact saving or retrieval
+        CoroutineScope(Dispatchers.IO).launch {
+            val quotaDecision = gate?.checkAndConsumeQuota() ?: com.example.firebase.manager.GateDecision.AllowLifetime
+            if (!quotaDecision.isAllowed) {
+                val blockMsg = when (quotaDecision) {
+                    is com.example.firebase.manager.GateDecision.BlockDailyLimitReached ->
+                        "Daily free limit reached (${quotaDecision.messageCountToday}/10 messages). Upgrade to Premium to continue."
+                    is com.example.firebase.manager.GateDecision.BlockTrialExpired ->
+                        "Your 3-day free trial has ended. Activate MAX Premium to continue."
+                    else -> "Usage limit reached. Activate MAX Premium."
+                }
+                streamingResponseManager.stopAllPlayback()
+                connectionManager.sendInterruptionSignal()
+                conversationManager.addMessage("MAX", blockMsg)
+                AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", blockMsg))
+                AssistantEventBus.emit(AssistantEvent.ErrorOccurred(ErrorType.PERMISSION, blockMsg))
+                return@launch
+            }
+
+            val saveResult = com.example.memory.retrieval.MemoryFactResolver.extractAndSaveMemoryFact(context, userText)
+            if (saveResult != null) {
+                android.util.Log.i("AssistantEngine", "[VOICE_MEMORY_DIRECT_SAVE] Saved fact for '$userText': $saveResult")
+                streamingResponseManager.stopAllPlayback()
+                responseTimeoutJob?.cancel()
+                responseTimeoutJob = null
+                conversationManager.addMessage("MAX", saveResult)
+                AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", saveResult))
+                return@launch
+            }
+
+            if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(userText)) {
                 val factResult = com.example.memory.retrieval.MemoryFactResolver.resolve(context, userText)
                 if (factResult != null && factResult.found) {
                     android.util.Log.i("AssistantEngine", "[MEMORY_DIRECT_RESOLVE] Resolved memory fact for '$userText': ${factResult.responseText}")
@@ -494,6 +535,28 @@ class AssistantEngine(private val context: Context) {
             android.util.Log.w("AssistantEngine", "[SECURITY_GATE] Gemini API Key is missing. Cannot start listening.")
             return
         }
+
+        // License & Entitlement Gate Pre-Check
+        val app = context.applicationContext as? com.example.MyApplication
+        val gate = app?.entitlementGate
+        val voiceDecision = gate?.canStartVoiceSession() ?: com.example.firebase.manager.GateDecision.AllowLifetime
+        if (!voiceDecision.isAllowed) {
+            val blockMsg = when (voiceDecision) {
+                is com.example.firebase.manager.GateDecision.BlockDailyLimitReached ->
+                    "Daily free limit reached (${voiceDecision.messageCountToday}/10 messages). Upgrade to Premium to continue."
+                is com.example.firebase.manager.GateDecision.BlockTrialExpired ->
+                    "Your 3-day free trial has ended. Activate MAX Premium to continue."
+                is com.example.firebase.manager.GateDecision.BlockNotAuthenticated ->
+                    "Please sign in with Google to use MAX."
+                else -> "Usage limit reached. Activate MAX Premium."
+            }
+            android.util.Log.w("AssistantEngine", "[LICENSE_GATE] Voice session BLOCKED: $blockMsg")
+            conversationManager.addMessage("MAX", blockMsg)
+            AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", blockMsg))
+            AssistantEventBus.emit(AssistantEvent.ErrorOccurred(ErrorType.PERMISSION, blockMsg))
+            return
+        }
+
         if (!audioStateGuard.tryBeginStarting()) {
             android.util.Log.d("AssistantEngine", "startListening rejected: AudioStateGuard is in state ${audioStateGuard.getState()}")
             return
@@ -505,6 +568,7 @@ class AssistantEngine(private val context: Context) {
         
         // Interrupt Gemini audio playback if user starts speaking (barge-in)
         streamingResponseManager.handleUserSpeaking()
+        connectionManager.sendInterruptionSignal()
 
         android.util.Log.d("VoiceLatency", "[VoiceLatency] speech_start ts=${System.currentTimeMillis()}")
         stateMachine.transitionTo(SessionState.LISTENING)
@@ -549,6 +613,9 @@ class AssistantEngine(private val context: Context) {
     }
 
     fun sendTextMessage(userText: String, promptText: String = userText) {
+        val app = context.applicationContext as? com.example.MyApplication
+        val gate = app?.entitlementGate
+
         // Intercept deterministic UI commands locally without Gemini
         if (com.example.automation.engine.SemanticUiCommandParser.isDeterministicPrimitive(userText) ||
             com.example.automation.engine.GoalPlanner.resolveFastPathPlan(userText, context) != null) {
@@ -556,6 +623,7 @@ class AssistantEngine(private val context: Context) {
             conversationManager.addMessage("You", userText)
             AssistantEventBus.emit(AssistantEvent.TextTranscribed("You", userText))
             CoroutineScope(Dispatchers.IO).launch {
+                gate?.checkAndConsumeQuota()
                 val planResult = com.example.automation.engine.GoalPlanner.planAndExecute(context, userText)
                 android.util.Log.i("AssistantEngine", "[DETERMINISTIC_TEXT_RESULT] Finished local execution for '$userText': success=${planResult.success}, error=${planResult.errorMessage}")
                 val replyMessage = if (planResult.success) {
@@ -569,11 +637,24 @@ class AssistantEngine(private val context: Context) {
             return
         }
 
-        // Intercept personal memory queries directly
-        if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(userText)) {
-            CoroutineScope(Dispatchers.IO).launch {
+        // Intercept memory fact saving directly
+        CoroutineScope(Dispatchers.IO).launch {
+            val saveResult = com.example.memory.retrieval.MemoryFactResolver.extractAndSaveMemoryFact(context, userText)
+            if (saveResult != null) {
+                gate?.checkAndConsumeQuota()
+                android.util.Log.i("AssistantEngine", "[MEMORY_DIRECT_TEXT_SAVE] Saved fact for '$userText': $saveResult")
+                conversationManager.addMessage("You", userText)
+                AssistantEventBus.emit(AssistantEvent.TextTranscribed("You", userText))
+                conversationManager.addMessage("MAX", saveResult)
+                AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", saveResult))
+                return@launch
+            }
+
+            // Intercept personal memory queries directly
+            if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(userText)) {
                 val factResult = com.example.memory.retrieval.MemoryFactResolver.resolve(context, userText)
                 if (factResult != null && factResult.found) {
+                    gate?.checkAndConsumeQuota()
                     android.util.Log.i("AssistantEngine", "[MEMORY_DIRECT_TEXT_RESOLVE] Resolved memory fact for '$userText': ${factResult.responseText}")
                     conversationManager.addMessage("You", userText)
                     AssistantEventBus.emit(AssistantEvent.TextTranscribed("You", userText))
@@ -581,19 +662,16 @@ class AssistantEngine(private val context: Context) {
                     AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", factResult.responseText))
                     return@launch
                 }
-                // If not found in direct resolver, send to model with dynamic RAG
-                sendTextMessageToModel(userText, promptText)
             }
-            return
-        }
 
-        // Update Emotion Engine state based on incoming text message
-        val (detectedEmotionEvent, currentEmotion) = emotionEngine.processUserText(userText)
-        if (detectedEmotionEvent != null) {
-            android.util.Log.d("AssistantEngine", "[EMOTION_EVENT_TEXT] Detected: $detectedEmotionEvent | New state: ${currentEmotion.getDominantTraits()}")
-        }
+            // Update Emotion Engine state based on incoming text message
+            val (detectedEmotionEvent, currentEmotion) = emotionEngine.processUserText(userText)
+            if (detectedEmotionEvent != null) {
+                android.util.Log.d("AssistantEngine", "[EMOTION_EVENT_TEXT] Detected: $detectedEmotionEvent | New state: ${currentEmotion.getDominantTraits()}")
+            }
 
-        sendTextMessageToModel(userText, promptText)
+            sendTextMessageToModel(userText, promptText)
+        }
     }
 
     private fun sendTextMessageToModel(userText: String, promptText: String) {
@@ -623,6 +701,33 @@ class AssistantEngine(private val context: Context) {
         }
 
         CoroutineScope(Dispatchers.IO).launch {
+            // Central Entitlement & Daily Quota Gate Check
+            val app = context.applicationContext as? com.example.MyApplication
+            val gate = app?.entitlementGate
+            val decision = gate?.checkAndConsumeQuota() ?: com.example.firebase.manager.GateDecision.AllowLifetime
+            if (!decision.isAllowed) {
+                val blockMessage = when (decision) {
+                    is com.example.firebase.manager.GateDecision.BlockDailyLimitReached -> {
+                        "Daily free limit reached (${decision.messageCountToday}/10 messages). Upgrade to Premium to continue."
+                    }
+                    is com.example.firebase.manager.GateDecision.BlockTrialExpired -> {
+                        "Your 3-day free trial has ended. Activate MAX Premium to continue."
+                    }
+                    is com.example.firebase.manager.GateDecision.BlockNotAuthenticated -> {
+                        "Please sign in with your Google account to use MAX."
+                    }
+                    else -> "Message quota exceeded. Please activate MAX Premium."
+                }
+                android.util.Log.w("AssistantEngine", "[LICENSE_GATE] AI request BLOCKED: $blockMessage")
+                conversationManager.addMessage("MAX", blockMessage)
+                AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", blockMessage))
+                AssistantEventBus.emit(AssistantEvent.ErrorOccurred(ErrorType.PERMISSION, blockMessage))
+                val fallbackState = if (connectionManager.isConnected()) SessionState.CONNECTED else SessionState.IDLE
+                stateMachine.transitionTo(fallbackState)
+                responseTimeoutJob?.cancel()
+                return@launch
+            }
+
             val relevantMemories = try {
                 com.example.memory.data.MemoryRepository.getInstance(context).getRelevantMemories(userText)
             } catch (e: Exception) {
@@ -658,6 +763,7 @@ class AssistantEngine(private val context: Context) {
         responseTimeoutJob = null
         stopListening()
         streamingResponseManager.stopAllPlayback()
+        connectionManager.sendInterruptionSignal()
     }
 
     fun stop() {

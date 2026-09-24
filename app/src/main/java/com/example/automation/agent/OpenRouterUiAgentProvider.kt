@@ -54,9 +54,9 @@ class OpenRouterUiAgentProvider : UiAgentProvider {
                 isPreferred = false
             ),
             UiAgentModelInfo(
-                id = "google/gemini-2.0-flash-001",
-                name = "Gemini 2.0 Flash",
-                description = "Ultra-low latency multimodal execution",
+                id = "google/gemini-2.5-flash",
+                name = "Gemini 2.5 Flash",
+                description = "Ultra-low latency multimodal visual grounding and function calling",
                 supportsVision = true,
                 supportsToolCalling = true,
                 contextLength = 1000000,
@@ -211,7 +211,7 @@ class OpenRouterUiAgentProvider : UiAgentProvider {
                         "anthropic/claude-3-5-sonnet",
                         "openai/gpt-4o",
                         "openai/gpt-4o-mini",
-                        "google/gemini-2.0-flash-001",
+                        "google/gemini-2.5-flash",
                         "google/gemini-2.5-pro-preview-03-04",
                         "google/gemini-flash-1.5",
                         "qwen/qwen-2.5-vl-72b-instruct"
@@ -280,12 +280,19 @@ class OpenRouterUiAgentProvider : UiAgentProvider {
                 parseToolCallResponse(responseText)
             } else {
                 val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-                Log.w(TAG, "OpenRouter reasoning request failed with HTTP $responseCode: $errorBody")
-                UiAgentReasoningResult.Error("OpenRouter error ($responseCode): $errorBody", errorCode = "HTTP_$responseCode", retryable = true)
+                Log.w(TAG, "OpenRouter reasoning request failed with HTTP $responseCode ($targetModel): $errorBody")
+                val friendlyMessage = when (responseCode) {
+                    404 -> "Model '$targetModel' unavailable on OpenRouter."
+                    429 -> "OpenRouter rate limit or credit limit reached."
+                    401, 403 -> "OpenRouter authentication failed. Please verify API key."
+                    in 500..599 -> "OpenRouter service is experiencing high load."
+                    else -> "OpenRouter returned an error ($responseCode)."
+                }
+                UiAgentReasoningResult.Error(friendlyMessage, errorCode = "HTTP_$responseCode", retryable = (responseCode != 401 && responseCode != 403))
             }
         } catch (e: Exception) {
             Log.e(TAG, "OpenRouter reasoning network error", e)
-            UiAgentReasoningResult.Error("Network error: ${e.localizedMessage ?: "Failed to reach OpenRouter"}", errorCode = "NETWORK_ERROR", retryable = true)
+            UiAgentReasoningResult.Error("UI Agent network connection issue. Retrying...", errorCode = "NETWORK_ERROR", retryable = true)
         }
     }
 

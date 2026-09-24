@@ -77,3 +77,20 @@ windows-agent/test_profile/
 **/publish/
 *.user
 *.suo
+
+# MAX Offline License Generator & Secrets (Never commit keys or generator to app git repo)
+max-license/
+generator/
+**/keys/private.key
+*.maxlicense
+
+# Personal User Data Backups (Real WhatsApp messages, contacts, voice models)
+MAX_DATA_BACKUP/
+
+# Firebase Service Account Credentials & License Keys
+*serviceAccountKey*.json
+tools/license-generator/serviceAccountKey.json
+tools/license-generator/keys.json
+tools/license-generator/customers.csv
+
+

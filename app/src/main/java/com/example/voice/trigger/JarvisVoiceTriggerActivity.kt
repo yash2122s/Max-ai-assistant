@@ -4,41 +4,30 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import android.widget.Toast
 import com.example.MainActivity
-import com.example.voice.assistant.SystemAssistantManager
-import com.example.voice.session.JarvisVoiceInteractionService
+import com.example.ui.theme.MaxHaptics
 
+/**
+ * Android System Assistant / Voice Assist Entry Point.
+ * Triggered by hardware Power button long-press/double-press or digital assistant gesture.
+ * Immediately brings up MainActivity into active listening state with edge reveal animation.
+ */
 class JarvisVoiceTriggerActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.d("JarvisVoiceTriggerActivity", "Triggered via Assist Intent")
+        Log.d("JarvisVoiceTriggerActivity", "Triggered via Assist / Power-key binding Intent")
 
-        val service = JarvisVoiceInteractionService.instance
-        if (service != null) {
-            try {
-                service.showSession(Bundle(), 0)
-            } catch (e: Exception) {
-                Log.e("JarvisVoiceTriggerActivity", "Failed to show assistant session", e)
-                Toast.makeText(this, "Failed to trigger Assistant HUD", Toast.LENGTH_SHORT).show()
-            }
-        } else {
-            Toast.makeText(
-                this, 
-                "Please configure MAX AI Agent as your default digital assistant app", 
-                Toast.LENGTH_LONG
-            ).show()
-            try {
-                val intent = SystemAssistantManager.createSetDefaultAssistantIntent(this)
-                startActivity(intent)
-            } catch (e: Exception) {
-                Log.e("JarvisVoiceTriggerActivity", "Failed to open assistant settings", e)
-                val intent = Intent(this, MainActivity::class.java).apply {
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                }
-                startActivity(intent)
-            }
+        MaxHaptics.mediumImpact(this)
+
+        val intent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_ASSIST
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("extra_start_listening", true)
+            putExtra("trigger_source", "power_button")
+            putExtra("extra_open_reveal", true)
         }
+        startActivity(intent)
+        overridePendingTransition(0, 0)
         finish()
     }
 }

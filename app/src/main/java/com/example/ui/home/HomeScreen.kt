@@ -5,147 +5,63 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.*
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.offset
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.ChatBubbleOutline
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Menu
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.automation.activity.AgentActivityState
-import com.example.automation.activity.AgentActivityTracker
-import com.example.automation.activity.AgentStage
 import com.example.network.ConnectionState
-import com.example.ui.theme.AccentCyan
-import com.example.ui.theme.Emerald400
-import com.example.ui.theme.MaxAccent
-import com.example.ui.theme.MaxBgDark
-import com.example.ui.theme.MaxBgLight
-import com.example.ui.theme.MaxBorder
-import com.example.ui.theme.MaxPrimary
-import com.example.ui.theme.MaxSecondary
-import com.example.ui.theme.MaxSuccess
-import com.example.ui.theme.MaxSurface
-import com.example.ui.theme.MaxSurfaceDark
-import com.example.ui.theme.MaxSurfaceVariant
-import com.example.ui.theme.MaxTextMuted
-import com.example.ui.theme.MaxTextPrimary
-import com.example.ui.theme.MaxTextSecondary
-import com.example.ui.theme.NeonGold
-import com.example.ui.theme.NeonPink
+import com.example.network.model.GeminiModelMode
+import com.example.ui.components.*
+import com.example.ui.theme.*
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
 /**
- * Flagship Next-Gen Dashboard & AI Assistant Home Screen for MAX.
+ * Flagship MAX Digital Assistant Home Screen — Premium iOS-Inspired Redesign.
  * Features:
- * - Stunning Glassmorphic Header & Status Bar with Connection Pulse
- * - Immersive AI Greeting & Interactive Quick Action Cards Grid
- * - Smooth LazyColumn Conversation Feed with Markdown & Code formatting
- * - Compact Inline Agent Activity Card with Real-time Step Tracking
- * - Floating Modern Pill Composer with Quick Actions Drawer, Voice Waveform & AI Speech Sync
+ * - Minimal, elegant Apple-style top navigation bar with live status indicator.
+ * - Contextual greeting & Assistant Orb with horizontally scrollable Quick Action pills.
+ * - Open conversational layout with compact right-aligned user bubbles & left-aligned MAX text.
+ * - Compact Live Activity cards for tool execution.
+ * - Floating iOS-style input dock with voice waveform & tap-to-interrupt.
  */
 @Composable
 fun HomeScreen(
@@ -158,6 +74,9 @@ fun HomeScreen(
     val audioRms by viewModel.audioRms.collectAsStateWithLifecycle()
     val liveUserCaption by viewModel.liveUserCaption.collectAsStateWithLifecycle()
     val liveAiCaption by viewModel.liveAiCaption.collectAsStateWithLifecycle()
+    val edgeRevealTrigger by viewModel.edgeRevealTrigger.collectAsStateWithLifecycle()
+    val cloudLicense by viewModel.cloudLicense.collectAsStateWithLifecycle()
+    val dailyUsage by viewModel.dailyUsage.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
     val listState = rememberLazyListState()
@@ -168,7 +87,7 @@ fun HomeScreen(
     var inputText by remember { mutableStateOf("") }
     var showQuickPrompts by remember { mutableStateOf(false) }
 
-    // Floating "Scroll to bottom" badge detection
+    // Scroll-to-bottom badge state
     val isScrolledUp by remember {
         derivedStateOf {
             val totalItems = listState.layoutInfo.totalItemsCount
@@ -209,7 +128,12 @@ fun HomeScreen(
         }
     }
 
-    // Auto-scroll when new messages arrive if near bottom
+    // Auto-connect on screen display
+    LaunchedEffect(Unit) {
+        viewModel.ensureConnected()
+    }
+
+    // Auto-scroll on new message
     LaunchedEffect(uiState.messages.size, uiState.liveAiCaption) {
         if (uiState.messages.isNotEmpty() && !isScrolledUp) {
             listState.animateScrollToItem(uiState.messages.size - 1)
@@ -219,11 +143,16 @@ fun HomeScreen(
     Scaffold(
         modifier = modifier
             .fillMaxSize()
-            .background(MaxBgDark),
-        containerColor = MaxBgDark,
+            .background(MaxIOSColors.DarkBase)
+            .edgeRevealAnimation(triggerKey = edgeRevealTrigger)
+            .edgeLightingGlow(
+                state = uiState.edgeLightingState,
+                amplitude = audioRms
+            ),
+        containerColor = MaxIOSColors.DarkBase,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            FlagshipTopBar(
+            IOSTopBar(
                 isMaxEnabled = uiState.isMaxEnabled,
                 connectionState = uiState.connectionState,
                 onMenuClick = onOpenDrawer,
@@ -233,19 +162,37 @@ fun HomeScreen(
             )
         }
     ) { innerPadding ->
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
                 .navigationBarsPadding()
                 .imePadding()
         ) {
-            // Main Message Feed & Dashboard
+            TrialQuotaBanner(
+                license = cloudLicense,
+                dailyUsage = dailyUsage,
+                onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.LICENSE) }
+            )
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+            ) {
+                // Main Message Feed or Empty State
             if (uiState.messages.isEmpty() && liveAiCaption.isBlank() && !uiState.isThinking) {
-                FlagshipDashboardEmptyState(
+                IOSDashboardEmptyState(
                     onPromptSelected = { prompt ->
                         viewModel.sendTextMessage(prompt)
                     },
+                    onMicClick = {
+                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                    },
+                    audioRms = audioRms,
+                    isListening = uiState.isRecording,
+                    isThinking = uiState.isThinking,
+                    isSpeaking = uiState.isAiSpeaking,
                     onNavigateTo = onNavigateTo,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -254,44 +201,74 @@ fun HomeScreen(
                     state = listState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 14.dp),
+                        .padding(horizontal = 16.dp),
                     contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     items(
                         items = uiState.messages,
                         key = { it.id }
                     ) { msg ->
                         if (msg.isUser) {
-                            UserMessageBubble(
+                            IOSUserMessageBubble(
                                 message = msg,
                                 onCopyText = { copyToClipboard(context, msg.text) }
                             )
                         } else {
-                            MaxMessageBubble(
+                            IOSMaxMessageBubble(
                                 message = msg,
                                 onCopyText = { copyToClipboard(context, msg.text) }
                             )
                         }
                     }
 
-                    // Three-Dot Typing Indicator (when model is thinking)
+                    // Live AI Caption streaming chunk if active
+                    if (uiState.isAiSpeaking && liveAiCaption.isNotBlank()) {
+                        item(key = "live_ai_streaming") {
+                            MaxGlassSurface(
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                shape = MaxIOSShapes.ShapeLarge,
+                                backgroundColor = MaxIOSColors.DarkSurfaceGrouped.copy(alpha = 0.9f)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(14.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(MaxIOSColors.SystemTeal)
+                                    )
+                                    Text(
+                                        text = liveAiCaption,
+                                        color = MaxIOSColors.TextPrimaryDark,
+                                        fontSize = 15.sp,
+                                        lineHeight = 22.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Three-Dot Typing Indicator when thinking
                     if (uiState.isThinking && !uiState.isAiSpeaking) {
                         item(key = "typing_indicator") {
-                            FlagshipTypingIndicator()
+                            IOSTypingIndicator()
                         }
                     }
                 }
             }
 
             // Floating "Scroll to Bottom" Pill
-            AnimatedVisibility(
+            androidx.compose.animation.AnimatedVisibility(
                 visible = isScrolledUp,
                 enter = fadeIn() + scaleIn(),
                 exit = fadeOut() + scaleOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 104.dp)
+                    .padding(bottom = 84.dp)
             ) {
                 Surface(
                     onClick = {
@@ -301,42 +278,42 @@ fun HomeScreen(
                             }
                         }
                     },
-                    shape = CircleShape,
-                    color = MaxSurface,
-                    shadowElevation = 6.dp,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder)
+                    shape = MaxIOSShapes.ShapePill,
+                    color = MaxIOSColors.DarkSurfaceElevated,
+                    shadowElevation = 4.dp,
+                    border = androidx.compose.foundation.BorderStroke(0.5.dp, MaxIOSColors.HairlineDark)
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.KeyboardArrowDown,
                             contentDescription = "Scroll down",
-                            tint = MaxPrimary,
+                            tint = MaxIOSColors.SystemBlue,
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
                             text = "New messages",
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaxTextPrimary
+                            fontWeight = FontWeight.Medium,
+                            color = MaxIOSColors.TextPrimaryDark
                         )
                     }
                 }
             }
 
-            // Quick Prompt Suggestions Drawer (Opened by Plus Button)
-            AnimatedVisibility(
+            // Quick Actions Drawer (Opened by Plus Button)
+            androidx.compose.animation.AnimatedVisibility(
                 visible = showQuickPrompts,
                 enter = slideInVertically { it } + fadeIn(),
                 exit = slideOutVertically { it } + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 90.dp, start = 14.dp, end = 14.dp)
+                    .padding(bottom = 76.dp, start = 16.dp, end = 16.dp)
             ) {
-                QuickPromptsCard(
+                IOSQuickActionsCard(
                     onSelectPrompt = { prompt ->
                         showQuickPrompts = false
                         viewModel.sendTextMessage(prompt)
@@ -345,7 +322,7 @@ fun HomeScreen(
                 )
             }
 
-            // Flagship Floating Rounded Composer with bottom background scrim
+            // Floating iOS-Style Input Dock with background scrim
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
@@ -354,17 +331,16 @@ fun HomeScreen(
                         Brush.verticalGradient(
                             colors = listOf(
                                 Color.Transparent,
-                                MaxBgDark.copy(alpha = 0.85f),
-                                MaxBgDark,
-                                MaxBgDark
+                                MaxIOSColors.DarkBase.copy(alpha = 0.85f),
+                                MaxIOSColors.DarkBase
                             )
                         )
                     )
-                    .padding(horizontal = 14.dp, vertical = 12.dp)
+                    .padding(bottom = 12.dp)
             ) {
-                FlagshipComposer(
-                    inputText = inputText,
-                    onInputTextChanged = { inputText = it },
+                MaxInputDock(
+                    text = inputText,
+                    onTextChange = { inputText = it },
                     onSend = {
                         val textToSend = inputText.trim()
                         if (textToSend.isNotEmpty()) {
@@ -379,13 +355,9 @@ fun HomeScreen(
                     onPlusClick = {
                         showQuickPrompts = !showQuickPrompts
                     },
-                    isRecording = uiState.isRecording,
-                    isAiSpeaking = uiState.isAiSpeaking,
-                    isThinking = uiState.isThinking,
-                    audioRms = audioRms,
-                    liveUserCaption = liveUserCaption,
-                    liveAiCaption = liveAiCaption,
-                    onStopVoice = {
+                    isListening = uiState.isRecording,
+                    isSpeaking = uiState.isAiSpeaking,
+                    onStopSpeaking = {
                         viewModel.stopRecording()
                         viewModel.interruptSpeech()
                     },
@@ -395,13 +367,113 @@ fun HomeScreen(
         }
     }
 }
+}
+
+private data class TrialBannerData(
+    val bgGradient: List<Color>,
+    val text: String,
+    val subtext: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val iconColor: Color
+)
+
+@Composable
+fun TrialQuotaBanner(
+    license: com.example.firebase.model.CloudLicense,
+    dailyUsage: Long,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    if (license.plan == com.example.firebase.model.LicensePlan.LIFETIME) return
+
+    val isExpired = license.isExpired()
+    val isLimitReached = dailyUsage >= 10L
+    val remainingDays = license.remainingTrialDays()
+
+    val banner = when {
+        isExpired -> {
+            TrialBannerData(
+                listOf(Color(0xFF3B151A), Color(0xFF260D10)),
+                "Free Trial Expired",
+                "Your 3-day trial has ended. Tap to activate Lifetime Premium.",
+                Icons.Default.ErrorOutline,
+                Color(0xFFFF453A)
+            )
+        }
+        isLimitReached -> {
+            TrialBannerData(
+                listOf(Color(0xFF38230D), Color(0xFF231608)),
+                "Daily Free Limit Reached (10/10)",
+                "Daily quota used. Tap to activate Lifetime Premium.",
+                Icons.Default.Warning,
+                Color(0xFFFF9F0A)
+            )
+        }
+        else -> {
+            TrialBannerData(
+                listOf(Color(0xFF0F2640), Color(0xFF091728)),
+                "3-Day Free Trial Active",
+                "$remainingDays days remaining • $dailyUsage/10 messages used today",
+                Icons.Default.HourglassTop,
+                Color(0xFF30D158)
+            )
+        }
+    }
+
+    Surface(
+        onClick = onClick,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = Color.Transparent,
+        border = androidx.compose.foundation.BorderStroke(0.5.dp, banner.iconColor.copy(alpha = 0.4f))
+    ) {
+        Box(
+            modifier = Modifier
+                .background(Brush.horizontalGradient(banner.bgGradient))
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Icon(
+                    imageVector = banner.icon,
+                    contentDescription = null,
+                    tint = banner.iconColor,
+                    modifier = Modifier.size(20.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = banner.text,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = banner.subtext,
+                        fontSize = 11.5.sp,
+                        color = Color.White.copy(alpha = 0.8f)
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Default.ChevronRight,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TOP BAR (Flagship Glassmorphic Header)
+// TOP BAR (Minimalist iOS Header)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun FlagshipTopBar(
+private fun IOSTopBar(
     isMaxEnabled: Boolean,
     connectionState: ConnectionState,
     onMenuClick: () -> Unit,
@@ -411,178 +483,139 @@ private fun FlagshipTopBar(
 ) {
     var showMenu by remember { mutableStateOf(false) }
 
-    Surface(
-        color = MaxBgLight.copy(alpha = 0.95f),
-        shadowElevation = 2.dp,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding()
+            .background(MaxIOSColors.DarkBase)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().statusBarsPadding()) {
-            Row(
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp)
+                .padding(horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            // Drawer Menu Button
+            IconButton(
+                onClick = onMenuClick,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(60.dp)
-                    .padding(horizontal = 12.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .size(36.dp)
+                    .clip(MaxIOSShapes.ShapeSmall)
+                    .background(MaxIOSColors.DarkSurfaceElevated)
+                    .border(0.5.dp, MaxIOSColors.HairlineDark, MaxIOSShapes.ShapeSmall)
             ) {
-                // Menu Button
-                IconButton(
-                    onClick = onMenuClick,
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaxSurfaceVariant)
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Menu,
-                        contentDescription = "Open Drawer",
-                        tint = MaxTextPrimary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Outlined.Menu,
+                    contentDescription = "Open Drawer",
+                    tint = MaxIOSColors.TextPrimaryDark,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
 
-                Spacer(modifier = Modifier.width(12.dp))
-
-                // Glowing AI Avatar
+            // Center Assistant Identity & Status Pill
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
+                        .size(8.dp)
                         .clip(CircleShape)
                         .background(
-                            Brush.linearGradient(
-                                listOf(MaxPrimary, MaxSecondary, MaxAccent)
-                            )
-                        ),
-                    contentAlignment = Alignment.Center
+                            if (!isMaxEnabled) MaxIOSColors.TextTertiaryDark
+                            else when (connectionState) {
+                                ConnectionState.CONNECTED -> MaxIOSColors.SystemGreen
+                                ConnectionState.CONNECTING -> MaxIOSColors.SystemAmber
+                                else -> MaxIOSColors.TextTertiaryDark
+                            }
+                        )
+                )
+                Text(
+                    text = if (!isMaxEnabled) "MAX Offline" else "MAX",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaxIOSColors.TextPrimaryDark,
+                    letterSpacing = (-0.41).sp
+                )
+            }
+
+            // Options & Settings Menu
+            Box {
+                IconButton(
+                    onClick = { showMenu = true },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(MaxIOSShapes.ShapeSmall)
+                        .background(MaxIOSColors.DarkSurfaceElevated)
+                        .border(0.5.dp, MaxIOSColors.HairlineDark, MaxIOSShapes.ShapeSmall)
                 ) {
-                    Text(
-                        text = "M",
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Black
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Options",
+                        tint = MaxIOSColors.TextPrimaryDark,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.width(10.dp))
-
-                // Title & Live Status
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.Center
+                DropdownMenu(
+                    expanded = showMenu,
+                    onDismissRequest = { showMenu = false },
+                    modifier = Modifier.background(MaxIOSColors.DarkSurfaceGrouped)
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Text(
-                            text = "MAX AI",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaxTextPrimary,
-                            letterSpacing = 0.4.sp
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    if (!isMaxEnabled) MaxTextMuted
-                                    else when (connectionState) {
-                                        ConnectionState.CONNECTED -> Emerald400
-                                        ConnectionState.CONNECTING -> NeonGold
-                                        else -> MaxTextMuted
-                                    }
+                    DropdownMenuItem(
+                        text = {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(
+                                    text = if (isMaxEnabled) "MAX Active" else "MAX Paused",
+                                    color = MaxIOSColors.TextPrimaryDark,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium
                                 )
-                        )
-                    }
-
-                    Text(
-                        text = if (!isMaxEnabled) "Offline / Paused"
-                        else when (connectionState) {
-                            ConnectionState.CONNECTED -> "Online • Real-time AI"
-                            ConnectionState.CONNECTING -> "Connecting..."
-                            else -> "Reconnecting..."
+                                Spacer(modifier = Modifier.weight(1f))
+                                Switch(
+                                    checked = isMaxEnabled,
+                                    onCheckedChange = {
+                                        onToggleMax(it)
+                                        showMenu = false
+                                    },
+                                    colors = SwitchDefaults.colors(
+                                        checkedThumbColor = Color.White,
+                                        checkedTrackColor = MaxIOSColors.SystemBlue
+                                    )
+                                )
+                            }
                         },
-                        fontSize = 12.sp,
-                        color = if (connectionState == ConnectionState.CONNECTED && isMaxEnabled) MaxSuccess else MaxTextMuted,
-                        fontWeight = FontWeight.Medium
+                        onClick = { onToggleMax(!isMaxEnabled) }
                     )
-                }
 
-                // Options Menu
-                Box {
-                    IconButton(
-                        onClick = { showMenu = true },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaxSurfaceVariant)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.MoreVert,
-                            contentDescription = "Options",
-                            tint = MaxTextPrimary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                    HorizontalDivider(color = MaxIOSColors.HairlineDark, thickness = 0.5.dp)
 
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false },
-                        modifier = Modifier.background(MaxSurface)
-                    ) {
-                        DropdownMenuItem(
-                            text = {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Text(
-                                        text = if (isMaxEnabled) "MAX Enabled" else "MAX Disabled",
-                                        color = MaxTextPrimary,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Spacer(modifier = Modifier.weight(1f))
-                                    Switch(
-                                        checked = isMaxEnabled,
-                                        onCheckedChange = {
-                                            onToggleMax(it)
-                                            showMenu = false
-                                        },
-                                        colors = SwitchDefaults.colors(
-                                            checkedThumbColor = Color.White,
-                                            checkedTrackColor = MaxPrimary
-                                        )
-                                    )
-                                }
-                            },
-                            onClick = { onToggleMax(!isMaxEnabled) }
-                        )
+                    DropdownMenuItem(
+                        text = { Text("Clear Chat History", color = MaxIOSColors.TextPrimaryDark, fontSize = 14.sp) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = MaxIOSColors.TextSecondaryDark, modifier = Modifier.size(18.dp))
+                        },
+                        onClick = {
+                            onClearChat()
+                            showMenu = false
+                        }
+                    )
 
-                        HorizontalDivider(color = MaxBorder)
-
-                        DropdownMenuItem(
-                            text = { Text("Clear Chat History", color = MaxTextPrimary, fontSize = 14.sp) },
-                            leadingIcon = {
-                                Icon(Icons.Default.Refresh, contentDescription = null, tint = MaxTextMuted, modifier = Modifier.size(18.dp))
-                            },
-                            onClick = {
-                                onClearChat()
-                                showMenu = false
-                            }
-                        )
-
-                        DropdownMenuItem(
-                            text = { Text("Settings", color = MaxTextPrimary, fontSize = 14.sp) },
-                            leadingIcon = {
-                                Icon(Icons.Default.Settings, contentDescription = null, tint = MaxTextMuted, modifier = Modifier.size(18.dp))
-                            },
-                            onClick = {
-                                onNavigateToSettings()
-                                showMenu = false
-                            }
-                        )
-                    }
+                    DropdownMenuItem(
+                        text = { Text("Settings", color = MaxIOSColors.TextPrimaryDark, fontSize = 14.sp) },
+                        leadingIcon = {
+                            Icon(Icons.Default.Settings, contentDescription = null, tint = MaxIOSColors.TextSecondaryDark, modifier = Modifier.size(18.dp))
+                        },
+                        onClick = {
+                            onNavigateToSettings()
+                            showMenu = false
+                        }
+                    )
                 }
             }
         }
@@ -590,265 +623,134 @@ private fun FlagshipTopBar(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DASHBOARD EMPTY STATE (Stunning Hero Card & Quick Action Grid)
+// DASHBOARD EMPTY STATE (Greeting + Reactive Orb + Quick Action Pills)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun FlagshipDashboardEmptyState(
+private fun IOSDashboardEmptyState(
     onPromptSelected: (String) -> Unit,
+    onMicClick: () -> Unit,
+    audioRms: Float,
+    isListening: Boolean,
+    isThinking: Boolean,
+    isSpeaking: Boolean,
     onNavigateTo: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val greeting = remember {
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        when (hour) {
+            in 5..11 -> "Good morning"
+            in 12..16 -> "Good afternoon"
+            in 17..21 -> "Good evening"
+            else -> "Hello"
+        }
+    }
+
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 20.dp, bottom = 120.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
+        contentPadding = PaddingValues(top = 28.dp, bottom = 120.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        // Hero Greeting Card
+        // Assistant Orb Hero
         item {
-            Surface(
-                shape = RoundedCornerShape(24.dp),
-                color = MaxSurface,
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
-                shadowElevation = 4.dp
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(22.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(MaxPrimary.copy(alpha = 0.2f), MaxAccent.copy(alpha = 0.2f))
-                                )
-                            )
-                            .border(1.5.dp, MaxPrimary.copy(alpha = 0.4f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AutoAwesome,
-                            contentDescription = null,
-                            tint = MaxPrimary,
-                            modifier = Modifier.size(28.dp)
-                        )
-                    }
+                MaxAssistantOrb(
+                    isListening = isListening,
+                    isThinking = isThinking,
+                    isSpeaking = isSpeaking,
+                    audioRms = audioRms,
+                    size = 92.dp,
+                    onClick = onMicClick
+                )
 
-                    Spacer(modifier = Modifier.height(14.dp))
-
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = "Hello, I am MAX",
-                        fontSize = 22.sp,
+                        text = greeting,
+                        fontSize = 28.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaxTextPrimary,
-                        letterSpacing = 0.3.sp
+                        color = MaxIOSColors.TextPrimaryDark,
+                        letterSpacing = 0.36.sp
                     )
-
                     Text(
-                        text = "Your intelligent assistant for voice, WhatsApp, reminders, device automation, and on-screen vision.",
-                        fontSize = 13.5.sp,
-                        color = MaxTextMuted,
-                        textAlign = TextAlign.Center,
-                        lineHeight = 20.sp,
-                        modifier = Modifier.padding(top = 6.dp)
+                        text = "What can I help you with?",
+                        fontSize = 16.sp,
+                        color = MaxIOSColors.TextSecondaryDark,
+                        modifier = Modifier.padding(top = 4.dp)
                     )
                 }
             }
         }
 
-        // Quick Action Grid Section Header
+        // Quick Actions Scrollable Pill Row
         item {
+            val quickActions = listOf(
+                "💬 Message" to "Send a WhatsApp message",
+                "⏰ Alarm" to "Set an alarm for 7 AM",
+                "🗺️ Open Maps" to "Open Google Maps",
+                "📷 Camera" to "Take a photo",
+                "🔍 Search" to "Search the web for news"
+            )
+
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 4.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text(
-                    text = "Quick Actions & Shortcuts",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaxTextSecondary,
-                    letterSpacing = 0.5.sp
-                )
+                quickActions.forEach { (label, prompt) ->
+                    MaxQuickActionCapsule(
+                        text = label,
+                        onClick = { onPromptSelected(prompt) }
+                    )
+                }
             }
         }
 
-        // 2x2 Grid of Quick Cards
+        // Inset Grouped Section for Common Capabilities
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    DashboardActionCard(
-                        title = "Send WhatsApp",
-                        subtitle = "Message Mom or friends",
-                        icon = Icons.Default.ChatBubbleOutline,
-                        accentColor = Emerald400,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onPromptSelected("Send a WhatsApp message to Mom") }
-                    )
-                    DashboardActionCard(
-                        title = "Set Alarm",
-                        subtitle = "Wake up or timers",
-                        icon = Icons.Default.Alarm,
-                        accentColor = NeonGold,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onPromptSelected("Set an alarm for 7:00 AM") }
-                    )
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    DashboardActionCard(
-                        title = "Screen Vision",
-                        subtitle = "Read what's on screen",
-                        icon = Icons.Default.Visibility,
-                        accentColor = AccentCyan,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onPromptSelected("Read what's on my screen") }
-                    )
-                    DashboardActionCard(
-                        title = "Reminders",
-                        subtitle = "Check your schedule",
-                        icon = Icons.Default.Schedule,
-                        accentColor = MaxPrimary,
-                        modifier = Modifier.weight(1f),
-                        onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.REMINDERS) }
-                    )
-                }
-            }
-        }
-
-        // Suggested Prompts Section Header
-        item {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp, start = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Suggested Commands",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaxTextSecondary,
-                    letterSpacing = 0.5.sp
+            MaxIOSSettingsSection(title = "Capabilities") {
+                MaxIOSSettingsRow(
+                    title = "Device & App Automation",
+                    subtitle = "Split-screen, open apps, control settings",
+                    icon = Icons.Default.AutoAwesome,
+                    iconBg = MaxIOSColors.SystemBlue,
+                    onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.CAPABILITIES) },
+                    showDivider = true
                 )
-            }
-        }
-
-        // Suggestion Chips List
-        val suggestions = listOf(
-            "Send a WhatsApp message to Mom",
-            "Set an alarm for 7 AM",
-            "Read what's on my screen",
-            "Check today's reminders",
-            "What is on my calendar today?"
-        )
-
-        items(suggestions) { prompt ->
-            Surface(
-                onClick = { onPromptSelected(prompt) },
-                shape = RoundedCornerShape(16.dp),
-                color = MaxSurface,
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
-                shadowElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = prompt,
-                        fontSize = 13.5.sp,
-                        color = MaxTextPrimary,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = MaxPrimary,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
+                MaxIOSSettingsRow(
+                    title = "Memory Vault",
+                    subtitle = "Search & manage personal AI knowledge",
+                    icon = Icons.Default.FolderShared,
+                    iconBg = MaxIOSColors.SystemPurple,
+                    onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.MEMORY) },
+                    showDivider = true
+                )
+                MaxIOSSettingsRow(
+                    title = "Reminders & Routines",
+                    subtitle = "Manage scheduled tasks and automated workflows",
+                    icon = Icons.Default.Alarm,
+                    iconBg = MaxIOSColors.SystemAmber,
+                    onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.ROUTINES) },
+                    showDivider = false
+                )
             }
         }
     }
 }
 
-@Composable
-private fun DashboardActionCard(
-    title: String,
-    subtitle: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    accentColor: Color,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(20.dp),
-        color = MaxSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
-        shadowElevation = 2.dp,
-        modifier = modifier.semantics(mergeDescendants = true) {
-            role = Role.Button
-        }
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(accentColor.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = accentColor,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Text(
-                text = title,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaxTextPrimary
-            )
-
-            Text(
-                text = subtitle,
-                fontSize = 11.5.sp,
-                color = MaxTextMuted,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// USER MESSAGE BUBBLE
+// USER MESSAGE BUBBLE (Compact Right-Aligned iOS Pill)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun UserMessageBubble(
+private fun IOSUserMessageBubble(
     message: ChatMessageItem,
     onCopyText: () -> Unit
 ) {
@@ -861,50 +763,43 @@ private fun UserMessageBubble(
     ) {
         Column(
             horizontalAlignment = Alignment.End,
-            modifier = Modifier.widthIn(max = 295.dp)
+            modifier = Modifier.widthIn(max = 280.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 4.dp),
-                color = Color.Transparent,
-                shadowElevation = 2.dp,
+            Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 20.dp, bottomEnd = 4.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(Color(0xFF0062FF), Color(0xFF1E40AF))
-                        )
-                    )
+                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp))
+                    .background(MaxIOSColors.SystemBlue)
                     .clickable { onCopyText() }
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
             ) {
                 SelectionContainer {
                     Text(
                         text = message.text,
                         color = Color.White,
-                        fontSize = 14.5.sp,
+                        fontSize = 15.sp,
                         lineHeight = 21.sp,
-                        fontWeight = FontWeight.Normal,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 11.dp)
+                        fontWeight = FontWeight.Normal
                     )
                 }
             }
 
             Text(
                 text = formattedTime,
-                fontSize = 10.5.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Medium,
-                color = MaxTextMuted,
-                modifier = Modifier.padding(top = 4.dp, end = 6.dp)
+                color = MaxIOSColors.TextTertiaryDark,
+                modifier = Modifier.padding(top = 4.dp, end = 4.dp)
             )
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAX MESSAGE BUBBLE
+// MAX MESSAGE BUBBLE (Open Conversational Left-Aligned Layout)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun MaxMessageBubble(
+private fun IOSMaxMessageBubble(
     message: ChatMessageItem,
     onCopyText: () -> Unit
 ) {
@@ -917,13 +812,13 @@ private fun MaxMessageBubble(
     ) {
         Column(
             horizontalAlignment = Alignment.Start,
-            modifier = Modifier.widthIn(max = 315.dp)
+            modifier = Modifier.widthIn(max = 310.dp)
         ) {
-            Surface(
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomStart = 4.dp, bottomEnd = 20.dp),
-                color = MaxSurface,
-                shadowElevation = 2.dp,
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
+            MaxGlassSurface(
+                shape = RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp),
+                backgroundColor = MaxIOSColors.DarkSurfaceGrouped,
+                borderColor = MaxIOSColors.HairlineDark,
+                borderWidth = 0.5.dp,
                 modifier = Modifier.clickable { onCopyText() }
             ) {
                 SelectionContainer {
@@ -933,18 +828,13 @@ private fun MaxMessageBubble(
                 }
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                modifier = Modifier.padding(top = 4.dp, start = 6.dp)
-            ) {
-                Text(
-                    text = if (message.isPending) "MAX • Generating..." else "MAX • $formattedTime",
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = if (message.isPending) MaxPrimary else MaxTextMuted
-                )
-            }
+            Text(
+                text = if (message.isPending) "MAX • Generating…" else "MAX • $formattedTime",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Medium,
+                color = if (message.isPending) MaxIOSColors.SystemBlue else MaxIOSColors.TextTertiaryDark,
+                modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+            )
         }
     }
 }
@@ -954,23 +844,23 @@ private fun MaxMessageBubble(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun FlagshipTypingIndicator() {
+private fun IOSTypingIndicator() {
     val transition = rememberInfiniteTransition(label = "typing_dots")
     val dot1 by transition.animateFloat(
         initialValue = 0f,
-        targetValue = -5f,
+        targetValue = -4f,
         animationSpec = infiniteRepeatable(tween(400, easing = LinearEasing), RepeatMode.Reverse),
         label = "dot1"
     )
     val dot2 by transition.animateFloat(
         initialValue = 0f,
-        targetValue = -5f,
+        targetValue = -4f,
         animationSpec = infiniteRepeatable(tween(400, delayMillis = 150, easing = LinearEasing), RepeatMode.Reverse),
         label = "dot2"
     )
     val dot3 by transition.animateFloat(
         initialValue = 0f,
-        targetValue = -5f,
+        targetValue = -4f,
         animationSpec = infiniteRepeatable(tween(400, delayMillis = 300, easing = LinearEasing), RepeatMode.Reverse),
         label = "dot3"
     )
@@ -979,13 +869,14 @@ private fun FlagshipTypingIndicator() {
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Start
     ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = MaxSurfaceVariant,
-            border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder)
+        Box(
+            modifier = Modifier
+                .clip(MaxIOSShapes.ShapeMedium)
+                .background(MaxIOSColors.DarkSurfaceGrouped)
+                .border(0.5.dp, MaxIOSColors.HairlineDark, MaxIOSShapes.ShapeMedium)
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -994,21 +885,21 @@ private fun FlagshipTypingIndicator() {
                         .offset(y = dot1.dp)
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(MaxTextMuted)
+                        .background(MaxIOSColors.TextSecondaryDark)
                 )
                 Box(
                     modifier = Modifier
                         .offset(y = dot2.dp)
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(MaxTextMuted)
+                        .background(MaxIOSColors.TextSecondaryDark)
                 )
                 Box(
                     modifier = Modifier
                         .offset(y = dot3.dp)
                         .size(6.dp)
                         .clip(CircleShape)
-                        .background(MaxTextMuted)
+                        .background(MaxIOSColors.TextSecondaryDark)
                 )
             }
         }
@@ -1016,224 +907,19 @@ private fun FlagshipTypingIndicator() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COMPOSER (Flagship Floating Rounded Pill Bar)
+// QUICK ACTIONS DRAWER
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun FlagshipComposer(
-    inputText: String,
-    onInputTextChanged: (String) -> Unit,
-    onSend: () -> Unit,
-    onMicClick: () -> Unit,
-    onPlusClick: () -> Unit,
-    isRecording: Boolean,
-    isAiSpeaking: Boolean,
-    isThinking: Boolean,
-    audioRms: Float,
-    liveUserCaption: String,
-    liveAiCaption: String,
-    onStopVoice: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val isVoiceActive = isRecording || isAiSpeaking
-
-    Surface(
-        shape = RoundedCornerShape(28.dp),
-        color = MaxSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
-        shadowElevation = 8.dp,
-        modifier = modifier.semantics(mergeDescendants = true) {
-            role = Role.Button
-        }.animateContentSize()
-    ) {
-        if (isVoiceActive) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                VoiceWaveformBar(audioRms = audioRms, isSpeaking = isAiSpeaking)
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = if (isAiSpeaking) "MAX is speaking..." else "Listening to your voice...",
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isAiSpeaking) MaxAccent else MaxPrimary
-                    )
-                    val caption = if (isAiSpeaking) liveAiCaption else liveUserCaption
-                    if (caption.isNotBlank()) {
-                        Text(
-                            text = caption,
-                            fontSize = 11.5.sp,
-                            color = MaxTextMuted,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = onStopVoice,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(MaxSurfaceVariant)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Stop voice",
-                        tint = MaxTextPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        } else {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = onPlusClick,
-                    modifier = Modifier.size(40.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Add,
-                        contentDescription = "Quick Actions",
-                        tint = MaxPrimary,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 6.dp, vertical = 8.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (inputText.isEmpty()) {
-                        Text(
-                            text = "Ask MAX or type command...",
-                            fontSize = 14.5.sp,
-                            color = MaxTextMuted
-                        )
-                    }
-
-                    BasicTextField(
-                        value = inputText,
-                        onValueChange = onInputTextChanged,
-                        textStyle = TextStyle(
-                            color = MaxTextPrimary,
-                            fontSize = 14.5.sp,
-                            lineHeight = 20.sp
-                        ),
-                        cursorBrush = SolidColor(MaxPrimary),
-                        keyboardOptions = KeyboardOptions(
-                            capitalization = KeyboardCapitalization.Sentences,
-                            imeAction = ImeAction.Send
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onSend = { onSend() }
-                        ),
-                        maxLines = 5,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                if (inputText.isNotBlank()) {
-                    IconButton(
-                        onClick = onSend,
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(CircleShape)
-                            .background(
-                                Brush.linearGradient(
-                                    listOf(MaxPrimary, MaxAccent)
-                                )
-                            )
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                } else {
-                    IconButton(
-                        onClick = onMicClick,
-                        modifier = Modifier.size(40.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = "Voice Input",
-                            tint = MaxPrimary,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// VOICE WAVEFORM BARS
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun VoiceWaveformBar(audioRms: Float, isSpeaking: Boolean) {
-    val infiniteTransition = rememberInfiniteTransition(label = "waveform")
-    val waveAnim by infiniteTransition.animateFloat(
-        initialValue = 0.2f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(tween(350, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "wave_anim"
-    )
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.height(26.dp)
-    ) {
-        val barColor = if (isSpeaking) MaxAccent else MaxPrimary
-        val normalizedRms = (audioRms / 10f).coerceIn(0.15f, 1f)
-
-        listOf(0.4f, 0.8f, 1.0f, 0.7f, 0.3f).forEachIndexed { i, factor ->
-            val heightRatio = if (isSpeaking) {
-                ((waveAnim * factor) * 20).coerceIn(4f, 22f)
-            } else {
-                ((normalizedRms * factor + waveAnim * 0.2f) * 20).coerceIn(4f, 22f)
-            }
-            Box(
-                modifier = Modifier
-                    .width(3.5.dp)
-                    .height(heightRatio.dp)
-                    .clip(CircleShape)
-                    .background(barColor)
-            )
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// QUICK PROMPTS CARD
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun QuickPromptsCard(
+private fun IOSQuickActionsCard(
     onSelectPrompt: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(20.dp),
-        color = MaxSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaxBorder),
-        shadowElevation = 10.dp,
+    MaxGlassSurface(
+        shape = MaxIOSShapes.ShapeLarge,
+        backgroundColor = MaxIOSColors.DarkSurfaceElevated,
+        borderColor = MaxIOSColors.HairlineDark,
+        borderWidth = 0.5.dp,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -1243,50 +929,49 @@ private fun QuickPromptsCard(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "Quick Assistant Actions",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaxTextPrimary
+                    text = "Quick Actions",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaxIOSColors.TextPrimaryDark
                 )
                 IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = MaxTextMuted, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Default.Close, contentDescription = "Close", tint = MaxIOSColors.TextSecondaryDark, modifier = Modifier.size(18.dp))
                 }
             }
 
             Spacer(modifier = Modifier.height(10.dp))
 
             val quickItems = listOf(
-                "💬 Message" to "Send a WhatsApp message to ",
+                "💬 Message" to "Send a WhatsApp message",
+                "🗺️ Split Screen Apps" to "Open Maps and Instagram in split screen",
+                "🔍 Vision" to "Read what's on my screen",
                 "⏰ Alarm" to "Set an alarm for 7:00 AM",
-                "📅 Calendar" to "What is on my calendar today?",
-                "👁️ Vision" to "Read what is on my screen"
+                "📝 Memory" to "Save a note in memory"
             )
 
-            quickItems.forEach { (label, prompt) ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onSelectPrompt(prompt) }
-                        .padding(horizontal = 10.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Text(
-                        text = label,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaxPrimary,
-                        modifier = Modifier.width(100.dp)
-                    )
-                    Text(
-                        text = prompt,
-                        fontSize = 12.5.sp,
-                        color = MaxTextSecondary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                quickItems.forEach { (title, prompt) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaxIOSShapes.ShapeMedium)
+                            .clickable { onSelectPrompt(prompt) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = title,
+                            fontSize = 14.sp,
+                            color = MaxIOSColors.TextPrimaryDark
+                        )
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = MaxIOSColors.SystemBlue,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
         }
@@ -1294,75 +979,89 @@ private fun QuickPromptsCard(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LIGHTWEIGHT MARKDOWN TEXT PARSER FOR CHAT
+// MARKDOWN TEXT RENDERER & CLIPBOARD HELPER
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun MarkdownChatText(text: String) {
-    val annotatedString = remember(text) {
-        buildAnnotatedString {
-            val lines = text.split("\n")
-            lines.forEachIndexed { index, line ->
-                val trimmed = line.trim()
-                if (trimmed.startsWith("### ")) {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 14.5.sp, color = MaxPrimary)) {
-                        append(trimmed.removePrefix("### "))
-                    }
-                } else if (trimmed.startsWith("## ")) {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.sp, color = MaxPrimary)) {
-                        append(trimmed.removePrefix("## "))
-                    }
-                } else if (trimmed.startsWith("# ")) {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp, color = MaxPrimary)) {
-                        append(trimmed.removePrefix("# "))
-                    }
-                } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-                    withStyle(SpanStyle(color = MaxPrimary, fontWeight = FontWeight.Bold)) {
-                        append("• ")
-                    }
-                    appendFormattedInline(trimmed.substring(2))
-                } else {
-                    appendFormattedInline(line)
+    val cleanText = text.trim()
+    val lines = cleanText.lines()
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        for (line in lines) {
+            val trimmedLine = line.trim()
+            when {
+                trimmedLine.startsWith("```") -> {
+                    // Skip markdown code fence markers
                 }
-                if (index < lines.size - 1) {
-                    append("\n")
+                trimmedLine.startsWith("# ") -> {
+                    Text(
+                        text = trimmedLine.removePrefix("# "),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaxIOSColors.TextPrimaryDark,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                    )
+                }
+                trimmedLine.startsWith("## ") -> {
+                    Text(
+                        text = trimmedLine.removePrefix("## "),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaxIOSColors.TextPrimaryDark,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+                trimmedLine.startsWith("- ") || trimmedLine.startsWith("* ") -> {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.padding(start = 4.dp)
+                    ) {
+                        Text(text = "•", color = MaxIOSColors.SystemBlue, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = buildAnnotatedInline(trimmedLine.substring(2)),
+                            color = MaxIOSColors.TextPrimaryDark,
+                            fontSize = 14.5.sp,
+                            lineHeight = 21.sp
+                        )
+                    }
+                }
+                else -> {
+                    if (trimmedLine.isNotEmpty()) {
+                        Text(
+                            text = buildAnnotatedInline(trimmedLine),
+                            color = MaxIOSColors.TextPrimaryDark,
+                            fontSize = 14.5.sp,
+                            lineHeight = 21.sp
+                        )
+                    }
                 }
             }
         }
     }
-
-    Text(
-        text = annotatedString,
-        color = MaxTextPrimary,
-        fontSize = 14.sp,
-        lineHeight = 21.sp
-    )
 }
 
-private fun androidx.compose.ui.text.AnnotatedString.Builder.appendFormattedInline(line: String) {
-    val parts = line.split("**")
-    parts.forEachIndexed { i, part ->
-        if (i % 2 == 1) {
-            withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = MaxTextPrimary)) {
-                append(part)
-            }
-        } else {
-            val codeParts = part.split("`")
-            codeParts.forEachIndexed { ci, cpart ->
-                if (ci % 2 == 1) {
-                    withStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = MaxSurfaceVariant, color = MaxPrimary)) {
-                        append(" $cpart ")
-                    }
-                } else {
-                    append(cpart)
-                }
-            }
+private fun buildAnnotatedInline(text: String) = buildAnnotatedString {
+    var cursor = 0
+    val boldRegex = Regex("\\*\\*(.*?)\\*\\*")
+    val matches = boldRegex.findAll(text)
+
+    for (match in matches) {
+        if (match.range.first > cursor) {
+            append(text.substring(cursor, match.range.first))
         }
+        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = MaxIOSColors.TextPrimaryDark)) {
+            append(match.groupValues[1])
+        }
+        cursor = match.range.last + 1
+    }
+    if (cursor < text.length) {
+        append(text.substring(cursor))
     }
 }
 
 private fun copyToClipboard(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-    val clip = ClipData.newPlainText("MAX Message", text)
+    val clip = ClipData.newPlainText("MAX Response", text)
     clipboard?.setPrimaryClip(clip)
 }
