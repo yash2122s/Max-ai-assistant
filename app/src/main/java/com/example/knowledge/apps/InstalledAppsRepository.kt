@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 object InstalledAppsRepository {
     private const val TAG = "AppsRepository"
@@ -107,7 +108,7 @@ object InstalledAppsRepository {
         val db = AppDatabase.getDatabase(context)
         val apps = runBlocking {
             try {
-                db.installedAppDao().getAllApps()
+                withTimeoutOrNull(1500L) { db.installedAppDao().getAllApps() } ?: emptyList()
             } catch (e: Exception) {
                 emptyList()
             }
@@ -202,6 +203,11 @@ object InstalledAppsRepository {
     fun findApp(context: Context? = null, query: String): String? {
         val cleanQuery = query.trim().lowercase()
         if (cleanQuery.isBlank()) return null
+
+        // Existing canonical identities do not require a Room/cache warm-up.
+        aliases[cleanQuery]?.takeIf { it.contains(".") }?.let { return it }
+        if (context != null && cleanQuery.contains(".") &&
+            context.packageManager.getLaunchIntentForPackage(cleanQuery) != null) return cleanQuery
 
         val apps = getApps(context)
 

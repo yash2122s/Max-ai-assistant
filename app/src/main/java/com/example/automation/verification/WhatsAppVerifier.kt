@@ -9,7 +9,7 @@ import com.example.service.SendVerificationResult
 
 class WhatsAppVerifier : Verifier {
     private val TAG = "WhatsAppVerifier"
-    override val supportedTools: Set<String> = setOf("send_whatsapp_message")
+    override val supportedTools: Set<String> = setOf("send_whatsapp_message", "navigate_whatsapp", "open_whatsapp_chat")
 
     override fun verify(
         context: Context,
@@ -36,9 +36,17 @@ class WhatsAppVerifier : Verifier {
 
         return when (lastSendResult) {
             SendVerificationResult.SUCCESS -> {
+                val reasonMsg = when (request.action) {
+                    "NAVIGATE_WHATSAPP", "OPEN_WHATSAPP_SCREEN", "WHATSAPP_NAVIGATE" ->
+                        "WhatsApp screen navigated and verified successfully"
+                    "OPEN_WHATSAPP_CHAT" ->
+                        "WhatsApp chat opened and verified successfully"
+                    else ->
+                        "WhatsApp UI confirmed message sent (input cleared / outgoing message observed)"
+                }
                 VerificationResult(
                     success = true,
-                    reason = "WhatsApp UI confirmed message sent (input cleared / outgoing message observed)",
+                    reason = reasonMsg,
                     retryRecommended = false,
                     snapshot = snapshot
                 )

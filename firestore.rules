@@ -90,7 +90,7 @@ service cloud.firestore {
 
       // Daily usage subcollection:
       // Track AI message consumption per 24h period.
-      // - Max 10 messages for trial users.
+      // - Max 20 messages for trial users.
       // - Client cannot decrease counter or reset early.
       match /dailyUsage/{period} {
         allow read: if isOwner(userId);

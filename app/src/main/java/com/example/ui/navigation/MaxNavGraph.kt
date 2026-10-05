@@ -134,13 +134,13 @@ fun MaxNavGraph(
         // Controlled Screens in Drawer Navigation
         composable(MaxDestinations.LICENSE) {
             com.example.ui.license.LicenseActivationScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = onOpenDrawer
             )
         }
 
         composable(MaxDestinations.SETTINGS) {
             com.example.ui.settings.SettingsScreen(
-                onNavigateBack = navigateBackToDrawer,
+                onNavigateBack = onOpenDrawer,
                 onNavigateToSkills = { navController.navigate(MaxDestinations.SKILLS) },
                 onNavigateToLicense = { navController.navigate(MaxDestinations.LICENSE) }
             )
@@ -148,19 +148,19 @@ fun MaxNavGraph(
 
         composable(MaxDestinations.SKILLS) {
             com.example.ui.skills.SkillsScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = onOpenDrawer
             )
         }
 
         composable(MaxDestinations.PERMISSIONS) {
             com.example.ui.permissions.PermissionsScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = onOpenDrawer
             )
         }
 
         composable(MaxDestinations.MEMORY) {
             com.example.ui.memory.MemoryScreen(
-                onNavigateBack = navigateBackToDrawer,
+                onNavigateBack = onOpenDrawer,
                 onNavigateToImport = { navController.navigate(MaxDestinations.IMPORT_MEMORY) }
             )
         }
@@ -173,37 +173,37 @@ fun MaxNavGraph(
 
         composable(MaxDestinations.PERIOD) {
             com.example.ui.period.PeriodScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = onOpenDrawer
             )
         }
 
         composable(MaxDestinations.REMINDERS) {
             com.example.ui.reminders.RemindersScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = onOpenDrawer
             )
         }
 
         composable(MaxDestinations.ROUTINES) {
             com.example.ui.routines.RoutinesScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = onOpenDrawer
             )
         }
 
         composable(MaxDestinations.NOTIFICATIONS) {
             com.example.ui.notifications.NotificationsScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = onOpenDrawer
             )
         }
 
         composable(MaxDestinations.CAPABILITIES) {
             com.example.ui.capabilities.CapabilitiesScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = onOpenDrawer
             )
         }
 
         composable(MaxDestinations.ABOUT) {
             com.example.ui.about.AboutScreen(
-                onNavigateBack = navigateBackToDrawer,
+                onNavigateBack = onOpenDrawer,
                 onNavigateToPrivacy = { navController.navigate(MaxDestinations.PRIVACY) }
             )
         }

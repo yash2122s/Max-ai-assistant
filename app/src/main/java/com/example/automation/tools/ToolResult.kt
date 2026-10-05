@@ -9,7 +9,8 @@ enum class ToolResultStatus {
     FAILURE,
     NEEDS_INPUT,
     USER_ACTION_REQUIRED,
-    PENDING_USER_ACTION
+    PENDING_USER_ACTION,
+    ACCEPTED
 }
 
 data class ToolResult(
@@ -29,6 +30,13 @@ data class ToolResult(
     val needsInputOptions: List<String> = emptyList(),
     val targetParam: String? = null
 ) {
+    val options: List<String> get() = needsInputOptions
+
+    /** Dispatch acceptance and pending user input are never verified completion. */
+    val isVerifiedSuccess: Boolean
+        get() = success && status == ToolResultStatus.SUCCESS &&
+            (verification?.success ?: !verificationRequired)
+
     companion object {
         fun success(
             toolName: String,
@@ -94,4 +102,3 @@ data class ToolResult(
         )
     }
 }
-

@@ -3,6 +3,14 @@
 ## Purpose
 Translates natural-language commands (via Gemini tool calls or direct dispatch) into executable device actions via a structured registry + execution pipeline.
 
+## Execution verification update — 2026-10-04
+- `LongTaskOrchestrator` validates initial/replacement DAGs, checks executor success AND outcome verification, persists replacement plans with versioned history, and derives completion from persisted steps. A failed dispatch cannot be promoted by a matching cached foreground.
+- `AgentTaskStore` stores ActionStep payloads/dependencies in existing JSON columns; no schema migration is required. It distinguishes WAITING_FOR_INPUT from WAITING_FOR_APPROVAL and rejects stale execution results. `TaskTransitionAuthority` rejects mismatched execution IDs and success without verification evidence.
+- `ToolResult.isVerifiedSuccess` is used for planner advancement and native result envelopes. Required verification without a registered verifier fails closed; tools with an intentional non-verification contract must declare `verificationRequired=false`.
+- `DurableRecoveryCoordinator` cannot complete a whole task from one verified interrupted call. Ambiguous external effects are blocked, and RetryEngine does not replay irreversible actions.
+- Computer-use observations use unique observation IDs, semantic screen fingerprints, fresh fallback snapshots, visible nodes, and the existing RAM-only screenshot provider. Launch verification requires exact package identity; unchanged Enter/key dispatch is not proof of success; stale coordinate targets require re-grounding.
+- Existing ComputerUseEngine and UiVerificationLoop remain bounded execution paths. Complete unified scheduling, independent-step parallelism, approval continuation, and restart resumption still need integration/device acceptance; this update does not establish full autonomous operation.
+
 ## Main Classes
 
 ### Engine

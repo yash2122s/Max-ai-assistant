@@ -58,7 +58,8 @@ class CameraTool(private val cameraAction: CameraAction) : Tool {
             ToolResult(
                 success = true,
                 toolName = name,
-                verificationRequired = true
+                message = "Screenshot captured successfully.",
+                verificationRequired = false
             )
         } catch (e: Exception) {
             ToolResult(

@@ -45,9 +45,9 @@ object GoalStateAssessor {
 
         records.add(EvidenceRecord("foreground_check", EvidenceStatus.VERIFIED, "Target app in foreground: $currentPkg"))
 
-        // For non-search goals (e.g. "Open Instagram", "Instagram open cheyyi and verify")
-        if (!context.isSearchGoal) {
-            val hasObservedContent = obs.interactiveElements.isNotEmpty() || obs.visibleTexts.isNotEmpty() || obs.screenshotPath != null
+        // For OPEN_APP_ONLY goals (e.g. "Open Instagram", "Open WhatsApp")
+        if (context.intentType == TaskIntentType.OPEN_APP_ONLY) {
+            val hasObservedContent = obs.isFresh() && (obs.interactiveElements.isNotEmpty() || obs.visibleTexts.isNotEmpty() || obs.hasScreenshot)
             if (hasObservedContent) {
                 records.add(EvidenceRecord("screen_content_check", EvidenceStatus.VERIFIED, "Screen content observed: ${obs.interactiveElements.size} elements, ${obs.visibleTexts.size} texts"))
                 return GoalStateAssessment(
@@ -61,6 +61,27 @@ object GoalStateAssessor {
                 return GoalStateAssessment(
                     assessedState = GoalState.APP_READY,
                     status = EvidenceStatus.INFERRED,
+                    evidence = records,
+                    isAlreadySatisfied = false
+                )
+            }
+        }
+
+        // For COMPOUND_UI_NAVIGATION / UI_ACTION
+        if (context.intentType == TaskIntentType.COMPOUND_UI_NAVIGATION || context.intentType == TaskIntentType.UI_ACTION) {
+            if (context.remainingSteps.isEmpty() && context.completedSteps.isNotEmpty()) {
+                records.add(EvidenceRecord("navigation_check", EvidenceStatus.VERIFIED, "All navigation steps completed: ${context.completedSteps}"))
+                return GoalStateAssessment(
+                    assessedState = GoalState.DESTINATION_VERIFIED,
+                    status = EvidenceStatus.VERIFIED,
+                    evidence = records,
+                    isAlreadySatisfied = true
+                )
+            } else {
+                records.add(EvidenceRecord("navigation_check", EvidenceStatus.OBSERVED, "Navigation in progress: remaining ${context.remainingSteps}"))
+                return GoalStateAssessment(
+                    assessedState = GoalState.NAVIGATION_IN_PROGRESS,
+                    status = EvidenceStatus.OBSERVED,
                     evidence = records,
                     isAlreadySatisfied = false
                 )

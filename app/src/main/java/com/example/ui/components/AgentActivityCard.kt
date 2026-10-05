@@ -52,7 +52,8 @@ import java.util.Locale
 @Composable
 fun AgentActivityCard(
     modifier: Modifier = Modifier,
-    onDismiss: (() -> Unit)? = null
+    onDismiss: (() -> Unit)? = null,
+    onStopTask: (() -> Unit)? = null
 ) {
     val activityState by AgentActivityTracker.state.collectAsState()
     var isExpanded by remember { mutableStateOf(false) }
@@ -147,6 +148,36 @@ fun AgentActivityCard(
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (activityState.active) {
+                        Button(
+                            onClick = {
+                                onStopTask?.invoke() ?: com.example.automation.engine.TaskCancellationCoordinator.cancelActiveTask()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFEF4444),
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                            modifier = Modifier.height(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Stop Task",
+                                tint = Color.White,
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "STOP",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+
                     IconButton(
                         onClick = { isExpanded = !isExpanded },
                         modifier = Modifier.size(24.dp)
@@ -329,6 +360,37 @@ fun AgentActivityCard(
                                 color = NeonPink,
                                 fontSize = 12.sp,
                                 modifier = Modifier.padding(8.dp)
+                            )
+                        }
+                    }
+
+                    if (activityState.active) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Button(
+                            onClick = {
+                                onStopTask?.invoke() ?: com.example.automation.engine.TaskCancellationCoordinator.cancelActiveTask()
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color(0xFFDC2626), // Strong red
+                                contentColor = Color.White
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(38.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "Cancel Task",
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "🛑 STOP ACTIVE TASK",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
                             )
                         }
                     }

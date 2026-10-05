@@ -2,6 +2,7 @@ package com.example.security
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
+import android.app.KeyguardManager
 import android.graphics.Path
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
@@ -33,109 +34,134 @@ class MaxLockAutomationEngine(
         '0' to Pair(540f * scaleX, 1300f * scaleY)
     )
 
-    fun start(pin: String, onComplete: (() -> Unit)? = null) {
+    fun start(
+        pin: String,
+        onComplete: (() -> Unit)? = null,
+        onResult: ((Boolean) -> Unit)? = null
+    ) {
         scope.launch {
-            Log.d("MaxLockEngine", "Starting MAX UNIVERSAL LOCK AUTOMATION ENGINE with PIN of length ${pin.length}")
-            
-            val pm = service.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-            val isScreenAlreadyOn = pm.isInteractive
-            
-            if (!isScreenAlreadyOn) {
-                // Screen is OFF — wake it first, then swipe
-                Log.d("MaxLockEngine", "Screen is OFF. Waking screen first...")
-                com.example.security.UnlockManager(service).wakeScreen()
-                delay(1000) // Wait for screen to turn on
+            val verified = unlockAndVerify(pin)
+            if (verified) {
+                onComplete?.invoke()
+                onResult?.invoke(true)
             } else {
-                Log.d("MaxLockEngine", "Screen is already ON.")
+                onResult?.invoke(false)
             }
-            
-            // Step 1: Collapse any expanded notification shade first
-            // This handles the case where notifications are visible on lock screen
-            try {
-                @Suppress("DEPRECATION")
-                val statusBarService = service.getSystemService("statusbar")
-                val statusBarClass = Class.forName("android.app.StatusBarManager")
-                val collapseMethod = statusBarClass.getMethod("collapsePanels")
-                collapseMethod.invoke(statusBarService)
-                Log.d("MaxLockEngine", "Collapsed notification panels")
-            } catch (e: Exception) {
-                Log.w("MaxLockEngine", "Could not collapse panels: ${e.message}")
-            }
-            delay(300)
-            
-            // Step 2: Dismiss keyguard via status bar (helps clear notification overlay)
-            // On MIUI/HyperOS, this helps get past the notification layer on lock screen
-            try {
-                service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
-                Log.d("MaxLockEngine", "Dismissed notification shade via global action")
-            } catch (e: Exception) {
-                Log.w("MaxLockEngine", "Could not dismiss notification shade: ${e.message}")
-            }
-            delay(300)
-            
-            // Step 3: First swipe up to dismiss lock screen / reveal PIN pad
+        }
+    }
+
+    /**
+     * P0 Security-Critical Gate: Executes unlock sequence and strictly awaits
+     * verified keyguard dismissal.
+     * Invariant: Unlock attempt != Unlock success.
+     */
+    suspend fun unlockAndVerify(pin: String, timeoutMs: Long = 7000): Boolean {
+        executeUnlockSequence(pin)
+        val verified = UnlockVerifier.verifyUnlocked(service, timeoutMs = timeoutMs)
+        if (verified) {
+            Log.d("MaxLockEngine", "Keyguard unlock verified successfully.")
+        } else {
+            Log.w("MaxLockEngine", "Keyguard unlock failed: device is still locked after timeout.")
+        }
+        return verified
+    }
+
+    suspend fun executeUnlockSequence(pin: String) {
+        Log.d("MaxLockEngine", "Starting MAX UNIVERSAL LOCK AUTOMATION ENGINE with PIN of length ${pin.length}")
+        
+        val pm = service.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        val isScreenAlreadyOn = pm.isInteractive
+        
+        if (!isScreenAlreadyOn) {
+            // Screen is OFF — wake it first, then swipe
+            Log.d("MaxLockEngine", "Screen is OFF. Waking screen first...")
+            com.example.security.UnlockManager(service).wakeScreen()
+            delay(1000) // Wait for screen to turn on
+        } else {
+            Log.d("MaxLockEngine", "Screen is already ON.")
+        }
+        
+        // Step 1: Collapse any expanded notification shade first
+        try {
+            @Suppress("DEPRECATION")
+            val statusBarService = service.getSystemService("statusbar")
+            val statusBarClass = Class.forName("android.app.StatusBarManager")
+            val collapseMethod = statusBarClass.getMethod("collapsePanels")
+            collapseMethod.invoke(statusBarService)
+            Log.d("MaxLockEngine", "Collapsed notification panels")
+        } catch (e: Exception) {
+            Log.w("MaxLockEngine", "Could not collapse panels: ${e.message}")
+        }
+        delay(300)
+        
+        // Step 2: Dismiss keyguard via status bar (helps clear notification overlay)
+        try {
+            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+            Log.d("MaxLockEngine", "Dismissed notification shade via global action")
+        } catch (e: Exception) {
+            Log.w("MaxLockEngine", "Could not dismiss notification shade: ${e.message}")
+        }
+        delay(300)
+        
+        // Step 3: First swipe up to dismiss lock screen / reveal PIN pad
+        swipeUp()
+        delay(1500) // Wait for transition/animation
+        
+        var root = service.rootInActiveWindow
+        
+        // If root is null or we're still on the lock screen, try another swipe
+        if (root == null) {
+            Log.w("MaxLockEngine", "Root window is null after first swipe. Retrying swipe...")
             swipeUp()
-            delay(1500) // Wait for transition/animation
-            
-            var root = service.rootInActiveWindow
-            
-            // If root is null or we're still on the lock screen, try another swipe
-            if (root == null) {
-                Log.w("MaxLockEngine", "Root window is null after first swipe. Retrying swipe...")
+            delay(1500)
+            root = service.rootInActiveWindow
+        }
+        
+        // Check if we're still seeing notifications or lock screen overlay
+        if (root != null) {
+            val hasNotification = hasNotificationOnScreen(root)
+            if (hasNotification) {
+                Log.d("MaxLockEngine", "Notifications detected on lock screen. Doing aggressive swipe...")
+                swipeUpAggressive()
+                delay(1000)
                 swipeUp()
                 delay(1500)
                 root = service.rootInActiveWindow
             }
-            
-            // Check if we're still seeing notifications or lock screen overlay
-            // If so, do an aggressive center-screen swipe to get past them
-            if (root != null) {
-                val hasNotification = hasNotificationOnScreen(root)
-                if (hasNotification) {
-                    Log.d("MaxLockEngine", "Notifications detected on lock screen. Doing aggressive swipe...")
-                    swipeUpAggressive()
-                    delay(1000)
-                    swipeUp()
-                    delay(1500)
-                    root = service.rootInActiveWindow
-                }
-            }
-            
-            if (root == null) {
-                Log.w("MaxLockEngine", "Root still null. Falling back to classic coordinates.")
-                executeClassicCoordinates(pin)
-                delay(1000)
-                onComplete?.invoke()
-                return@launch
-            }
-
-            val screenType = detectScreenType(root)
-            Log.d("MaxLockEngine", "Detected screen type: $screenType")
-
-            when (screenType) {
-                ScreenType.PIN -> {
-                    handlePinScreenSmart(root, pin)
-                }
-                ScreenType.PATTERN -> {
-                    Log.w("MaxLockEngine", "Pattern screen detected. Classic gesture fallback.")
-                    fallbackGesture()
-                }
-                ScreenType.SWIPE, ScreenType.UNKNOWN -> {
-                    // Might still be on lock screen, try one more swipe then PIN
-                    Log.d("MaxLockEngine", "Swipe or unknown screen. Swiping up again and retrying...")
-                    swipeUp()
-                    delay(1500)
-                    val newRoot = service.rootInActiveWindow
-                    if (newRoot != null && detectScreenType(newRoot) == ScreenType.PIN) {
-                        handlePinScreenSmart(newRoot, pin)
-                    } else {
-                        executeClassicCoordinates(pin)
-                    }
-                }
-            }
-            delay(1500) // General delay to ensure device is fully unlocked before callback runs
-            onComplete?.invoke()
         }
+        
+        if (root == null) {
+            Log.w("MaxLockEngine", "Root still null. Falling back to classic coordinates.")
+            executeClassicCoordinates(pin)
+            delay(1000)
+            return
+        }
+
+        val screenType = detectScreenType(root)
+        Log.d("MaxLockEngine", "Detected screen type: $screenType")
+
+        when (screenType) {
+            ScreenType.PIN -> {
+                handlePinScreenSmart(root, pin)
+            }
+            ScreenType.PATTERN -> {
+                Log.w("MaxLockEngine", "Pattern screen detected. Classic gesture fallback.")
+                fallbackGesture()
+            }
+            ScreenType.SWIPE, ScreenType.UNKNOWN -> {
+                // Might still be on lock screen, try one more swipe then PIN
+                Log.d("MaxLockEngine", "Swipe or unknown screen. Swiping up again and retrying...")
+                swipeUp()
+                delay(1500)
+                val newRoot = service.rootInActiveWindow
+                if (newRoot != null && detectScreenType(newRoot) == ScreenType.PIN) {
+                    handlePinScreenSmart(newRoot, pin)
+                } else {
+                    executeClassicCoordinates(pin)
+                }
+            }
+        }
+        delay(1500) // Allow system animation to settle
     }
     
     /**
@@ -185,14 +211,14 @@ class MaxLockAutomationEngine(
         for (digit in pin) {
             val clicked = clickDigitSmart(root, digit.toString())
             if (!clicked) {
-                Log.w("MaxLockEngine", "Smart click failed for digit $digit. Tapping fallback coordinates.")
+                Log.w("MaxLockEngine", "Smart click failed for digit [REDACTED]. Tapping fallback coordinates.")
                 // Fallback to tap screen coordinates for this digit
                 val coord = pinPadMap[digit]
                 if (coord != null) {
                     tapScreen(coord.first, coord.second)
                 }
             } else {
-                Log.d("MaxLockEngine", "Smart clicked digit $digit successfully.")
+                Log.d("MaxLockEngine", "Smart clicked digit [REDACTED] successfully.")
             }
             delay(300) // Timing delay between typing digits
         }

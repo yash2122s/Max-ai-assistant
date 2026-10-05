@@ -181,7 +181,7 @@ fun HomeScreen(
                     .weight(1f)
             ) {
                 // Main Message Feed or Empty State
-            if (uiState.messages.isEmpty() && liveAiCaption.isBlank() && !uiState.isThinking) {
+            if (uiState.messages.isEmpty() && !uiState.isThinking) {
                 IOSDashboardEmptyState(
                     onPromptSelected = { prompt ->
                         viewModel.sendTextMessage(prompt)
@@ -219,36 +219,6 @@ fun HomeScreen(
                                 message = msg,
                                 onCopyText = { copyToClipboard(context, msg.text) }
                             )
-                        }
-                    }
-
-                    // Live AI Caption streaming chunk if active
-                    if (uiState.isAiSpeaking && liveAiCaption.isNotBlank()) {
-                        item(key = "live_ai_streaming") {
-                            MaxGlassSurface(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                shape = MaxIOSShapes.ShapeLarge,
-                                backgroundColor = MaxIOSColors.DarkSurfaceGrouped.copy(alpha = 0.9f)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(MaxIOSColors.SystemTeal)
-                                    )
-                                    Text(
-                                        text = liveAiCaption,
-                                        color = MaxIOSColors.TextPrimaryDark,
-                                        fontSize = 15.sp,
-                                        lineHeight = 22.sp
-                                    )
-                                }
-                            }
                         }
                     }
 
@@ -322,8 +292,8 @@ fun HomeScreen(
                 )
             }
 
-            // Floating iOS-Style Input Dock with background scrim
-            Box(
+            // Floating iOS-Style Input Dock & Live Task Activity Card
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
@@ -338,6 +308,21 @@ fun HomeScreen(
                     )
                     .padding(bottom = 12.dp)
             ) {
+                // Live Agent Task Execution Activity Card with Stop Control
+                val activityState by viewModel.agentActivityState.collectAsState()
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = activityState.active || (activityState.stage != com.example.automation.activity.AgentStage.IDLE && !activityState.goal.isNullOrBlank()),
+                    enter = slideInVertically { it } + fadeIn(),
+                    exit = slideOutVertically { it } + fadeOut(),
+                    modifier = Modifier.padding(bottom = 6.dp)
+                ) {
+                    com.example.ui.components.AgentActivityCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        onDismiss = { com.example.automation.activity.AgentActivityTracker.reset() },
+                        onStopTask = { viewModel.cancelActiveTask() }
+                    )
+                }
+
                 MaxInputDock(
                     text = inputText,
                     onTextChange = { inputText = it },
@@ -384,7 +369,7 @@ fun TrialQuotaBanner(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    if (license.plan == com.example.firebase.model.LicensePlan.LIFETIME) return
+    if (license.plan == com.example.firebase.model.LicensePlan.LIFETIME && license.status == com.example.firebase.model.LicenseStatus.ACTIVE) return
 
     val isExpired = license.isExpired()
     val isLimitReached = dailyUsage >= 10L

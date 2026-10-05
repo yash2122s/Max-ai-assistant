@@ -64,16 +64,17 @@ class ReminderReceiver : BroadcastReceiver() {
                                 val service = com.example.core.registry.ServiceRegistry.get<com.example.service.JarvisAccessibilityService>(com.example.core.registry.ServiceType.ACCESSIBILITY)
                                 val pin = securitySettings.getDecryptedPin()
                                 if (service != null && pin.isNotEmpty()) {
-                                    val deferred = kotlinx.coroutines.CompletableDeferred<Unit>()
-                                    service.unlockWithPin(pin) {
+                                    val unlocked = service.unlockWithPinVerified(pin)
+                                    if (unlocked) {
                                         executeAutomation()
-                                        deferred.complete(Unit)
+                                    } else {
+                                        Log.e("ReminderReceiver", "Device unlock failed; keyguard is still locked. Aborting sensitive automation.")
                                     }
-                                    deferred.await()
                                 } else {
-                                    Log.e("ReminderReceiver", "Service null or PIN empty, cannot auto unlock")
-                                    executeAutomation()
+                                    Log.e("ReminderReceiver", "Service null or PIN empty, cannot auto unlock. Aborting automation while device is locked.")
                                 }
+                            } else if (keyguardManager.isKeyguardLocked) {
+                                Log.w("ReminderReceiver", "Device is locked and auto-unlock disabled. Aborting automation.")
                             } else {
                                 executeAutomation()
                             }

@@ -53,6 +53,8 @@ MAX
 │   ├── ToolDispatcher           app/src/main/java/com/example/network/ToolDispatcher.kt
 │   │     — Maps Gemini tool-call function names to action JSON
 │   ├── MessageModels            app/src/main/java/com/example/network/MessageModels.kt
+│   ├── LiveSessionState         app/src/main/java/com/example/network/LiveSessionState.kt
+│   │     — In-memory resumption token and bounded tool-call duplicate ledger
 │   ├── GeminiPlanningClient     app/src/main/java/com/example/network/GeminiPlanningClient.kt
 │   └── GeminiPlanningProvider   app/src/main/java/com/example/network/provider/GeminiPlanningProvider.kt
 │         — Injected into GoalPlanner for LLM-based multi-step planning

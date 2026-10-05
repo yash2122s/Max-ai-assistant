@@ -18,7 +18,7 @@ class GeminiModelRouterTest {
     }
 
     @Test
-    fun testQuickCommands_SelectsFastMode() {
+    fun testQuickCommands_DefaultToPrimaryFastModel() {
         val quickQueries = listOf(
             "Open Chrome",
             "Call Mom",
@@ -32,7 +32,7 @@ class GeminiModelRouterTest {
 
         for (query in quickQueries) {
             val mode = router.selectMode(TaskContext(query = query))
-            assertEquals("Expected FAST mode for query: '$query'", GeminiModelMode.FAST, mode)
+            assertEquals("Expected primary FAST mode for query: '$query'", GeminiModelMode.FAST, mode)
             assertEquals(GeminiLiveModels.FAST, router.modelFor(mode))
         }
     }

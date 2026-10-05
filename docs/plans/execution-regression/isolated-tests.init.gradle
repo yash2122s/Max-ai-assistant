@@ -1,0 +1,8 @@
+allprojects {
+    tasks.withType(org.gradle.api.tasks.testing.Test).configureEach {
+        // Verification-only isolation of Robolectric SDK/native runtimes.
+        // App code and test expectations are unchanged by this init script.
+        forkEvery = 1
+        maxParallelForks = 2
+    }
+}

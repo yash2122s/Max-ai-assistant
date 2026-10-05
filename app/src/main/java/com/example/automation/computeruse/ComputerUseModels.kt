@@ -16,11 +16,37 @@ enum class EvidenceStatus {
 }
 
 /**
+ * High-level intent classification for computer-use tasks.
+ */
+enum class TaskIntentType {
+    OPEN_APP_ONLY,
+    COMPOUND_UI_NAVIGATION,
+    SEARCH,
+    UI_ACTION
+}
+
+enum class NavigationActionType {
+    OPEN_APP,
+    CLICK_ELEMENT,
+    TYPE_TEXT,
+    PRESS_KEY
+}
+
+data class NavigationStep(
+    val actionType: NavigationActionType = NavigationActionType.CLICK_ELEMENT,
+    val target: String,
+    val stateExpectation: String? = null
+)
+
+/**
  * Strongly typed goal lifecycle states for the Computer-Use state machine.
  */
 enum class GoalState {
     INIT,
     APP_READY,
+    NAVIGATION_IN_PROGRESS,
+    TARGET_ACTION,
+    TARGET_VERIFIED,
     SEARCH_UI_OPEN,
     QUERY_ENTERED,
     SEARCH_SUBMITTED,
@@ -117,11 +143,20 @@ data class TargetGrounding(
      * Checks if this grounding is stale relative to the current observation.
      */
     fun isStale(currentObs: ScreenObservation): Boolean {
+        if (!currentObs.isFresh()) return true
         if (currentObs.foregroundPackage.isNotBlank() && !currentObs.foregroundPackage.equals(packageName, ignoreCase = true)) {
             return true
         }
         if (bounds.isEmpty || bounds.width() <= 0 || bounds.height() <= 0) {
             return true
+        }
+        if (observationId != currentObs.observationId) {
+            // Re-ground against a new snapshot; package equality alone cannot validate old coordinates.
+            return currentObs.interactiveElements.none { element ->
+                element.isEnabled && element.bounds == bounds &&
+                    (if (!resourceId.isNullOrBlank()) element.id == resourceId else
+                        element.text == semanticLabel || element.contentDescription == semanticLabel)
+            }
         }
         return false
     }
@@ -136,10 +171,24 @@ data class TaskContext(
     val targetApp: String? = null,
     val searchQuery: String = "",
     val isSearchGoal: Boolean = false,
+    val intentType: TaskIntentType = if (isSearchGoal) TaskIntentType.SEARCH else TaskIntentType.OPEN_APP_ONLY,
+    val navigationSteps: List<NavigationStep> = emptyList(),
+    var currentStepIndex: Int = 0,
+    val completedSteps: MutableList<String> = mutableListOf(),
     val startTime: Long = System.currentTimeMillis(),
     val maxSteps: Int = 10,
     @Volatile var isCancelled: Boolean = false
-)
+) {
+    val remainingSteps: List<String>
+        get() = if (currentStepIndex < navigationSteps.size) {
+            navigationSteps.subList(currentStepIndex, navigationSteps.size).map { it.target }
+        } else {
+            emptyList()
+        }
+
+    val currentTarget: String?
+        get() = navigationSteps.getOrNull(currentStepIndex)?.target
+}
 
 /**
  * Assessment result from observing the current screen state.

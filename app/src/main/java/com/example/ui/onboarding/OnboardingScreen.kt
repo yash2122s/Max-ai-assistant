@@ -8,6 +8,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -450,6 +451,7 @@ private fun PermissionsStepView(
             PermissionCard(
                 title = "Accessibility Service",
                 description = "Required to inspect UI elements and perform autonomous actions.",
+                icon = Icons.Filled.Settings,
                 isGranted = uiState.isAccessibilityGranted,
                 onRequest = onRequestAccessibility
             )
@@ -457,6 +459,7 @@ private fun PermissionsStepView(
             PermissionCard(
                 title = "Display Over Other Apps",
                 description = "Required to show the MAX voice orb and visual execution feedback.",
+                icon = Icons.Filled.Layers,
                 isGranted = uiState.isOverlayGranted,
                 onRequest = onRequestOverlay
             )
@@ -464,6 +467,7 @@ private fun PermissionsStepView(
             PermissionCard(
                 title = "Microphone",
                 description = "Required for real-time voice communication and wake-word detection.",
+                icon = Icons.Filled.Mic,
                 isGranted = uiState.isMicrophoneGranted,
                 onRequest = onRequestMicrophone
             )
@@ -471,6 +475,7 @@ private fun PermissionsStepView(
             PermissionCard(
                 title = "Ignore Battery Optimizations",
                 description = "Keeps MAX responsive in the background when your screen is locked.",
+                icon = Icons.Filled.Warning,
                 isGranted = uiState.isBatteryOptimizationsIgnored,
                 onRequest = onRequestBattery
             )
@@ -491,6 +496,7 @@ private fun PermissionsStepView(
 private fun PermissionCard(
     title: String,
     description: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     isGranted: Boolean,
     onRequest: () -> Unit
 ) {
@@ -503,21 +509,37 @@ private fun PermissionCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(MaxDimensions.spaceMd),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .background(MaxSurfaceVariant, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (isGranted) Color(0xFF10B981) else MaxPrimaryRoyal,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            
+            Spacer(modifier = Modifier.width(MaxDimensions.spaceMd))
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    fontSize = 14.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaxTextPrimary
                 )
-                Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = description,
-                    fontSize = 11.sp,
-                    color = MaxTextMuted
+                    fontSize = 12.sp,
+                    color = MaxTextMuted,
+                    lineHeight = 16.sp
                 )
             }
 
@@ -532,18 +554,25 @@ private fun PermissionCard(
                     Text(
                         text = "GRANTED",
                         color = Color(0xFF10B981),
-                        fontSize = 11.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
                 }
             } else {
-                MaxButton(
-                    text = "Grant",
-                    onClick = onRequest,
-                    variant = MaxButtonVariant.SECONDARY,
-                    modifier = Modifier.height(30.dp)
-                )
+                Surface(
+                    shape = RoundedCornerShape(MaxDimensions.radiusPill),
+                    color = MaxPrimaryRoyal.copy(alpha = 0.1f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaxPrimaryRoyal.copy(alpha = 0.3f))
+                ) {
+                    Text(
+                        text = "GRANT",
+                        color = MaxPrimaryRoyal,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                    )
+                }
             }
         }
     }
@@ -637,6 +666,111 @@ private fun AiConfigStepView(
                         tint = MaxPrimary.copy(alpha = 0.7f),
                         modifier = Modifier.size(16.dp)
                     )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
+
+        MaxCard(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.padding(MaxDimensions.spaceMd),
+                verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+            ) {
+                Text(
+                    text = "Assistant Voice & Persona",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaxTextPrimary
+                )
+
+                val isMale = uiState.liveVoiceName.equals("Puck", ignoreCase = true) ||
+                        uiState.liveVoiceName.equals("Charon", ignoreCase = true) ||
+                        uiState.liveVoiceName.equals("Fenrir", ignoreCase = true)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Female Option
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(MaxDimensions.radiusMd))
+                            .background(if (!isMale) Color(0xFFFF4081).copy(alpha = 0.12f) else MaxSurfaceVariant)
+                            .border(
+                                1.dp,
+                                if (!isMale) Color(0xFFFF4081) else MaxBorder,
+                                RoundedCornerShape(MaxDimensions.radiusMd)
+                            )
+                            .clickable { onVoiceSelected("Aoede") }
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Face,
+                                    contentDescription = null,
+                                    tint = if (!isMale) Color(0xFFFF4081) else MaxTextMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Female",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (!isMale) Color(0xFFFF4081) else MaxTextPrimary
+                                )
+                            }
+                            Text(
+                                text = "Caring & Warm",
+                                fontSize = 11.sp,
+                                color = MaxTextMuted
+                            )
+                        }
+                    }
+
+                    // Male Option
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(MaxDimensions.radiusMd))
+                            .background(if (isMale) MaxPrimary.copy(alpha = 0.12f) else MaxSurfaceVariant)
+                            .border(
+                                1.dp,
+                                if (isMale) MaxPrimary else MaxBorder,
+                                RoundedCornerShape(MaxDimensions.radiusMd)
+                            )
+                            .clickable { onVoiceSelected("Puck") }
+                            .padding(10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.RecordVoiceOver,
+                                    contentDescription = null,
+                                    tint = if (isMale) MaxPrimary else MaxTextMuted,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Male",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isMale) MaxPrimary else MaxTextPrimary
+                                )
+                            }
+                            Text(
+                                text = "Confident & Sharp",
+                                fontSize = 11.sp,
+                                color = MaxTextMuted
+                            )
+                        }
+                    }
                 }
             }
         }

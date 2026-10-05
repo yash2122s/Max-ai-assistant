@@ -9,6 +9,7 @@ sealed class ActionExpectation {
     data class FocusField(val target: String) : ActionExpectation()
     data class AppForeground(val packageName: String) : ActionExpectation()
     data class ElementSelected(val target: String) : ActionExpectation()
+    data class TargetVerified(val target: String) : ActionExpectation()
 }
 
 /**

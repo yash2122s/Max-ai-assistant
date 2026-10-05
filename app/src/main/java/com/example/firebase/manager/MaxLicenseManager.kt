@@ -250,7 +250,7 @@ class MaxLicenseManager(
 
         val user = authManager.userState.value
         if (user == null) {
-            val allowed = newLocal <= 10L
+            val allowed = newLocal <= 20L
             return@withContext Result.success(Pair(newLocal, allowed))
         }
 
@@ -262,7 +262,7 @@ class MaxLicenseManager(
             _dailyUsageCount.value = maxCount
             Result.success(Pair(maxCount, allowed))
         } else {
-            val allowed = newLocal <= 10L
+            val allowed = newLocal <= 20L
             Result.success(Pair(newLocal, allowed))
         }
     }

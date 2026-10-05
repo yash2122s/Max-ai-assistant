@@ -13,9 +13,18 @@ object QuickActions {
             if (cameraManager == null) {
                 return "Camera Service is not available on this device."
             }
-            val cameraId = cameraManager.cameraIdList.firstOrNull()
+            val cameraIds = cameraManager.cameraIdList
+            val cameraId = cameraIds.firstOrNull { id ->
+                val chars = runCatching { cameraManager.getCameraCharacteristics(id) }.getOrNull() ?: return@firstOrNull false
+                val hasFlash = chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+                val isBack = chars.get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) == android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+                hasFlash && isBack
+            } ?: cameraIds.firstOrNull { id ->
+                val chars = runCatching { cameraManager.getCameraCharacteristics(id) }.getOrNull() ?: return@firstOrNull false
+                chars.get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE) == true
+            }
             if (cameraId == null) {
-                return "No camera found to use flashlight."
+                return "No flash-capable camera found to use flashlight."
             }
             cameraManager.setTorchMode(cameraId, turnOn)
             if (turnOn) "Flashlight turned ON successfully!" else "Flashlight turned OFF successfully!"

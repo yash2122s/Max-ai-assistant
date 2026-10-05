@@ -22,6 +22,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -39,6 +40,7 @@ class OpenAppVerificationUnitTest {
         context = ApplicationProvider.getApplicationContext()
         verifier = OpenAppVerifier()
         WorldStateManager.setForegroundApp("")
+        com.example.service.JarvisAccessibilityService.testRootProvider = null
 
         val testApps = listOf(
             com.example.data.local.InstalledApp(packageName = "com.google.android.youtube", appName = "YouTube"),
@@ -48,6 +50,15 @@ class OpenAppVerificationUnitTest {
         InstalledAppsRepository.setCachedAppsForTesting(testApps)
     }
 
+    @After fun clearObservation() {
+        com.example.service.JarvisAccessibilityService.testRootProvider = null
+    }
+
+    private fun observePackage(pkg: String) {
+        val root = android.view.accessibility.AccessibilityNodeInfo.obtain().apply { packageName = pkg }
+        com.example.service.JarvisAccessibilityService.testRootProvider = { root }
+    }
+
     @Test
     fun test1_ImmediateMatch_ReturnsSuccessImmediately() {
         val request = ExecutionRequest(
@@ -55,19 +66,20 @@ class OpenAppVerificationUnitTest {
             arguments = JsonObject().apply { addProperty("app_name", "YouTube") }
         )
         val initialSnapshot = DeviceContext(ui = UiSnapshot(packageName = "com.google.android.youtube"))
+        observePackage("com.google.android.youtube")
 
         val start = System.currentTimeMillis()
         val result = verifier.verify(context, request, ToolResult(success = true, toolName = "open_app"), initialSnapshot)
         val elapsed = System.currentTimeMillis() - start
 
         assertTrue("Verification should succeed for matching package", result.success)
-        assertNull(result.reason)
+        assertTrue(result.reason?.contains("Live foreground package=com.google.android.youtube") == true)
         assertFalse(result.retryRecommended)
         assertTrue("Immediate match should take < 500ms, took ${elapsed}ms", elapsed < 500)
     }
 
     @Test
-    fun test2_InitiallyEmptySnapshot_SucceedsViaWorldStateFallback() {
+    fun test2_CachedWorldStateCannotVerifyLaunch() {
         val request = ExecutionRequest(
             action = "OPEN_APP",
             arguments = JsonObject().apply { addProperty("app_name", "YouTube") }
@@ -79,8 +91,7 @@ class OpenAppVerificationUnitTest {
 
         val result = verifier.verify(context, request, ToolResult(success = true, toolName = "open_app"), initialSnapshot)
 
-        assertTrue("Verification should succeed via fallback signal", result.success)
-        assertNull(result.reason)
+        assertFalse("Cached world state must not prove an app opened", result.success)
         assertFalse(result.retryRecommended)
     }
 
@@ -95,7 +106,7 @@ class OpenAppVerificationUnitTest {
         // Simulate app window transition appearing after 200ms
         CoroutineScope(Dispatchers.Default).launch {
             delay(200)
-            WorldStateManager.setForegroundApp("com.google.android.youtube")
+            observePackage("com.google.android.youtube")
         }
 
         val start = System.currentTimeMillis()
@@ -103,7 +114,7 @@ class OpenAppVerificationUnitTest {
         val elapsed = System.currentTimeMillis() - start
 
         assertTrue("Verification should succeed once package appears in poll loop", result.success)
-        assertNull(result.reason)
+        assertTrue(result.reason?.contains("Live foreground package=com.google.android.youtube") == true)
         assertTrue("Elapsed time should be bounded and finish shortly after transition (~200-800ms), was ${elapsed}ms", elapsed in 150..1500)
     }
 
@@ -153,6 +164,7 @@ class OpenAppVerificationUnitTest {
             arguments = JsonObject().apply { addProperty("app_name", "Calculator") }
         )
         val snapshot = DeviceContext(ui = UiSnapshot(packageName = "com.google.android.calculator"))
+        observePackage("com.google.android.calculator")
         val result = verifier.verify(context, request, ToolResult(success = true, toolName = "open_app"), snapshot)
         assertTrue("Calculator launch should be verified successfully", result.success)
 

@@ -10,55 +10,60 @@ import com.example.service.JarvisAccessibilityService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import java.io.File
 
 object ScreenObservationProvider {
     private const val TAG = "ScreenObservation"
     private const val MAX_TRAVERSAL_NODES = 150
     private const val MAX_TREE_DEPTH = 30
-    private const val SCREENSHOT_PATH = "/sdcard/max_cu_obs.png"
 
     suspend fun captureObservation(context: Context? = null, captureScreenshot: Boolean = true): ScreenObservation = withContext(Dispatchers.Default) {
         val observation = withTimeoutOrNull(3500L) {
             val service = JarvisAccessibilityService.instance
-            val rootNode = JarvisAccessibilityService.getActiveRoot()
+            val rootNode = JarvisAccessibilityService.getActiveRoot() ?: com.example.automation.engine.LiveNodeResolver.rootProvider.invoke()
             val currentPackage = rootNode?.packageName?.toString()
                 ?: service?.rootInActiveWindow?.packageName?.toString()
                 ?: service?.windows?.firstOrNull { it.isActive }?.root?.packageName?.toString()
                 ?: service?.windows?.firstOrNull { it.isFocused }?.root?.packageName?.toString()
+                ?: com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot().packageName.takeIf { it.isNotBlank() }
                 ?: com.example.automation.state.WorldStateManager.getCurrentState().currentApp
                 ?: ""
             val currentActivity = rootNode?.className?.toString()?.takeIf { it.contains("Activity") }
+                ?: com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot().activityName
 
-            // 1. Capture real physical screenshot
-            var savedScreenshotPath: String? = null
-            var screenshotFp: String? = null
-            if (captureScreenshot) {
-                try {
-                    val screenshotPath = context?.cacheDir?.absolutePath?.let { "$it/max_cu_obs.png" } ?: SCREENSHOT_PATH
-                    if (JarvisAccessibilityService.runShell("screencap -p $screenshotPath && chmod 666 $screenshotPath")) {
-                        val f = File(screenshotPath)
-                        if (f.exists() && f.length() > 0) {
-                            savedScreenshotPath = screenshotPath
-                            screenshotFp = computeScreenshotHash(f)
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Screenshot capture failed: ${e.message}")
-                }
-            }
-
-            val obsId = "obs_${System.currentTimeMillis()}"
+            val obsId = "obs_${java.util.UUID.randomUUID()}"
 
             if (rootNode == null) {
-                Log.i(TAG, "[OBSERVE] app=$currentPackage activity=${currentActivity ?: "none"} screenshot=${if (savedScreenshotPath != null) "yes" else "no"} treeNodes=0")
+                val snapshot = com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot()
+                if (!snapshot.isFresh(2000L) || snapshot.packageName.isBlank()) {
+                    return@withTimeoutOrNull ScreenObservation(observationId = obsId, timestamp = snapshot.timestamp)
+                }
+                val snapshotInteractive = snapshot.nodes.filter { it.isVisibleToUser && (it.isClickable || it.isEditable || it.isFocusable || it.isScrollable) }.map {
+                    InteractiveElement(
+                        id = it.resourceId,
+                        text = it.text,
+                        contentDescription = it.contentDescription,
+                        className = it.className,
+                        bounds = Rect(it.bounds),
+                        isClickable = it.isClickable,
+                        isEditable = it.isEditable,
+                        isScrollable = it.isScrollable,
+                        isFocused = it.isFocused,
+                        isEnabled = it.isEnabled,
+                        isSelected = it.isSelected
+                    )
+                }
+                val snapshotTexts = snapshot.allVisibleTexts.ifEmpty { snapshot.nodes.mapNotNull { it.text } }
+                Log.i(TAG, "[OBSERVE] app=${snapshot.packageName} treeNodes=${snapshot.nodes.size} source=state_store")
                 return@withTimeoutOrNull ScreenObservation(
                     observationId = obsId,
-                    foregroundPackage = currentPackage,
-                    currentActivity = currentActivity,
-                    screenshotPath = savedScreenshotPath,
-                    screenshotFingerprint = screenshotFp,
-                    timestamp = System.currentTimeMillis()
+                    foregroundPackage = snapshot.packageName,
+                    currentActivity = snapshot.activityName,
+                    interactiveElements = snapshotInteractive,
+                    editableElements = snapshotInteractive.filter { it.isEditable },
+                    scrollableElements = snapshotInteractive.filter { it.isScrollable },
+                    focusedElement = snapshotInteractive.firstOrNull { it.isFocused },
+                    visibleTexts = snapshotTexts,
+                    timestamp = snapshot.timestamp
                 )
             }
 
@@ -89,12 +94,12 @@ object ScreenObservationProvider {
                 val isEnabled = node.isEnabled
                 val isSelected = node.isSelected
 
-                if (!text.isNullOrBlank() && !visibleTexts.contains(text)) {
+                if (node.isVisibleToUser && !text.isNullOrBlank() && !visibleTexts.contains(text)) {
                     visibleTexts.add(text)
                 }
 
                 val isInteractive = isClickable || isEditable || isScrollable || isFocused || !desc.isNullOrBlank() || !id.isNullOrBlank()
-                if (isInteractive && (bounds.width() > 0 && bounds.height() > 0)) {
+                if (node.isVisibleToUser && isInteractive && (bounds.width() > 0 && bounds.height() > 0)) {
                     val element = InteractiveElement(
                         id = id,
                         text = text,
@@ -129,7 +134,7 @@ object ScreenObservationProvider {
                 Log.w(TAG, "Error traversing accessibility tree: ${e.message}")
             }
 
-            Log.i(TAG, "[OBSERVE] app=$currentPackage activity=${currentActivity ?: "none"} screenshot=${if (savedScreenshotPath != null) "yes" else "no"} treeNodes=$nodeCount")
+            Log.i(TAG, "[OBSERVE] app=$currentPackage treeNodes=$nodeCount source=accessibility")
 
             ScreenObservation(
                 observationId = obsId,
@@ -140,34 +145,24 @@ object ScreenObservationProvider {
                 scrollableElements = scrollableList,
                 visibleTexts = visibleTexts,
                 focusedElement = focusedElem,
-                screenshotPath = savedScreenshotPath,
-                screenshotFingerprint = screenshotFp,
                 timestamp = System.currentTimeMillis()
             )
         }
 
-        observation ?: ScreenObservation(
+        val semantic = observation ?: ScreenObservation(
             foregroundPackage = "",
             timestamp = System.currentTimeMillis()
         )
-    }
-
-    private fun computeScreenshotHash(file: File): String? {
-        if (!file.exists() || file.length() == 0L) return null
-        return try {
-            val digest = java.security.MessageDigest.getInstance("MD5")
-            file.inputStream().use { input ->
-                val buffer = ByteArray(8192)
-                var bytesRead = input.read(buffer)
-                while (bytesRead != -1) {
-                    digest.update(buffer, 0, bytesRead)
-                    bytesRead = input.read(buffer)
-                }
+        // Node traversal is finished before a potentially suspending screenshot capture.
+        if (captureScreenshot) {
+            val bytes = withContext(Dispatchers.IO) {
+                com.example.voice.vision.ScreenCaptureProvider.captureCompressedJpeg()
             }
-            digest.digest().joinToString("") { "%02x".format(it) }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed computing screenshot hash: ${e.message}")
-            null
+            semantic.copy(screenshotJpeg = bytes, screenshotFingerprint = bytes?.let {
+                java.security.MessageDigest.getInstance("SHA-256").digest(it).joinToString("") { b -> "%02x".format(b) }
+            })
+        } else {
+            semantic
         }
     }
 }

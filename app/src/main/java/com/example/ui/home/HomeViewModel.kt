@@ -268,29 +268,102 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         // P1.2 — typed reply to a pending approval (Allow / Cancel)
         if (com.example.automation.approval.ApprovalCoordinator.hasPending()) {
             viewModelScope.launch(Dispatchers.IO) {
-                val intent = com.example.automation.approval.ApprovalCoordinator.parseReply(trimmed)
-                when (intent) {
-                    com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE -> {
-                        val pending = com.example.automation.approval.ApprovalCoordinator.resolve()
-                        if (pending != null) {
-                            val ctx = com.example.automation.approval.ApprovalCoordinator.context()
-                                ?: getApplication<Application>()
-                            try {
-                                com.example.automation.engine.ActionDispatcher.dispatchWithResult(ctx, pending.payload)
-                            } catch (e: Exception) {
-                                _uiState.update { it.copy(isThinking = false, error = e.message) }
-                            }
-                        }
-                    }
-                    com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY ->
-                        com.example.automation.approval.ApprovalCoordinator.cancel()
-                    com.example.automation.approval.ApprovalCoordinator.ReplyIntent.OTHER -> Unit
-                }
-                if (intent != com.example.automation.approval.ApprovalCoordinator.ReplyIntent.OTHER) {
-                    _uiState.update { it.copy(isThinking = false) }
-                }
+                val ctx = com.example.automation.approval.ApprovalCoordinator.context()
+                    ?: getApplication<Application>()
+                com.example.automation.approval.ApprovalCoordinator.handleReply(trimmed, ctx)
+                _uiState.update { it.copy(isThinking = false) }
             }
             return
+        }
+
+        // P1-4: Typed selection for multi-contact disambiguation
+        if (com.example.automation.engine.PendingCallManager.state is com.example.automation.engine.CallState.AwaitingContactSelection) {
+            val replyIntent = com.example.automation.approval.ApprovalCoordinator.parseReply(trimmed)
+            if (replyIntent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY) {
+                com.example.automation.engine.PendingCallManager.cancel()
+                val reply = "Call cancelled."
+                persistChatMessage("jarvis", reply)
+                thinkingTimeoutJob?.cancel()
+                isModelIdle = true
+                _liveAiCaption.value = reply
+                _uiState.update { it.copy(isThinking = false, liveAiCaption = reply) }
+                scheduleCaptionClear()
+                _uiEvents.tryEmit(HomeUiEvent.ScrollToBottom)
+                return
+            }
+
+            val selectedCandidate = com.example.automation.engine.PendingCallManager.resolveAndSelectCandidate(trimmed)
+            if (selectedCandidate != null) {
+                val confirmPrompt = "Do you want to call ${selectedCandidate.contactMatch.displayName} (${selectedCandidate.phoneNumber.normalizedNumber})? Please say yes to confirm or cancel."
+                persistChatMessage("jarvis", confirmPrompt)
+                thinkingTimeoutJob?.cancel()
+                isModelIdle = true
+                _liveAiCaption.value = confirmPrompt
+                _uiState.update { it.copy(isThinking = false, liveAiCaption = confirmPrompt) }
+                scheduleCaptionClear()
+                _uiEvents.tryEmit(HomeUiEvent.ScrollToBottom)
+                return
+            } else {
+                val clarification = "Please choose which number or contact to call (e.g., 1, 2, Mobile, or Work)."
+                persistChatMessage("jarvis", clarification)
+                thinkingTimeoutJob?.cancel()
+                isModelIdle = true
+                _liveAiCaption.value = clarification
+                _uiState.update { it.copy(isThinking = false, liveAiCaption = clarification) }
+                scheduleCaptionClear()
+                _uiEvents.tryEmit(HomeUiEvent.ScrollToBottom)
+                return
+            }
+        }
+
+        // Typed reply to a pending phone call confirmation
+        if (com.example.automation.engine.PendingCallManager.hasPendingConfirmation()) {
+            val replyIntent = com.example.automation.approval.ApprovalCoordinator.parseReply(trimmed)
+            if (replyIntent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE) {
+                val pending = com.example.automation.engine.PendingCallManager.getPendingConfirmation()
+                if (pending != null) {
+                    com.example.automation.engine.PendingCallManager.confirmPendingCall(pending.contactId, pending.phoneId)
+                    viewModelScope.launch(Dispatchers.IO) {
+                        val callArgs = org.json.JSONObject().apply {
+                            put("action", "CALL_PHONE")
+                            put("contactId", pending.contactId)
+                            put("phoneId", pending.phoneId)
+                            put("contact", pending.displayName)
+                            put("phoneNumber", pending.phoneNumber)
+                            put("confirmed", true)
+                            put("user_confirmed", true)
+                            put("last_input_transcription", trimmed)
+                        }
+                        val resultJsonStr = com.example.automation.engine.ActionDispatcher.dispatchWithResult(getApplication<Application>(), callArgs)
+                        val resultObj = runCatching { org.json.JSONObject(resultJsonStr) }.getOrNull()
+                        val isSuccess = resultObj?.optBoolean("success", false) == true
+                        val reply = if (isSuccess) {
+                            "Calling ${pending.displayName}..."
+                        } else {
+                            resultObj?.optString("message") ?: "Failed to place call."
+                        }
+                        persistChatMessage("jarvis", reply)
+                        thinkingTimeoutJob?.cancel()
+                        isModelIdle = true
+                        _liveAiCaption.value = reply
+                        _uiState.update { it.copy(isThinking = false, liveAiCaption = reply) }
+                        scheduleCaptionClear()
+                        _uiEvents.tryEmit(HomeUiEvent.ScrollToBottom)
+                    }
+                    return
+                }
+            } else if (replyIntent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY) {
+                com.example.automation.engine.PendingCallManager.cancel()
+                val reply = "Call cancelled."
+                persistChatMessage("jarvis", reply)
+                thinkingTimeoutJob?.cancel()
+                isModelIdle = true
+                _liveAiCaption.value = reply
+                _uiState.update { it.copy(isThinking = false, liveAiCaption = reply) }
+                scheduleCaptionClear()
+                _uiEvents.tryEmit(HomeUiEvent.ScrollToBottom)
+                return
+            }
         }
 
         // P1.4 — typed reply to a pending habit routine suggestion
@@ -631,6 +704,16 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
                 isAiSpeaking = false
             ) }
         }
+    }
+
+    val agentActivityState: StateFlow<com.example.automation.activity.AgentActivityState> =
+        com.example.automation.activity.AgentActivityTracker.state
+
+    fun cancelActiveTask() {
+        com.example.automation.engine.TaskCancellationCoordinator.cancelActiveTask(
+            context = getApplication(),
+            reason = "Task stopped by user from Home UI"
+        )
     }
 
     override fun onCleared() {

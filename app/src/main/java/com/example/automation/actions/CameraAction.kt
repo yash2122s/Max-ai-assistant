@@ -56,7 +56,17 @@ class CameraAction : BaseAction<JSONObject>() {
                             log("Captured screenshot (${jpeg.size} bytes) but MediaStore insert failed")
                         }
                     } else {
-                        log("Silent background screenshot unavailable (Shizuku/Accessibility disabled).")
+                        // Fallback to accessibility global screenshot action
+                        val service = ServiceRegistry.get<JarvisAccessibilityService>(ServiceType.ACCESSIBILITY)
+                        if (service != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            val dispatched = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_TAKE_SCREENSHOT)
+                            log("Triggered system screenshot via Accessibility GLOBAL_ACTION_TAKE_SCREENSHOT: $dispatched")
+                            if (!dispatched) {
+                                throw IllegalStateException("Accessibility service failed to trigger system screenshot")
+                            }
+                        } else {
+                            throw IllegalStateException("Screenshot capture unavailable (Accessibility service not running or permission missing)")
+                        }
                     }
                 }
                 else -> {
@@ -65,6 +75,7 @@ class CameraAction : BaseAction<JSONObject>() {
             }
         } catch (e: Exception) {
             logError("Failed to execute camera action: ${e.message}", e)
+            throw e
         }
     }
 }

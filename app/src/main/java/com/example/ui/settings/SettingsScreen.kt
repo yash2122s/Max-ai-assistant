@@ -160,11 +160,11 @@ fun SettingsScreen(
             }
 
             // ================================================================
-            // SECTION: AI ENGINE & MODEL ROUTING
+            // SECTION: AI ENGINE
             // ================================================================
             MaxIOSSettingsSection(
-                title = "AI Engine & Model Routing",
-                footer = "Auto mode dynamically selects Fast for quick voice queries and Deep for complex multi-step planning."
+                title = "Gemini Live AI Engine",
+                footer = "Real-time AI model mode is set to Auto by default, dynamically selecting Fast for low-latency voice (<500ms) and Deep for multi-step reasoning."
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
@@ -230,61 +230,61 @@ fun SettingsScreen(
 
                 HorizontalDivider(color = MaxIOSColors.HairlineDark, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
 
+                MaxIOSSettingsRow(
+                    title = "Thinking Observability",
+                    subtitle = "Stream live AI reasoning thought summaries in UI",
+                    icon = Icons.Default.Psychology,
+                    iconBg = MaxIOSColors.SystemPurple,
+                    trailingContent = {
+                        Switch(
+                            checked = uiState.isThinkingObservabilityEnabled,
+                            onCheckedChange = { viewModel.updateIsThinkingObservabilityEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaxIOSColors.SystemPurple,
+                                uncheckedThumbColor = Color.LightGray,
+                                uncheckedTrackColor = Color(0xFF333842)
+                            )
+                        )
+                    },
+                    showDivider = false
+                )
+            }
+
+            // ================================================================
+            // SECTION: ASSISTANT VOICE & PERSONA (MALE / FEMALE)
+            // ================================================================
+            MaxIOSSettingsSection(
+                title = "Assistant Voice & Persona",
+                footer = "Select your preferred assistant voice and personality. Female speaks warmly and caringly, while Male speaks confidently with brotherly energy."
+            ) {
                 Column(
                     modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Text(
-                        text = "Real-Time AI Model Mode",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaxIOSColors.TextPrimaryDark
+                    val isMale = uiState.liveVoiceName.equals("Puck", ignoreCase = true) ||
+                            uiState.liveVoiceName.equals("Charon", ignoreCase = true) ||
+                            uiState.liveVoiceName.equals("Fenrir", ignoreCase = true) ||
+                            uiState.liveVoiceName.equals("Orus", ignoreCase = true)
+
+                    IOSVoiceOption(
+                        title = "Female Voice (Aoede)",
+                        subtitle = "Caring, sweet, warm & affectionate persona (ప్రేమగా & కేరింగ్ గా మాట్లాడుతుంది)",
+                        badge = "CARING",
+                        badgeColor = Color(0xFFFF4081),
+                        icon = Icons.Default.Face,
+                        isSelected = !isMale,
+                        onClick = { viewModel.updateLiveVoiceName("Aoede") }
                     )
 
-                    IOSModelModeOption(
-                        title = "Auto (Recommended)",
-                        subtitle = "Dynamically routes between Fast and Deep thinking",
-                        badge = "SMART",
-                        isSelected = uiState.modelRoutingMode.equals("AUTO", ignoreCase = true),
-                        onClick = { viewModel.updateModelRoutingMode("AUTO") }
-                    )
-
-                    IOSModelModeOption(
-                        title = "Fast Mode (gemini-3.8-live)",
-                        subtitle = "Low latency real-time voice streaming (<500ms)",
-                        badge = "FAST",
-                        isSelected = uiState.modelRoutingMode.equals("FAST", ignoreCase = true),
-                        onClick = { viewModel.updateModelRoutingMode("FAST") }
-                    )
-
-                    IOSModelModeOption(
-                        title = "Deep Mode (Extended Thinking)",
-                        subtitle = "Multi-step reasoning & complex device automation",
-                        badge = "REASONING",
-                        isSelected = uiState.modelRoutingMode.equals("DEEP", ignoreCase = true),
-                        onClick = { viewModel.updateModelRoutingMode("DEEP") }
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    MaxIOSSettingsRow(
-                        title = "Thinking Observability",
-                        subtitle = "Stream live AI reasoning thought summaries in UI",
-                        icon = Icons.Default.Psychology,
-                        iconBg = MaxIOSColors.SystemPurple,
-                        trailingContent = {
-                            Switch(
-                                checked = uiState.isThinkingObservabilityEnabled,
-                                onCheckedChange = { viewModel.updateIsThinkingObservabilityEnabled(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = MaxIOSColors.SystemPurple,
-                                    uncheckedThumbColor = Color.LightGray,
-                                    uncheckedTrackColor = Color(0xFF333842)
-                                )
-                            )
-                        },
-                        showDivider = false
+                    IOSVoiceOption(
+                        title = "Male Voice (Puck)",
+                        subtitle = "Confident, sharp & brotherly persona (మగవాడిలా & కాన్ఫిడెంట్ గా మాట్లాడుతుంది)",
+                        badge = "CONFIDENT",
+                        badgeColor = MaxIOSColors.SystemBlue,
+                        icon = Icons.Default.RecordVoiceOver,
+                        isSelected = isMale,
+                        onClick = { viewModel.updateLiveVoiceName("Puck") }
                     )
                 }
             }
@@ -562,10 +562,12 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun IOSModelModeOption(
+private fun IOSVoiceOption(
     title: String,
     subtitle: String,
     badge: String,
+    badgeColor: Color,
+    icon: ImageVector,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
@@ -573,10 +575,10 @@ private fun IOSModelModeOption(
         modifier = Modifier
             .fillMaxWidth()
             .clip(MaxIOSShapes.ShapeMedium)
-            .background(if (isSelected) MaxIOSColors.SystemBlue.copy(alpha = 0.12f) else MaxIOSColors.DarkBase.copy(alpha = 0.5f))
+            .background(if (isSelected) badgeColor.copy(alpha = 0.12f) else MaxIOSColors.DarkBase.copy(alpha = 0.5f))
             .border(
                 0.5.dp,
-                if (isSelected) MaxIOSColors.SystemBlue else MaxIOSColors.HairlineDark,
+                if (isSelected) badgeColor else MaxIOSColors.HairlineDark,
                 MaxIOSShapes.ShapeMedium
             )
             .clickable(onClick = onClick)
@@ -587,14 +589,20 @@ private fun IOSModelModeOption(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            RadioButton(
-                selected = isSelected,
-                onClick = onClick,
-                colors = RadioButtonDefaults.colors(
-                    selectedColor = MaxIOSColors.SystemBlue,
-                    unselectedColor = MaxIOSColors.TextTertiaryDark
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) badgeColor.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (isSelected) badgeColor else MaxIOSColors.TextSecondaryDark,
+                    modifier = Modifier.size(20.dp)
                 )
-            )
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -604,19 +612,19 @@ private fun IOSModelModeOption(
                         text = title,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isSelected) MaxIOSColors.SystemBlue else MaxIOSColors.TextPrimaryDark
+                        color = if (isSelected) badgeColor else MaxIOSColors.TextPrimaryDark
                     )
                     Box(
                         modifier = Modifier
                             .clip(MaxIOSShapes.ShapePill)
-                            .background(if (isSelected) MaxIOSColors.SystemBlue.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
+                            .background(if (isSelected) badgeColor.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = badge,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isSelected) MaxIOSColors.SystemBlue else MaxIOSColors.TextSecondaryDark
+                            color = if (isSelected) badgeColor else MaxIOSColors.TextSecondaryDark
                         )
                     }
                 }
@@ -627,6 +635,14 @@ private fun IOSModelModeOption(
                     lineHeight = 16.sp
                 )
             }
+            RadioButton(
+                selected = isSelected,
+                onClick = onClick,
+                colors = RadioButtonDefaults.colors(
+                    selectedColor = badgeColor,
+                    unselectedColor = MaxIOSColors.TextTertiaryDark
+                )
+            )
         }
     }
 }

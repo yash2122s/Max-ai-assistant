@@ -48,7 +48,7 @@ class IntentRoutingGuardUnitTest {
 
         val waCallUtterance = "Call Yash on WhatsApp"
         val waCallAuth = ActionAuthorizer.authorizeAction(waCallUtterance, "CALL_PHONE")
-        assertTrue("Direct 'Call Yash on WhatsApp' must authorize CALL_PHONE", waCallAuth.authorized)
+        assertFalse("Direct 'Call Yash on WhatsApp' must NOT authorize cellular CALL_PHONE", waCallAuth.authorized)
     }
 
     @Test
@@ -159,5 +159,58 @@ class IntentRoutingGuardUnitTest {
 
         val s5 = plan.steps[4].action as UiStep.TypeText
         assertEquals("I am in a meeting and will call back later", s5.text)
+    }
+
+    @Test
+    fun testActionDispatcher_isUiNavigationTask_InvertedRouting() {
+        // UI Tasks for WhatsApp, Telegram, and other apps must route to ComputerUseEngine
+        assertTrue(com.example.automation.engine.ActionDispatcher.isUiNavigationTask("WhatsApp", "create a new sticker"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isUiNavigationTask("WhatsApp", "send_whatsapp_message"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isUiNavigationTask("Telegram", "open channel"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isUiNavigationTask("YouTube", "search tech videos"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isUiNavigationTask("Instagram", "view profile"))
+
+        // Pure hardware / device settings must NOT be routed as UI navigation tasks
+        assertFalse(com.example.automation.engine.ActionDispatcher.isUiNavigationTask(null, "toggle_setting flashlight"))
+        assertFalse(com.example.automation.engine.ActionDispatcher.isUiNavigationTask("flashlight", "turn on flashlight"))
+        assertFalse(com.example.automation.engine.ActionDispatcher.isUiNavigationTask("wifi", "enable wifi"))
+        assertFalse(com.example.automation.engine.ActionDispatcher.isUiNavigationTask("bluetooth", "toggle bluetooth"))
+        assertFalse(com.example.automation.engine.ActionDispatcher.isUiNavigationTask(null, "set_volume up"))
+    }
+
+    @Test
+    fun testActionDispatcher_BilingualVoiceGuards() {
+        // Telugu Call Utterances
+        assertTrue(com.example.automation.engine.ActionDispatcher.isExplicitCallUtterance("నాన్నకు కాల్ చెయ్"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isExplicitCallUtterance("డాడీకి ఫోన్ చేయి"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isExplicitCallUtterance("కాల్ చేయండి"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isExplicitCallUtterance("call chey Yash ki"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isExplicitCallUtterance("phone cheyyi"))
+
+        // Telugu Messaging Utterances
+        assertTrue(com.example.automation.engine.ActionDispatcher.isMessagingUtterance("వాట్సాప్‌లో మెసేజ్ పంపు"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isMessagingUtterance("నాన్నకు మెసేజ్ పెట్టు నేను మీటింగ్‌లో ఉన్నాను"))
+        assertTrue(com.example.automation.engine.ActionDispatcher.isMessagingUtterance("Send WhatsApp message to Yash that I am in a meeting"))
+
+        // Mixed Telugu Messaging with "call" word inside text must NOT be treated as explicit call
+        val mixedMessage = "వాట్సాప్‌లో మెసేజ్ పంపు నేను తర్వాత కాల్ చేస్తాను"
+        assertTrue(com.example.automation.engine.ActionDispatcher.isMessagingUtterance(mixedMessage))
+        assertFalse(com.example.automation.engine.ActionDispatcher.isExplicitCallUtterance(mixedMessage))
+    }
+
+    @Test
+    fun testDispatchWithResult_RejectsGenericMessagingAsPhoneCall() = runBlocking {
+        val request = JSONObject().apply {
+            put("action", "CALL_PHONE")
+            put("last_input_transcription", "Send a message saying I will call later")
+        }
+
+        val result = JSONObject(
+            com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, request)
+        )
+
+        assertFalse(result.optBoolean("success"))
+        assertEquals("REJECTED", result.optString("executionState"))
+        assertEquals("CALL_PHONE_MESSAGING_CONFLICT", result.optJSONObject("error")?.optString("code"))
     }
 }

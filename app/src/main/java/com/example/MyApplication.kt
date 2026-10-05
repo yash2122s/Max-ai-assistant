@@ -139,6 +139,7 @@ class MyApplication : Application() {
 
         ToolRegistry.register(openAppTool)
         ToolRegistry.register(com.example.automation.tools.WaitForUiTool())
+        ToolRegistry.register(com.example.automation.tools.WaitTool())
         ToolRegistry.register(flashlightTool)
         ToolRegistry.register(whatsAppTool)
         ToolRegistry.register(scheduleTaskTool)
@@ -261,8 +262,8 @@ class MyApplication : Application() {
         featureGate = com.example.license.entitlement.FeatureGate(entitlementManager)
         
         // Eagerly compute entitlement on startup and observe updates
-        entitlementManager.refresh()
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            entitlementManager.refresh()
             maxLicenseManager.currentLicense.collect {
                 entitlementManager.refresh()
             }

@@ -96,6 +96,7 @@ android {
       isIncludeAndroidResources = true
       isReturnDefaultValues = true
       all {
+        it.maxHeapSize = "2048m"
         it.systemProperty("junit.jupiter.tempdir.cleanup.mode.default", "never")
       }
     }

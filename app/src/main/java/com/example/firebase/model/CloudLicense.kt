@@ -33,11 +33,16 @@ enum class LicenseStatus {
 
     companion object {
         fun fromString(value: String?): LicenseStatus {
-            return when (value?.uppercase()?.trim()) {
-                "TRIAL" -> TRIAL
+            val normalized = value?.uppercase()?.trim()
+            return when (normalized) {
                 "ACTIVE" -> ACTIVE
+                "TRIAL" -> TRIAL
                 "REVOKED" -> REVOKED
-                else -> EXPIRED
+                "EXPIRED" -> EXPIRED
+                else -> {
+                    android.util.Log.w("CloudLicense", "Unrecognized or non-active license status: '$value', defaulting to EXPIRED")
+                    EXPIRED
+                }
             }
         }
     }

@@ -10,7 +10,7 @@ import com.example.service.JarvisAccessibilityService
 class WaitForUiTool : Tool {
     private val TAG = "WaitForUiTool"
     override val name: String = "wait_for_ui"
-    override val supportedActions: Set<String> = setOf("WAIT_FOR_UI", "WAIT", "WAIT_FOR_ELEMENT", "VERIFY_UI")
+    override val supportedActions: Set<String> = setOf("WAIT_FOR_UI", "WAIT_FOR_ELEMENT", "VERIFY_UI")
     override val retryPolicy: RetryPolicy = RetryPolicy.NoRetry
     override val capabilities: ToolCapabilities = ToolCapabilities(
         supportsPlanner = true,

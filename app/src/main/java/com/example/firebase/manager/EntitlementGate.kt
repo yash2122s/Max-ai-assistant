@@ -9,8 +9,10 @@ import com.example.firebase.model.LicenseStatus
 sealed class GateDecision {
     data object AllowLifetime : GateDecision()
     data class AllowTrial(val messageCountToday: Long, val messagesRemaining: Long) : GateDecision()
-    data class BlockDailyLimitReached(val messageCountToday: Long, val limit: Long = 10L) : GateDecision()
+    data class BlockDailyLimitReached(val messageCountToday: Long, val limit: Long = EntitlementGate.DEFAULT_DAILY_LIMIT) : GateDecision()
     data object BlockTrialExpired : GateDecision()
+    data object BlockLicenseRevoked : GateDecision()
+    data class BlockLicenseInactive(val reason: String = "MAX License is not active.") : GateDecision()
     data class BlockNotAuthenticated(val message: String = "Google Sign-In required.") : GateDecision()
     data class BlockError(val message: String) : GateDecision()
 
@@ -31,29 +33,51 @@ class EntitlementGate(
         val license = licenseManager.currentLicense.value
         val now = System.currentTimeMillis()
 
-        // 1. Lifetime user: ALWAYS ALLOW
-        if (license.plan == LicensePlan.LIFETIME && license.status == LicenseStatus.ACTIVE) {
-            Log.d(TAG, "[License] gate_allowed: LIFETIME user")
-            return GateDecision.AllowLifetime
+        // 0. Revoked check
+        if (license.status == LicenseStatus.REVOKED) {
+            Log.w(TAG, "[License] gate_blocked: LICENSE REVOKED")
+            return GateDecision.BlockLicenseRevoked
         }
 
-        // 2. Expired Trial check: only block if explicitly expired plan or active trial has elapsed
+        // 1. Lifetime user: Check ACTIVE
+        if (license.plan == LicensePlan.LIFETIME) {
+            if (license.status == LicenseStatus.ACTIVE) {
+                Log.d(TAG, "[License] gate_allowed: LIFETIME user")
+                return GateDecision.AllowLifetime
+            } else {
+                Log.w(TAG, "[License] gate_blocked: LIFETIME license inactive (status=${license.status})")
+                return GateDecision.BlockLicenseInactive("MAX Lifetime License is not active (${license.status}).")
+            }
+        }
+
+        // 2. Paid / Premium tiers
+        if (license.plan == LicensePlan.PREMIUM || license.plan == LicensePlan.PRO) {
+            if (license.status == LicenseStatus.ACTIVE && license.isEntitled(now)) {
+                Log.d(TAG, "[License] gate_allowed: PREMIUM/PRO user")
+                return GateDecision.AllowLifetime
+            } else {
+                Log.w(TAG, "[License] gate_blocked: PREMIUM/PRO inactive (status=${license.status})")
+                return GateDecision.BlockLicenseInactive("MAX Premium License is not active (${license.status}).")
+            }
+        }
+
+        // 3. Expired Trial check: only block if explicitly expired plan or active trial has elapsed
         if (license.plan == LicensePlan.EXPIRED || (license.plan == LicensePlan.TRIAL && license.isExpired(now))) {
             Log.w(TAG, "[License] gate_blocked: TRIAL EXPIRED")
             return GateDecision.BlockTrialExpired
         }
 
-        // 3. Active Trial or First-Time Sync: Consume 1 message atomically
+        // 4. Active Trial or First-Time Sync: Consume 1 message atomically
         if (license.plan == LicensePlan.TRIAL || license.plan == LicensePlan.FREE) {
             val result = licenseManager.consumeDailyMessage()
             if (result.isSuccess) {
                 val (newCount, allowed) = result.getOrNull()!!
                 return if (allowed) {
-                    val remaining = (10L - newCount).coerceAtLeast(0L)
+                    val remaining = (DEFAULT_DAILY_LIMIT - newCount).coerceAtLeast(0L)
                     Log.d(TAG, "[License] gate_allowed: TRIAL message count=$newCount, remaining=$remaining")
                     GateDecision.AllowTrial(newCount, remaining)
                 } else {
-                    Log.w(TAG, "[License] gate_blocked: DAILY LIMIT REACHED ($newCount/10)")
+                    Log.w(TAG, "[License] gate_blocked: DAILY LIMIT REACHED ($newCount/$DEFAULT_DAILY_LIMIT)")
                     GateDecision.BlockDailyLimitReached(newCount)
                 }
             } else {
@@ -64,15 +88,15 @@ class EntitlementGate(
                 Log.w(TAG, "[License] gate_check fallback warning: ${err?.message}")
                 // Graceful check against current local count if temporary network hiccup
                 val currentLocalCount = licenseManager.dailyUsageCount.value
-                return if (currentLocalCount < 10L) {
-                    GateDecision.AllowTrial(currentLocalCount + 1L, 10L - (currentLocalCount + 1L))
+                return if (currentLocalCount < DEFAULT_DAILY_LIMIT) {
+                    GateDecision.AllowTrial(currentLocalCount + 1L, DEFAULT_DAILY_LIMIT - (currentLocalCount + 1L))
                 } else {
                     GateDecision.BlockDailyLimitReached(currentLocalCount)
                 }
             }
         }
 
-        return GateDecision.BlockTrialExpired
+        return GateDecision.BlockError("Access denied: Invalid license state.")
     }
 
     /**
@@ -82,8 +106,24 @@ class EntitlementGate(
         val license = licenseManager.currentLicense.value
         val now = System.currentTimeMillis()
 
-        if (license.plan == LicensePlan.LIFETIME && license.status == LicenseStatus.ACTIVE) {
-            return GateDecision.AllowLifetime
+        if (license.status == LicenseStatus.REVOKED) {
+            return GateDecision.BlockLicenseRevoked
+        }
+
+        if (license.plan == LicensePlan.LIFETIME) {
+            return if (license.status == LicenseStatus.ACTIVE) {
+                GateDecision.AllowLifetime
+            } else {
+                GateDecision.BlockLicenseInactive("MAX Lifetime License is not active (${license.status}).")
+            }
+        }
+
+        if (license.plan == LicensePlan.PREMIUM || license.plan == LicensePlan.PRO) {
+            return if (license.status == LicenseStatus.ACTIVE && license.isEntitled(now)) {
+                GateDecision.AllowLifetime
+            } else {
+                GateDecision.BlockLicenseInactive("MAX Premium License is not active (${license.status}).")
+            }
         }
 
         if (license.plan == LicensePlan.EXPIRED || (license.plan == LicensePlan.TRIAL && license.isExpired(now))) {
@@ -91,14 +131,15 @@ class EntitlementGate(
         }
 
         val usage = licenseManager.dailyUsageCount.value
-        if (usage >= 10L) {
+        if (usage >= DEFAULT_DAILY_LIMIT) {
             return GateDecision.BlockDailyLimitReached(usage)
         }
 
-        return GateDecision.AllowTrial(usage, (10L - usage).coerceAtLeast(0L))
+        return GateDecision.AllowTrial(usage, (DEFAULT_DAILY_LIMIT - usage).coerceAtLeast(0L))
     }
 
     companion object {
         private const val TAG = "EntitlementGate"
+        const val DEFAULT_DAILY_LIMIT = 20L
     }
 }

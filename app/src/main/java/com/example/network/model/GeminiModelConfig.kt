@@ -39,7 +39,7 @@ object GeminiLiveModels {
         return when (mode) {
             GeminiModelMode.FAST -> FAST
             GeminiModelMode.DEEP -> DEEP
-            GeminiModelMode.AUTO -> FAST // Baseline for Auto mode before task escalation
+            GeminiModelMode.AUTO -> FAST
         }
     }
 
@@ -48,6 +48,9 @@ object GeminiLiveModels {
         return sanitized.equals(DEEP, ignoreCase = true) || sanitized.contains("extended-thinking", ignoreCase = true)
     }
 }
+
+/** Explicit session-level thinking effort; never a request to expose private reasoning. */
+enum class LiveThinkingLevel { LOW, MEDIUM, HIGH }
 
 /**
  * Centralized source of truth for UI Automation Agent reasoning models.

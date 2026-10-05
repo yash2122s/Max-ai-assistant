@@ -60,8 +60,16 @@ data class Turn(
 // Response models
 data class ServerMessage(
     val serverContent: ServerContent?,
-    val toolCall: ToolCall? = null
+    val toolCall: ToolCall? = null,
+    val setupComplete: com.google.gson.JsonObject? = null,
+    val toolCallCancellation: ToolCallCancellation? = null,
+    val sessionResumptionUpdate: SessionResumptionUpdate? = null,
+    val goAway: com.google.gson.JsonObject? = null
 )
+
+data class ToolCallCancellation(val ids: List<String> = emptyList())
+
+data class SessionResumptionUpdate(val newHandle: String? = null, val resumable: Boolean = false)
 
 data class ToolCall(
     val functionCalls: List<FunctionCall>

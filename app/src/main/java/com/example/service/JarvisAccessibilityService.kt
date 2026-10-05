@@ -50,7 +50,32 @@ data class TargetStateSnapshot(
 class JarvisAccessibilityService : AccessibilityService() {
 
     companion object {
+        @Volatile
         var pendingTask: AutomationTask? = null
+        private val taskMutex = Any()
+
+        fun setPendingTaskSafely(task: AutomationTask?): Boolean {
+            synchronized(taskMutex) {
+                val current = pendingTask
+                if (task != null && current != null) {
+                    val age = System.currentTimeMillis() - current.startTime
+                    if (age < 15000L) {
+                        Log.w("JarvisAccessibility", "Concurrent automation collision: active task '${current.type}' started ${age}ms ago. Rejecting new task '${task.type}'")
+                        return false
+                    }
+                }
+                pendingTask = task
+                return true
+            }
+        }
+
+        fun clearPendingTask(expectedTask: AutomationTask? = null) {
+            synchronized(taskMutex) {
+                if (expectedTask == null || pendingTask === expectedTask) {
+                    pendingTask = null
+                }
+            }
+        }
         var instance: JarvisAccessibilityService? = null
         var lastSendVerificationResult: SendVerificationResult? = null
         var testRootProvider: (() -> AccessibilityNodeInfo?)? = null
@@ -163,10 +188,17 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "UNLOCK_WITH_PIN") {
-            val pin = intent.getStringExtra("pin")
-            if (!pin.isNullOrEmpty()) {
-                Log.d("JarvisAccessibility", "Received request to unlock with PIN")
-                unlockWithPin(pin)
+            val securitySettings = com.example.security.SecuritySettings(this)
+            if (securitySettings.autoUnlockEnabled) {
+                val storedPin = securitySettings.getDecryptedPin()
+                if (storedPin.isNotEmpty()) {
+                    Log.d("JarvisAccessibility", "Received request to unlock device with encrypted settings PIN")
+                    unlockWithPin(storedPin)
+                } else {
+                    Log.w("JarvisAccessibility", "UNLOCK_WITH_PIN requested but PIN not configured in SecuritySettings")
+                }
+            } else {
+                Log.w("JarvisAccessibility", "UNLOCK_WITH_PIN requested but auto-unlock disabled")
             }
         }
         return super.onStartCommand(intent, flags, startId)
@@ -176,6 +208,13 @@ class JarvisAccessibilityService : AccessibilityService() {
         if (!com.example.core.lifecycle.MaxRuntimeManager.isMaxEnabled(this)) {
             pendingTask = null
             return
+        }
+
+        // Feed continuous reactive UI state store
+        try {
+            com.example.automation.monitor.AccessibilityStateMonitor.onAccessibilityEvent(event)
+        } catch (e: Exception) {
+            Log.w("JarvisAccessibility", "Failed to feed AccessibilityStateMonitor: ${e.message}")
         }
 
         // P1.4 — habit discovery: passively observe foreground app transitions.
@@ -231,6 +270,11 @@ class JarvisAccessibilityService : AccessibilityService() {
             return
         }
 
+        if (task.type == "WHATSAPP_NAVIGATE" && (packageName == "com.whatsapp" || packageName == "com.whatsapp.w4b")) {
+            handleWhatsAppScreenNavigation(task, packageName)
+            return
+        }
+
         if (task.type == "SEND_MESSAGE_DEEP_LINK" && (packageName == "com.whatsapp" || packageName == "com.whatsapp.w4b")) {
             handleWhatsAppDeepLinkAutomation(task, packageName)
             return
@@ -251,7 +295,7 @@ class JarvisAccessibilityService : AccessibilityService() {
             return
         }
         val contact = task.contact ?: return
-        val message = task.message ?: return
+        val message = task.message ?: ""
 
         val timeElapsed = System.currentTimeMillis() - task.startTime
         if (timeElapsed > 12000L) {
@@ -278,6 +322,13 @@ class JarvisAccessibilityService : AccessibilityService() {
                 Log.d("WA_DEBUG", "Deep Link Step 0: isCorrectChatOpen=$isCorrect")
                 if (!isCorrect && timeElapsed < 3500L) {
                     Log.d("WA_DEBUG", "Deep Link Step 0: Waiting for correct chat header to load...")
+                    return
+                }
+
+                if (message.isBlank()) {
+                    Log.d("WA_DEBUG", "Deep Link Step 0: Message is blank, target chat for '$contact' opened successfully!")
+                    lastSendVerificationResult = SendVerificationResult.SUCCESS
+                    completeTask(task)
                     return
                 }
 
@@ -386,12 +437,284 @@ class JarvisAccessibilityService : AccessibilityService() {
         if (buttonSendNodes.isNotEmpty()) return buttonSendNodes[0]
 
         val sendByDesc = findNodeByDescRecursive(root, "Send") ?: findNodeByDescRecursive(root, "send")
+            ?: findNodeByDescRecursive(root, "పంపు") ?: findNodeByDescRecursive(root, "పంపించు")
         if (sendByDesc != null) return sendByDesc
 
         val sendByText = root.findAccessibilityNodeInfosByText("Send").firstOrNull { it.isClickable || it.parent?.isClickable == true }
+            ?: root.findAccessibilityNodeInfosByText("పంపు").firstOrNull { it.isClickable || it.parent?.isClickable == true }
         if (sendByText != null) return sendByText
 
         return null
+    }
+
+    private fun findWhatsAppSearchInput(root: AccessibilityNodeInfo, pkgName: String): AccessibilityNodeInfo? {
+        val ids = listOf(
+            "$pkgName:id/search_src_text",
+            "$pkgName:id/search_input",
+            "$pkgName:id/search_view",
+            "$pkgName:id/search_bar",
+            "$pkgName:id/search_edit_frame"
+        )
+        for (id in ids) {
+            val nodes = root.findAccessibilityNodeInfosByViewId(id)
+            if (nodes.isNotEmpty() && nodes[0].isVisibleToUser) return nodes[0]
+        }
+        val byText = root.findAccessibilityNodeInfosByText("Search").firstOrNull { it.className == "android.widget.EditText" }
+            ?: root.findAccessibilityNodeInfosByText("Ask Meta AI or Search").firstOrNull { it.className == "android.widget.EditText" }
+            ?: root.findAccessibilityNodeInfosByText("Search...").firstOrNull { it.className == "android.widget.EditText" }
+            ?: root.findAccessibilityNodeInfosByText("శోధించండి").firstOrNull { it.className == "android.widget.EditText" }
+        return byText
+    }
+
+    private fun findWhatsAppSearchIcon(root: AccessibilityNodeInfo, pkgName: String): AccessibilityNodeInfo? {
+        val ids = listOf(
+            "$pkgName:id/menuitem_search",
+            "$pkgName:id/menu_item_search",
+            "$pkgName:id/search",
+            "$pkgName:id/search_button"
+        )
+        for (id in ids) {
+            val nodes = root.findAccessibilityNodeInfosByViewId(id)
+            if (nodes.isNotEmpty() && nodes[0].isVisibleToUser) return nodes[0]
+        }
+        return findNodeByDescRecursive(root, "Search")
+            ?: findNodeByDescRecursive(root, "search")
+            ?: findNodeByDescRecursive(root, "శోధించండి")
+    }
+
+    private fun findNodeByTextOrDesc(root: AccessibilityNodeInfo, labels: List<String>, pkgName: String): AccessibilityNodeInfo? {
+        for (label in labels) {
+            val byText = root.findAccessibilityNodeInfosByText(label).firstOrNull { it.isVisibleToUser && (it.isClickable || it.parent?.isClickable == true) }
+            if (byText != null) return byText
+            val byDesc = findNodeByDescRecursive(root, label)
+            if (byDesc != null) return byDesc
+        }
+        return null
+    }
+
+    private fun handleWhatsAppScreenNavigation(task: AutomationTask, pkgName: String) {
+        val root = rootInActiveWindow ?: run {
+            Log.d("WA_DEBUG", "ScreenNav: rootInActiveWindow is null")
+            return
+        }
+        val targetScreen = (task.message ?: task.contact ?: "").trim().lowercase(java.util.Locale.ROOT)
+        val timeElapsed = System.currentTimeMillis() - task.startTime
+        if (timeElapsed > 12000L) {
+            Log.e("WA_DEBUG", "WhatsApp Screen Navigation Timed Out after ${timeElapsed}ms")
+            lastSendVerificationResult = SendVerificationResult.TIMEOUT
+            pendingTask = null
+            return
+        }
+
+        Log.d("WA_DEBUG", "WhatsApp Screen Navigation: target='$targetScreen', step=${task.step}, elapsed=${timeElapsed}ms")
+
+        // 1. If currently inside an inner chat/details screen with a back button, navigate back to main tabs
+        val backButton = root.findAccessibilityNodeInfosByViewId("$pkgName:id/back").firstOrNull()
+            ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/navigation_icon").firstOrNull()
+            ?: findNodeByDescRecursive(root, "Navigate up")
+            ?: findNodeByDescRecursive(root, "Back")
+            ?: findNodeByDescRecursive(root, "వెనక్కి")
+
+        if (backButton != null && task.step == 0) {
+            Log.d("WA_DEBUG", "ScreenNav: In sub-screen with back button. Clicking back to reach main screen...")
+            performClickOnNode(backButton)
+            task.step = 1
+            handler.postDelayed({
+                if (pendingTask === task && task.step == 1) {
+                    handleWhatsAppScreenNavigation(task, pkgName)
+                }
+            }, 300L)
+            return
+        }
+
+        // 2. Map targetScreen to primary tab or action
+        when (targetScreen) {
+            "chats", "chat", "messages", "conversations", "చాట్స్", "చాట్‌లు" -> {
+                val chatsTab = findNodeByTextOrDesc(root, listOf("Chats", "చాట్‌లు", "చాట్స్"), pkgName)
+                    ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/tab_chats").firstOrNull()
+                    ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/chats_tab").firstOrNull()
+                if (chatsTab != null) {
+                    val clicked = performClickOnNode(chatsTab)
+                    Log.d("WA_DEBUG", "ScreenNav: Clicked Chats tab result=$clicked")
+                    lastSendVerificationResult = SendVerificationResult.SUCCESS
+                    completeTask(task)
+                    return
+                }
+            }
+
+            "status", "updates", "update", "stories", "స్టేటస్", "అప్‌డేట్స్", "అప్‌డేట్‌లు" -> {
+                val updatesTab = findNodeByTextOrDesc(root, listOf("Updates", "Status", "స్టేటస్", "అప్‌డేట్‌లు", "అప్‌డేట్స్"), pkgName)
+                    ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/tab_updates").firstOrNull()
+                    ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/tab_status").firstOrNull()
+                if (updatesTab != null) {
+                    val clicked = performClickOnNode(updatesTab)
+                    Log.d("WA_DEBUG", "ScreenNav: Clicked Updates/Status tab result=$clicked")
+                    lastSendVerificationResult = SendVerificationResult.SUCCESS
+                    completeTask(task)
+                    return
+                }
+            }
+
+            "communities", "community", "కమ్యూనిటీస్", "కమ్యూనిటీలు" -> {
+                val commTab = findNodeByTextOrDesc(root, listOf("Communities", "కమ్యూనిటీలు", "కమ్యూనిటీస్"), pkgName)
+                    ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/tab_communities").firstOrNull()
+                if (commTab != null) {
+                    val clicked = performClickOnNode(commTab)
+                    Log.d("WA_DEBUG", "ScreenNav: Clicked Communities tab result=$clicked")
+                    lastSendVerificationResult = SendVerificationResult.SUCCESS
+                    completeTask(task)
+                    return
+                }
+            }
+
+            "calls", "call", "call log", "call_log", "కాల్స్", "కాల్‌లు" -> {
+                val callsTab = findNodeByTextOrDesc(root, listOf("Calls", "కాల్స్", "కాల్‌లు"), pkgName)
+                    ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/tab_calls").firstOrNull()
+                if (callsTab != null) {
+                    val clicked = performClickOnNode(callsTab)
+                    Log.d("WA_DEBUG", "ScreenNav: Clicked Calls tab result=$clicked")
+                    lastSendVerificationResult = SendVerificationResult.SUCCESS
+                    completeTask(task)
+                    return
+                }
+            }
+
+            "new_chat", "new chat", "start chat", "contacts", "select contact", "కొత్త చాట్" -> {
+                val fab = root.findAccessibilityNodeInfosByViewId("$pkgName:id/fab").firstOrNull()
+                    ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/start_chat").firstOrNull()
+                    ?: findNodeByDescRecursive(root, "New chat")
+                    ?: findNodeByDescRecursive(root, "Start chat")
+                    ?: findNodeByDescRecursive(root, "Select contact")
+                    ?: findNodeByDescRecursive(root, "కొత్త చాట్")
+                if (fab != null) {
+                    val clicked = performClickOnNode(fab)
+                    Log.d("WA_DEBUG", "ScreenNav: Clicked New Chat FAB result=$clicked")
+                    lastSendVerificationResult = SendVerificationResult.SUCCESS
+                    completeTask(task)
+                    return
+                }
+            }
+
+            "settings", "preferences", "సెట్టింగ్స్", "సెట్టింగ్‌లు" -> {
+                if (task.step == 0 || task.step == 1) {
+                    val moreOptions = findNodeByDescRecursive(root, "More options")
+                        ?: findNodeByDescRecursive(root, "మరిన్ని ఎంపికలు")
+                        ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/menuitem_overflow").firstOrNull()
+                        ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/more_options").firstOrNull()
+                    if (moreOptions != null) {
+                        performClickOnNode(moreOptions)
+                        task.step = 2
+                        handler.postDelayed({
+                            if (pendingTask === task && task.step == 2) {
+                                handleWhatsAppScreenNavigation(task, pkgName)
+                            }
+                        }, 250L)
+                        return
+                    }
+                } else if (task.step == 2) {
+                    val settingsItem = root.findAccessibilityNodeInfosByText("Settings").firstOrNull()
+                        ?: root.findAccessibilityNodeInfosByText("సెట్టింగ్‌లు").firstOrNull()
+                        ?: findNodeByDescRecursive(root, "Settings")
+                    if (settingsItem != null) {
+                        val clicked = performClickOnNode(settingsItem)
+                        Log.d("WA_DEBUG", "ScreenNav: Clicked Settings menu item result=$clicked")
+                        lastSendVerificationResult = SendVerificationResult.SUCCESS
+                        completeTask(task)
+                        return
+                    }
+                }
+            }
+
+            "linked_devices", "linked devices", "లింక్డ్ డివైసెస్" -> {
+                if (task.step <= 1) {
+                    val moreOptions = findNodeByDescRecursive(root, "More options")
+                        ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/menuitem_overflow").firstOrNull()
+                    if (moreOptions != null) {
+                        performClickOnNode(moreOptions)
+                        task.step = 2
+                        handler.postDelayed({
+                            if (pendingTask === task && task.step == 2) {
+                                handleWhatsAppScreenNavigation(task, pkgName)
+                            }
+                        }, 250L)
+                        return
+                    }
+                } else if (task.step == 2) {
+                    val linkedItem = root.findAccessibilityNodeInfosByText("Linked devices").firstOrNull()
+                        ?: findNodeByDescRecursive(root, "Linked devices")
+                    if (linkedItem != null) {
+                        performClickOnNode(linkedItem)
+                        lastSendVerificationResult = SendVerificationResult.SUCCESS
+                        completeTask(task)
+                        return
+                    }
+                }
+            }
+
+            "starred_messages", "starred messages", "స్టార్డ్ మెసేజెస్" -> {
+                if (task.step <= 1) {
+                    val moreOptions = findNodeByDescRecursive(root, "More options")
+                        ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/menuitem_overflow").firstOrNull()
+                    if (moreOptions != null) {
+                        performClickOnNode(moreOptions)
+                        task.step = 2
+                        handler.postDelayed({
+                            if (pendingTask === task && task.step == 2) {
+                                handleWhatsAppScreenNavigation(task, pkgName)
+                            }
+                        }, 250L)
+                        return
+                    }
+                } else if (task.step == 2) {
+                    val starredItem = root.findAccessibilityNodeInfosByText("Starred messages").firstOrNull()
+                        ?: findNodeByDescRecursive(root, "Starred messages")
+                    if (starredItem != null) {
+                        performClickOnNode(starredItem)
+                        lastSendVerificationResult = SendVerificationResult.SUCCESS
+                        completeTask(task)
+                        return
+                    }
+                }
+            }
+
+            "payments", "పేమెంట్స్" -> {
+                if (task.step <= 1) {
+                    val moreOptions = findNodeByDescRecursive(root, "More options")
+                        ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/menuitem_overflow").firstOrNull()
+                    if (moreOptions != null) {
+                        performClickOnNode(moreOptions)
+                        task.step = 2
+                        handler.postDelayed({
+                            if (pendingTask === task && task.step == 2) {
+                                handleWhatsAppScreenNavigation(task, pkgName)
+                            }
+                        }, 250L)
+                        return
+                    }
+                } else if (task.step == 2) {
+                    val payItem = root.findAccessibilityNodeInfosByText("Payments").firstOrNull()
+                        ?: findNodeByDescRecursive(root, "Payments")
+                    if (payItem != null) {
+                        performClickOnNode(payItem)
+                        lastSendVerificationResult = SendVerificationResult.SUCCESS
+                        completeTask(task)
+                        return
+                    }
+                }
+            }
+
+            else -> {
+                val node = root.findAccessibilityNodeInfosByText(targetScreen).firstOrNull()
+                    ?: findNodeByDescRecursive(root, targetScreen)
+                if (node != null) {
+                    val clicked = performClickOnNode(node)
+                    Log.d("WA_DEBUG", "ScreenNav: Clicked generic target '$targetScreen' result=$clicked")
+                    lastSendVerificationResult = SendVerificationResult.SUCCESS
+                    completeTask(task)
+                    return
+                }
+            }
+        }
     }
 
     private fun isCorrectChatOpen(root: AccessibilityNodeInfo, contact: String, pkgName: String): Boolean {
@@ -1006,8 +1329,8 @@ class JarvisAccessibilityService : AccessibilityService() {
                 }
 
                 // 1. If correct chat is already open, move straight to Step 3
-                val messageBoxNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/entry")
-                if (messageBoxNodes.isNotEmpty() && isCorrectChatOpen(root, contact, pkgName)) {
+                val entryNode = findWhatsAppEntryNode(root, pkgName)
+                if (entryNode != null && isCorrectChatOpen(root, task, pkgName)) {
                     Log.d("WA_DEBUG", "Step 0: Correct chat is already open, jumping directly to Step 3")
                     directClickTime = 0L
                     task.step = 3
@@ -1024,135 +1347,111 @@ class JarvisAccessibilityService : AccessibilityService() {
                     } else {
                         Log.w("WA_DEBUG", "Step 0: Direct click did not open chat within 2500ms! Falling back to Search flow.")
                         directClickTime = 0L
-                        // Fall through to Search fallback below
                     }
                 } else {
                     // 3. REAL-TIME OBSERVATION: Check if requested contact is already visible on current screen!
-                    val visibleContactNode = findVisibleContactNode(root, contact, pkgName)
-                    if (visibleContactNode != null) {
-                        val rowAncestor = findClickableRowAncestor(visibleContactNode, pkgName)
+                    val visibleResolution = WhatsAppContactResolver.resolveVisibleChatRow(root, task.contactDisplayName ?: contact, pkgName, task.phone)
+                    if (visibleResolution is WhatsAppContactMatch.Found) {
                         Log.d("WA_DEBUG", "Step 0: Contact '$contact' is visible on current screen! Clicking row...")
-                        val clicked = clickVisibleContactRow(visibleContactNode, rowAncestor)
+                        val clicked = performClickOnNode(visibleResolution.nodeToClick, forceGesture = true)
                         Log.d("WA_DEBUG", "Step 0: Direct contact row click result=$clicked")
                         if (clicked) {
                             directClickTime = System.currentTimeMillis()
-                            // Remain in Step 0 to await actual UI transition via accessibility events
+                            task.step = 3
+                            handler.postDelayed({
+                                if (pendingTask === task && task.step == 3) {
+                                    handleWhatsAppAutomation(task, pkgName)
+                                }
+                            }, 400L)
                             return
                         }
                     }
                 }
 
-                // 4. Fallback: If contact is not visible on current screen or direct click timed out, proceed with existing search flow
-                var searchNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/menuitem_search")
-                if (searchNodes.isEmpty()) {
-                    searchNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/menu_item_search")
+                // 4. Search fallback: Check if search input is already open or click search icon
+                val searchInput = findWhatsAppSearchInput(root, pkgName)
+                if (searchInput != null) {
+                    Log.d("WA_DEBUG", "Step 0: Search input already open, moving to Step 1")
+                    directClickTime = 0L
+                    task.step = 1
+                    handleWhatsAppAutomation(task, pkgName)
+                    return
                 }
-                if (searchNodes.isEmpty()) {
-                    searchNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/search")
-                }
-                if (searchNodes.isEmpty()) {
-                    searchNodes = root.findAccessibilityNodeInfosByText("Search")
-                }
-                
-                var targetNode = if (searchNodes.isNotEmpty()) searchNodes[0] else findNodeByDescRecursive(root, "search")
-                Log.d("WA_DEBUG", "Step 0: Search fallback. searchNodes.size=${searchNodes.size}, targetNodeFound=${targetNode != null}")
 
-                if (targetNode != null) {
-                    val clicked = performClickOnNode(targetNode)
+                val searchIcon = findWhatsAppSearchIcon(root, pkgName)
+                if (searchIcon != null) {
+                    val clicked = performClickOnNode(searchIcon)
                     Log.d("WA_DEBUG", "Step 0: Search icon click result=$clicked")
                     if (clicked) {
                         directClickTime = 0L
                         task.step = 1
+                        handler.postDelayed({
+                            if (pendingTask === task && task.step == 1) {
+                                handleWhatsAppAutomation(task, pkgName)
+                            }
+                        }, 250L)
+                        return
                     }
-                } else {
-                    var searchInputNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/search_src_text")
-                    if (searchInputNodes.isEmpty()) {
-                        searchInputNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/search_input")
-                    }
-                    Log.d("WA_DEBUG", "Step 0: searchInputNodes.size=${searchInputNodes.size}")
-                    if (searchInputNodes.isNotEmpty()) {
-                        Log.d("WA_DEBUG", "Step 0: Search bar already open, moving to Step 1")
-                        task.step = 1
+                }
+
+                // If in a wrong chat or sub-screen, go back to main screen
+                if (entryNode != null && !isCorrectChatOpen(root, task, pkgName)) {
+                    val backButton = root.findAccessibilityNodeInfosByViewId("$pkgName:id/back").firstOrNull()
+                        ?: root.findAccessibilityNodeInfosByViewId("$pkgName:id/navigation_icon").firstOrNull()
+                        ?: findNodeByDescRecursive(root, "Navigate up")
+                        ?: findNodeByDescRecursive(root, "Back")
+                    if (backButton != null) {
+                        performClickOnNode(backButton)
                     } else {
-                        val messageBoxNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/entry")
-                        Log.d("WA_DEBUG", "Step 0: messageBoxNodes.size=${messageBoxNodes.size}")
-                        if (messageBoxNodes.isNotEmpty()) {
-                            val isCorrect = isCorrectChatOpen(root, contact, pkgName)
-                            Log.d("WA_DEBUG", "Step 0: isCorrectChatOpen=$isCorrect")
-                            if (isCorrect) {
-                                Log.d("WA_DEBUG", "Step 0: Correct chat already open, jumping to Step 3")
-                                task.step = 3
-                            } else {
-                                val backNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/back")
-                                var backButton = if (backNodes.isNotEmpty()) backNodes[0] else findNodeByDescRecursive(root, "Navigate up")
-                                if (backButton == null) backButton = findNodeByDescRecursive(root, "Back")
-                                if (backButton == null) {
-                                    val navNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/navigation_icon")
-                                    if (navNodes.isNotEmpty()) backButton = navNodes[0]
-                                }
-                                
-                                Log.d("WA_DEBUG", "Step 0: Wrong chat open, backButtonFound=${backButton != null}")
-                                if (backButton != null) {
-                                    performClickOnNode(backButton)
-                                } else {
-                                    performGlobalAction(GLOBAL_ACTION_BACK)
-                                }
-                            }
-                        } else {
-                            if (timeElapsed > 4000L) {
-                                val chatTabNodes = root.findAccessibilityNodeInfosByText("Chats")
-                                Log.d("WA_DEBUG", "Step 0: Stuck? chatTabNodes.size=${chatTabNodes.size}")
-                                if (chatTabNodes.isNotEmpty()) {
-                                    performClickOnNode(chatTabNodes[0])
-                                } else {
-                                    val backButton = findNodeByDescRecursive(root, "Navigate up") ?: 
-                                                   findNodeByDescRecursive(root, "Back") ?:
-                                                   root.findAccessibilityNodeInfosByViewId("$pkgName:id/back").firstOrNull() ?:
-                                                   root.findAccessibilityNodeInfosByViewId("$pkgName:id/navigation_icon").firstOrNull()
-                                    
-                                    Log.d("WA_DEBUG", "Step 0: navigation backButtonFound=${backButton != null}")
-                                    if (backButton != null) {
-                                        performClickOnNode(backButton)
-                                    } else {
-                                        performGlobalAction(GLOBAL_ACTION_BACK)
-                                    }
-                                }
-                                task.startTime = System.currentTimeMillis() - 2000L 
-                            }
-                        }
+                        performGlobalAction(GLOBAL_ACTION_BACK)
                     }
+                    return
+                }
+
+                if (timeElapsed > 4000L) {
+                    val chatsTab = root.findAccessibilityNodeInfosByText("Chats").firstOrNull()
+                        ?: root.findAccessibilityNodeInfosByText("చాట్‌లు").firstOrNull()
+                    if (chatsTab != null) {
+                        performClickOnNode(chatsTab)
+                    }
+                    task.startTime = System.currentTimeMillis() - 2000L
                 }
             }
+
             1 -> {
-                var searchInputNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/search_src_text")
-                if (searchInputNodes.isEmpty()) {
-                    searchInputNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/search_input")
-                }
-                Log.d("WA_DEBUG", "Step 1: searchInputNodes.size=${searchInputNodes.size}")
-                if (searchInputNodes.isNotEmpty()) {
-                    val currentText = searchInputNodes[0].text?.toString()
-                    Log.d("WA_DEBUG", "Step 1: currentText='$currentText', target='$contact'")
-                    if (currentText == contact) {
+                val searchInput = findWhatsAppSearchInput(root, pkgName)
+                if (searchInput != null) {
+                    val target = task.contactDisplayName ?: contact
+                    val currentText = searchInput.text?.toString() ?: ""
+                    Log.d("WA_DEBUG", "Step 1: currentText='$currentText', target='$target'")
+                    if (currentText == target) {
                         task.step = 2
                     } else {
                         val args = Bundle().apply {
-                            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, contact)
+                            putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, target)
                         }
-                        val typed = searchInputNodes[0].performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-                        Log.d("WA_DEBUG", "Step 1: Typed text result=$typed")
-                        task.step = 2 
+                        val typed = searchInput.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                        Log.d("WA_DEBUG", "Step 1: Typed search text result=$typed")
+                        task.step = 2
                     }
+                    handler.postDelayed({
+                        if (pendingTask === task && task.step == 2) {
+                            handleWhatsAppAutomation(task, pkgName)
+                        }
+                    }, 300L)
+                } else {
+                    Log.d("WA_DEBUG", "Step 1: Search input not found yet...")
                 }
             }
+
             2 -> {
                 val currentRoot = rootInActiveWindow ?: return
 
                 // If chat entry is ALREADY open and correct chat is confirmed, proceed directly to Step 3
-                val hasEntry = currentRoot.findAccessibilityNodeInfosByViewId("$pkgName:id/entry").isNotEmpty() ||
-                        currentRoot.findAccessibilityNodeInfosByViewId("$pkgName:id/text_entry").isNotEmpty()
-                if (hasEntry && isCorrectChatOpen(currentRoot, task, pkgName)) {
+                if (findWhatsAppEntryNode(currentRoot, pkgName) != null && isCorrectChatOpen(currentRoot, task, pkgName)) {
                     Log.d("WA_DEBUG", "Step 2: Correct chat already open for '$contact', proceeding to Step 3")
                     task.step = 3
+                    handleWhatsAppAutomation(task, pkgName)
                     return
                 }
 
@@ -1170,6 +1469,11 @@ class JarvisAccessibilityService : AccessibilityService() {
                         Log.d("WA_DEBUG", "Step 2: Contact row click result = $clicked")
                         if (clicked) {
                             task.step = 3
+                            handler.postDelayed({
+                                if (pendingTask === task && task.step == 3) {
+                                    handleWhatsAppAutomation(task, pkgName)
+                                }
+                            }, 400L)
                         }
                     }
                     is WhatsAppContactMatch.Ambiguous -> {
@@ -1181,60 +1485,100 @@ class JarvisAccessibilityService : AccessibilityService() {
                     }
                 }
             }
+
             3 -> {
-                val messageBoxNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/entry")
-                    .ifEmpty { root.findAccessibilityNodeInfosByViewId("$pkgName:id/text_entry") }
-                Log.d("WA_DEBUG", "Step 3: messageBoxNodes.size=${messageBoxNodes.size}")
-                if (messageBoxNodes.isNotEmpty()) {
+                val entryNode = findWhatsAppEntryNode(root, pkgName)
+                if (entryNode != null) {
                     val isCorrect = isCorrectChatOpen(root, task, pkgName)
-                    Log.d("WA_DEBUG", "Step 3: isCorrectChatOpen=$isCorrect")
-                    if (!isCorrect) {
-                        Log.e("WA_DEBUG", "Step 3: Safety check failed! Top toolbar does not match '$contact'. Refusing to type or send message.")
+                    val timeElapsed = System.currentTimeMillis() - task.startTime
+                    Log.d("WA_DEBUG", "Step 3: isCorrectChatOpen=$isCorrect, timeElapsed=${timeElapsed}ms")
+                    if (!isCorrect && timeElapsed < 3500L) {
+                        Log.d("WA_DEBUG", "Step 3: Safety check waiting for chat header transition to '$contact'...")
                         return
                     }
 
                     if (message.isBlank()) {
                         Log.d("WA_DEBUG", "Step 3: Message is empty, WhatsApp chat for '$contact' opened successfully!")
+                        lastSendVerificationResult = SendVerificationResult.SUCCESS
                         completeTask(task)
                         return
                     }
 
-                    val currentText = messageBoxNodes[0].text?.toString()
+                    val currentText = entryNode.text?.toString() ?: ""
                     Log.d("WA_DEBUG", "Step 3: currentText='$currentText', message='$message'")
                     if (currentText != message) {
                         val args = Bundle().apply {
                             putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, message)
                         }
-                        val typed = messageBoxNodes[0].performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                        val typed = entryNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
                         Log.d("WA_DEBUG", "Step 3: Entered message text result=$typed")
                     }
 
-                    var sendButtonNodes = root.findAccessibilityNodeInfosByViewId("$pkgName:id/send")
-                        .ifEmpty { root.findAccessibilityNodeInfosByViewId("$pkgName:id/send_button") }
-                    Log.d("WA_DEBUG", "Step 3: sendButtonNodes.size=${sendButtonNodes.size} by ID")
-                    if (sendButtonNodes.isEmpty()) {
-                        val sendNode = findNodeByDescRecursive(root, "send") ?: findNodeByDescRecursive(root, "Send")
-                        Log.d("WA_DEBUG", "Step 3: Fallback content desc sendNode found=${sendNode != null}")
-                        if (sendNode != null) {
-                            sendButtonNodes = listOf(sendNode)
+                    // Advance to Step 4 to wait for fresh hierarchy with Send Button
+                    task.step = 4
+                    Log.d("WA_DEBUG", "Step 3 -> Step 4: Message text entered. Waiting for Send button to appear...")
+                    handler.postDelayed({
+                        if (pendingTask === task && task.step == 4) {
+                            handleWhatsAppAutomation(task, pkgName)
                         }
-                    }
+                    }, 200L)
+                } else {
+                    Log.d("WA_DEBUG", "Step 3: Entry node not found yet, waiting for chat view to load...")
+                }
+            }
 
-                    if (sendButtonNodes.isNotEmpty() && performClickOnNode(sendButtonNodes[0])) {
-                        Log.d("WA_DEBUG", "Step 3: Clicking WhatsApp send button")
-                        completeTask(task)
-                    } else {
-                        val sendTextNodes = root.findAccessibilityNodeInfosByText("Send")
-                        Log.d("WA_DEBUG", "Step 3: sendTextNodes.size=${sendTextNodes.size} by text")
-                        if (sendTextNodes.isNotEmpty() && performClickOnNode(sendTextNodes[0])) {
-                            Log.d("WA_DEBUG", "Step 3: Clicked Send button by text")
-                            completeTask(task)
-                        } else {
-                            Log.e("WA_DEBUG", "Step 3: Send button not found! Screen hierarchy:\n${dumpScreenToJson()}")
-                        }
+            4 -> {
+                // STEP 4: Fresh hierarchy -> Locate and Click Send Button
+                val sendNode = findWhatsAppSendNode(root, pkgName)
+                if (sendNode != null) {
+                    Log.d("WA_DEBUG", "Step 4: Found Send button. Performing click...")
+                    val clicked = performClickOnNode(sendNode)
+                    Log.d("WA_DEBUG", "Step 4: Send button click result = $clicked")
+                    if (clicked) {
+                        lastSendVerificationResult = SendVerificationResult.SEND_ACTION_CONFIRMED
+                        task.step = 5
+                        Log.d("WA_DEBUG", "Step 4 -> Step 5: Send action confirmed. Advancing to post-send verification.")
+                        handler.postDelayed({
+                            if (pendingTask === task && task.step == 5) {
+                                handleWhatsAppAutomation(task, pkgName)
+                            }
+                        }, 500L)
+                        return
                     }
                 } else {
-                    Log.d("WA_DEBUG", "Step 3: MessageBox node not found yet, waiting for chat view to load...")
+                    val timeElapsed = System.currentTimeMillis() - task.startTime
+                    Log.d("WA_DEBUG", "Step 4: Send button not yet found in current hierarchy (elapsed=${timeElapsed}ms). Waiting...")
+                }
+            }
+
+            5 -> {
+                // STEP 5: Post-send UI verification against fresh accessibility hierarchy
+                val entryNode = findWhatsAppEntryNode(root, pkgName)
+                val textAfterSend = entryNode?.text?.toString() ?: ""
+                val isInputCleared = textAfterSend.isBlank() || textAfterSend == "Type a message" || textAfterSend == "Message"
+
+                val hasOutgoingBubble = task.message?.let { msg ->
+                    root.findAccessibilityNodeInfosByText(msg).any { it.packageName == pkgName }
+                } ?: false
+
+                val timeElapsed = System.currentTimeMillis() - task.startTime
+                Log.d("WA_DEBUG", "Step 5 (Verification): isInputCleared=$isInputCleared, hasOutgoingBubble=$hasOutgoingBubble, currentInput='$textAfterSend'")
+
+                if (isInputCleared || hasOutgoingBubble) {
+                    lastSendVerificationResult = SendVerificationResult.SUCCESS
+                    Log.d("WA_DEBUG", "Step 5: Post-Send Verification PASSED (SUCCESS). Completing task.")
+                    completeTask(task)
+                } else if (timeElapsed > 8000L) {
+                    lastSendVerificationResult = SendVerificationResult.SEND_ACTION_CONFIRMED
+                    Log.w("WA_DEBUG", "Step 5: Post-send verification timeout. Keeping SEND_ACTION_CONFIRMED.")
+                    completeTask(task)
+                } else {
+                    Log.d("WA_DEBUG", "Step 5: Message still clearing. Waiting...")
+                    handler.postDelayed({
+                        if (pendingTask === task && task.step == 5) {
+                            handleWhatsAppAutomation(task, pkgName)
+                        }
+                    }, 400L)
                 }
             }
         }
@@ -2073,6 +2417,10 @@ class JarvisAccessibilityService : AccessibilityService() {
     fun unlockWithPin(pin: String, onComplete: (() -> Unit)? = null): Boolean {
         com.example.security.MaxLockAutomationEngine(this).start(pin, onComplete)
         return true
+    }
+
+    suspend fun unlockWithPinVerified(pin: String, timeoutMs: Long = 7000): Boolean {
+        return com.example.security.MaxLockAutomationEngine(this).unlockAndVerify(pin, timeoutMs)
     }
 
     private fun completeTask(task: AutomationTask) {

@@ -51,7 +51,9 @@ object NaturalCommandNormalizer {
 
     private val TRAILING_FILLERS = listOf(
         " for me", " please", " now", " right now", " chesi pettu", " chesi ivvu",
-        " చేసి పెట్టు", " చేయి", " చేయ్", " చేసుకో", " పెట్టు", " చూడు"
+        " చేసి పెట్టు", " చేయి", " చేయ్", " చేసుకో", " పెట్టు", " చూడు",
+        " cheyyandi", " cheyyi", " chesi", " cheyi", " chesko", " chesuko", " chey",
+        " teesuko", " teesko", " ivvu", " pettandi", " pettu"
     )
 
     fun normalize(rawGoal: String): NormalizedCommand {
@@ -109,13 +111,15 @@ object NaturalCommandNormalizer {
         // 5. FLASHLIGHT INTENT
         val flashOnPhrases = setOf(
             "turn on flashlight", "turn on torch", "turn on the flashlight", "turn on the torch",
-            "flashlight on", "torch on", "lights on", "torch veyyi", "flashlight veyyi",
-            "టార్చ్ ఆన్", "ఫ్లాష్‌లైట్ ఆన్", "లైట్స్ ఆన్"
+            "flashlight on", "torch on", "lights on", "light on", "turn on light", "torch veyyi", "flashlight veyyi",
+            "flashlight on chey", "torch on chey", "light on chey",
+            "టార్చ్ ఆన్", "ఫ్లాష్‌లైట్ ఆన్", "లైట్స్ ఆన్", "లైట్ ఆన్", "లైట్ వెలిగించు"
         )
         val flashOffPhrases = setOf(
             "turn off flashlight", "turn off torch", "turn off the flashlight", "turn off the torch",
-            "flashlight off", "torch off", "lights off", "torch aapu", "flashlight aapu",
-            "టార్చ్ ఆఫ్", "ఫ్లాష్‌లైట్ ఆఫ్", "లైట్స్ ఆఫ్"
+            "flashlight off", "torch off", "lights off", "light off", "turn off light", "torch aapu", "flashlight aapu",
+            "flashlight off chey", "torch off chey", "light off chey",
+            "టార్చ్ ఆఫ్", "ఫ్లాష్‌లైట్ ఆఫ్", "లైట్స్ ఆఫ్", "లైట్ ఆఫ్", "లైట్ ఆపు"
         )
         if (clean in flashOnPhrases) return NormalizedCommand(FastPathIntent.FLASHLIGHT_ON)
         if (clean in flashOffPhrases) return NormalizedCommand(FastPathIntent.FLASHLIGHT_OFF)

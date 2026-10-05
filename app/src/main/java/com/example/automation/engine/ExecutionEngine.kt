@@ -12,12 +12,146 @@ import com.example.automation.verification.VerificationRegistry
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import com.example.automation.engine.state.AgentTaskStore
+import com.example.automation.engine.truth.ExecutionTruthCoordinator
+import java.util.UUID
 
 object ExecutionEngine {
     suspend fun execute(
         context: Context,
         request: ExecutionRequest,
         contextOutputs: Map<String, Map<String, Any?>> = emptyMap()
+    ): ToolResult {
+        val ownsTask = request.source != ExecutionSource.PLANNER
+        val effective = if (ownsTask) request.copy(taskId = request.taskId ?: UUID.randomUUID().toString(),
+            stepId = request.stepId ?: "step_1") else request
+        var store: AgentTaskStore? = null
+        var created = false
+        var cancelled = false
+        var outcome: ToolResult? = null
+        if (ownsTask) TaskCancellationCoordinator.registerActiveTask(effective.taskId!!, effective.cancellationToken)
+        try {
+            outcome = withTimeoutOrNull(executionBudgetMs(effective)) {
+                currentCoroutineContext().ensureActive()
+                if (effective.cancellationToken.isCancelled) {
+                    return@withTimeoutOrNull ToolResult.failure("UNKNOWN", "EXECUTION_CANCELLED", "Task cancelled before dispatch")
+                }
+                if (ownsTask) {
+                    store = AgentTaskStore(context)
+                    // Approval callers already own the correlated task/step. Never replace it.
+                    if (store!!.getTask(effective.taskId!!) == null) {
+                        store!!.create(effective.taskId, effective.arguments.get("last_input_transcription")?.asString ?: effective.action,
+                            listOf(com.example.automation.state.ActionStep(effective.stepId!!, effective.action)))
+                    }
+                    created = true
+                    val existing = store!!.getStep(effective.taskId, effective.stepId!!)
+                    val preStarted = existing?.status == "RUNNING" && existing.executionId == effective.executionId.toString()
+                    // Approval/legacy adapters may already have marked this exact
+                    // attempt RUNNING; do not rewind it to DISPATCHING.
+                    for (state in if (preStarted) emptyList() else listOf("DISPATCHING", "RUNNING")) {
+                        val transition = store!!.transitionStep(effective.taskId, effective.stepId!!,
+                            effective.executionId.toString(), state, "ExecutionEngine")
+                        check(transition is com.example.automation.engine.truth.TaskTransitionAuthority.TransitionResult.Success) {
+                            "Dispatch state rejected: $transition"
+                        }
+                    }
+                }
+                executeInternal(context, effective, contextOutputs, store)
+            } ?: ToolResult.failure("UNKNOWN", "EXECUTION_TIMEOUT", "Action deadline exceeded")
+            return finishOutcome(effective, outcome!!, store.takeIf { created })
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            cancelled = true
+            outcome = ToolResult.failure("UNKNOWN", "EXECUTION_CANCELLED", "Task cancelled during execution; no future steps will run")
+            if (kotlinx.coroutines.currentCoroutineContext().isActive && effective.cancellationToken.isCancelled) {
+                cancelled = false
+                return finishOutcome(effective, outcome!!, store.takeIf { created })
+            }
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e("ExecutionEngine", "Execution lifecycle failed: ${effective.action}", e)
+            outcome = ToolResult.failure("UNKNOWN", "EXECUTION_EXCEPTION", e.message ?: "Execution lifecycle failed")
+            return finishOutcome(effective, outcome!!, store.takeIf { created })
+        } finally {
+            if (cancelled) {
+                withContext(NonCancellable) {
+                    withTimeoutOrNull(5000L) { finishOutcome(effective, outcome!!, store.takeIf { created }) }
+                }
+            }
+            if (ownsTask) TaskCancellationCoordinator.unregisterActiveTask(effective.taskId)
+        }
+    }
+
+    private suspend fun finishOutcome(request: ExecutionRequest, result: ToolResult, store: AgentTaskStore?): ToolResult {
+        val cancelled = request.cancellationToken.isCancelled || result.errorCode == "EXECUTION_CANCELLED" || result.errorCode == "WAIT_CANCELLED"
+        val prior = ExecutionTruthCoordinator.getLastExecution()?.takeIf { it.executionId == request.executionId.toString() }
+        val status = when {
+            cancelled -> "CANCELLED"
+            result.metadata.optString("status") == "CONFIRMATION_REQUIRED" -> "WAITING_FOR_APPROVAL"
+            result.status == com.example.automation.tools.ToolResultStatus.NEEDS_INPUT -> "WAITING_FOR_INPUT"
+            result.status == com.example.automation.tools.ToolResultStatus.USER_ACTION_REQUIRED -> "BLOCKED"
+            result.status == com.example.automation.tools.ToolResultStatus.ACCEPTED -> "CALL_REQUESTED"
+            result.isVerifiedSuccess -> prior?.status ?: "COMPLETED"
+            result.errorCode == "VERIFICATION_FAILED" || result.success || result.errorCode == "EXECUTION_TIMEOUT" -> "UNVERIFIED"
+            else -> "FAILED"
+        }
+        var completed = if (cancelled) result.copy(success = false, status = com.example.automation.tools.ToolResultStatus.FAILURE,
+            errorCode = "EXECUTION_CANCELLED", message = "Task cancelled; no future steps will run") else result
+        if (store != null) {
+            try {
+                check(withTimeoutOrNull(5000L) {
+                val taskId = request.taskId!!
+                val stepId = request.stepId!!
+                if (status == "WAITING_FOR_INPUT") {
+                    store.recordStepWaitingInput(taskId, stepId, request.executionId.toString(), result.message ?: "Input required")
+                } else if (status == "WAITING_FOR_APPROVAL") {
+                    store.recordStepWaitingApproval(taskId, stepId, request.executionId.toString(), request.action)
+                } else {
+                    val targetStatus = if (completed.isVerifiedSuccess) "SUCCEEDED" else if (status == "CALL_REQUESTED") "UNVERIFIED" else status
+                    val transition = store.transitionStep(taskId, stepId, request.executionId.toString(), targetStatus, "ExecutionEngine",
+                        failureReason = if (!completed.isVerifiedSuccess) completed.message else null,
+                        verificationEvidence = completed.verification?.reason ?: completed.message ?: "${request.action} verified by ${completed.toolName}",
+                        executorResultJson = com.google.gson.Gson().toJson(completed))
+                    check(transition is com.example.automation.engine.truth.TaskTransitionAuthority.TransitionResult.Success) { "Terminal state rejected: $transition" }
+                }
+                true
+                } == true) { "Terminal persistence deadline exceeded" }
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Exception) {
+                android.util.Log.e("ExecutionEngine", "Could not persist terminal execution", e)
+                completed = ToolResult.failure(result.toolName, "TERMINAL_PERSISTENCE_FAILED", "Execution result could not be persisted: ${e.message}")
+            }
+        }
+        completed = completed.copy(metadata = org.json.JSONObject(completed.metadata.toString()).apply {
+            put("taskId", request.taskId ?: org.json.JSONObject.NULL)
+            put("stepId", request.stepId ?: org.json.JSONObject.NULL)
+            put("executionId", request.executionId.toString())
+            put("terminalStatus", if (completed.errorCode == "TERMINAL_PERSISTENCE_FAILED") "UNVERIFIED" else status)
+        })
+        ExecutionTruthCoordinator.recordExecution(taskId = request.taskId, stepId = request.stepId,
+            executionId = request.executionId.toString(), actionName = request.action,
+            executorSuccess = prior?.executorSuccess ?: result.metadata.optBoolean("executorSuccess", result.success),
+            verifiedSuccess = completed.isVerifiedSuccess,
+            status = if (completed.errorCode == "TERMINAL_PERSISTENCE_FAILED") "UNVERIFIED" else status,
+            failureReason = if (completed.isVerifiedSuccess) null else completed.message, message = completed.message)
+        if (request.source != ExecutionSource.PLANNER) {
+            if (cancelled) AutomationEventBus.publish(AutomationEvent.ExecutionCancelled(request.executionId, completed.message))
+            else AutomationEventBus.publish(AutomationEvent.ExecutionFinished(request.executionId, completed.isVerifiedSuccess))
+        }
+        android.util.Log.i("ExecutionEngine", "[EXECUTION_RESULT] taskId=${request.taskId} stepId=${request.stepId} executionId=${request.executionId} action=${request.action} status=$status verified=${completed.isVerifiedSuccess}")
+        return completed
+    }
+
+    private fun executionBudgetMs(request: ExecutionRequest): Long {
+        if (request.action.uppercase() !in setOf("WAIT", "WAIT_FOR_TIME", "DELAY", "SLEEP")) return 25_000L
+        return com.example.automation.tools.WaitTool.durationMs(request).coerceIn(0L, 3_600_000L) + 5000L
+    }
+
+    private suspend fun executeInternal(
+        context: Context, request: ExecutionRequest,
+        contextOutputs: Map<String, Map<String, Any?>>, store: AgentTaskStore?
     ): ToolResult {
         val startedAt = System.currentTimeMillis()
         val executionId = request.executionId
@@ -51,9 +185,6 @@ object ExecutionEngine {
                         )
                         AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, "InterpolationEngine", "UNRESOLVED_VARIABLE", interpolation.message))
                         AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-                        if (request.source != ExecutionSource.PLANNER) {
-                            AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
-                        }
                         return failResult
                     }
                 }
@@ -71,13 +202,10 @@ object ExecutionEngine {
                 )
                 AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, "UNKNOWN", "TOOL_NOT_FOUND", "No tool matches action: ${effectiveRequest.action}"))
                 AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-                if (effectiveRequest.source != ExecutionSource.PLANNER) {
-                    AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
-                }
                 return failResult
             }
 
-            if (tool is RequestValidator && !tool.validate(effectiveRequest)) {
+            if (!tool.validate(effectiveRequest)) {
                 val failResult = ToolResult(
                     success = false,
                     toolName = tool.name,
@@ -86,9 +214,6 @@ object ExecutionEngine {
                 )
                 AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, tool.name, "VALIDATION_FAILED", "Request validation failed"))
                 AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-                if (effectiveRequest.source != ExecutionSource.PLANNER) {
-                    AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
-                }
                 return failResult
             }
 
@@ -102,13 +227,14 @@ object ExecutionEngine {
             var retriesCount = 0
             var totalVerificationTime = 0L
 
-            val finalResult = withTimeoutOrNull(25_000L) {
+            val finalResult = withTimeoutOrNull(executionBudgetMs(effectiveRequest)) {
                 RetryEngine.executeWithRetry(
                     context = context,
                     tool = tool,
                     request = effectiveRequest,
                     executeBlock = { attempt ->
                         currentCoroutineContext().ensureActive()
+                        if (effectiveRequest.cancellationToken.isCancelled) throw kotlinx.coroutines.CancellationException("Task cancelled before tool dispatch")
                         if (attempt > 1) {
                             retriesCount++
                         }
@@ -126,17 +252,19 @@ object ExecutionEngine {
                         } else if (toolResult.verificationRequired) {
                             AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.VERIFYING))
                             AutomationEventBus.publish(AutomationEvent.VerificationStarted(executionId, tool.name))
+                            // Verification uses the same identity and legal transition as dispatch.
+                            store?.transitionStep(request.taskId!!, request.stepId!!, executionId.toString(), "VERIFYING", "ExecutionEngine")
                             val verifyStart = System.currentTimeMillis()
                             
                             val verifier = VerificationRegistry.getVerifierForTool(tool.name)
 
                             val snapshot = DeviceContext.capture(context)
                             
-                            val verificationResult = verifier?.verify(context, request, toolResult, snapshot)
+                            val verificationResult = verifier?.verify(context, effectiveRequest, toolResult, snapshot)
                                 ?: com.example.automation.verification.VerificationResult(
-                                    success = toolResult.success,
-                                    reason = if (toolResult.success) null else toolResult.message,
-                                    retryRecommended = !toolResult.success && toolResult.retryable,
+                                    success = false,
+                                    reason = "Verification required but no verifier is registered for ${tool.name}",
+                                    retryRecommended = false,
                                     snapshot = snapshot
                                 )
                                 
@@ -150,7 +278,7 @@ object ExecutionEngine {
                             }
                             verificationResult
                         } else {
-                            com.example.automation.verification.VerificationResult(
+                            toolResult.verification ?: com.example.automation.verification.VerificationResult(
                                 success = toolResult.success,
                                 reason = if (toolResult.success) null else toolResult.message,
                                 retryRecommended = false,
@@ -179,21 +307,51 @@ object ExecutionEngine {
 
             val completedResult = finalResult.copy(metrics = metrics)
 
-            if (completedResult.success) {
+            if (store != null && completedResult.isVerifiedSuccess) {
+                store.transitionStep(request.taskId!!, request.stepId!!, executionId.toString(), "VERIFYING", "ExecutionEngine")
+            }
+
+            // Authoritative ExecutionTruth recording
+            val isVerified = completedResult.isVerifiedSuccess
+            val isCallRequested = completedResult.verification?.reason?.startsWith("CALL_REQUESTED") == true ||
+                                  completedResult.errorCode == "CALL_REQUESTED" ||
+                                  completedResult.status == com.example.automation.tools.ToolResultStatus.ACCEPTED
+            val isCallPlaced = completedResult.verification?.reason?.startsWith("CALL_PLACED") == true ||
+                               completedResult.metadata.optString("status") == "CALL_PLACED"
+
+            val truthStatus = when {
+                isCallPlaced -> "CALL_PLACED"
+                isCallRequested -> "CALL_REQUESTED"
+                completedResult.metadata.optString("status") == "CONFIRMATION_REQUIRED" -> "WAITING_FOR_APPROVAL"
+                completedResult.status == com.example.automation.tools.ToolResultStatus.NEEDS_INPUT -> "WAITING_FOR_INPUT"
+                isVerified -> "COMPLETED"
+                completedResult.success -> "UNVERIFIED"
+                else -> "FAILED"
+            }
+
+            com.example.automation.engine.truth.ExecutionTruthCoordinator.recordExecution(
+                taskId = effectiveRequest.taskId,
+                stepId = effectiveRequest.stepId,
+                executionId = executionId.toString(),
+                actionName = effectiveRequest.action,
+                executorSuccess = completedResult.metadata.optBoolean("executorSuccess", completedResult.success) || isCallRequested,
+                verifiedSuccess = isVerified && completedResult.success,
+                status = truthStatus,
+                failureReason = if (!completedResult.success && !isCallRequested) (completedResult.message ?: completedResult.errorCode) else null,
+                message = completedResult.message
+            )
+
+            if (isVerified) {
                 AutomationEventBus.publish(AutomationEvent.ToolFinished(executionId, tool.name, completedResult))
                 AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.SUCCEEDED))
-                if (effectiveRequest.source != ExecutionSource.PLANNER) {
-                    AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, true))
-                }
             } else {
                 AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, tool.name, completedResult.errorCode ?: "EXECUTION_FAILED", completedResult.message ?: "Failed"))
                 AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-                if (effectiveRequest.source != ExecutionSource.PLANNER) {
-                    AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
-                }
             }
 
             return completedResult
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             android.util.Log.e("ExecutionEngine", "Uncaught exception in execute for action: ${request.action}", e)
             val failResult = ToolResult(
@@ -203,11 +361,18 @@ object ExecutionEngine {
                 message = e.message ?: "Uncaught exception",
                 retryable = false
             )
+            com.example.automation.engine.truth.ExecutionTruthCoordinator.recordExecution(
+                taskId = request.taskId,
+                stepId = request.stepId,
+                executionId = executionId.toString(),
+                actionName = request.action,
+                executorSuccess = false,
+                verifiedSuccess = false,
+                failureReason = e.message ?: "Uncaught execution exception",
+                message = e.message
+            )
             AutomationEventBus.publish(AutomationEvent.ToolFailed(executionId, "UNKNOWN", "EXECUTION_EXCEPTION", e.message ?: "Uncaught exception"))
             AutomationEventBus.publish(AutomationEvent.StateChanged(executionId, ExecutionState.FAILED))
-            if (request.source != ExecutionSource.PLANNER) {
-                AutomationEventBus.publish(AutomationEvent.ExecutionFinished(executionId, false))
-            }
             return failResult
         }
     }

@@ -7,7 +7,6 @@ import com.example.automation.engine.PendingCallManager
 import com.example.automation.verification.RetryPolicy
 import org.json.JSONArray
 import org.json.JSONObject
-
 import com.example.utils.asStringOrNull
 
 class SearchContactTool(private val searchContactAction: SearchContactAction) : Tool {
@@ -28,30 +27,36 @@ class SearchContactTool(private val searchContactAction: SearchContactAction) : 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
         return try {
             val query = request.arguments.get("query").asStringOrNull() ?: ""
-            var matches = searchContactAction.searchContacts(context, query)
+            // P1-5: Invalidate obsolete pending call target on replacement lookup
+            PendingCallManager.clear()
+            com.example.automation.approval.ApprovalCoordinator.clearAll()
 
             val cleanQuery = query.trim().replace(Regex("[\\s\\-()]"), "")
             val isDigitOnly = cleanQuery.matches(Regex("""\+?\d{7,15}"""))
 
-            if (matches.isEmpty() && isDigitOnly) {
+            var matches = if (isDigitOnly) {
                 val normalizedNumber = android.telephony.PhoneNumberUtils.normalizeNumber(query) ?: query
+                val rawId = -1000L - (normalizedNumber.hashCode().toLong().and(0x7fffffffL) % 1000000L)
                 val syntheticMatch = com.example.automation.engine.ContactMatch(
-                    contactId = -999L,
+                    contactId = rawId,
                     lookupKey = "raw_number:$normalizedNumber",
                     displayName = "Raw Number",
                     phoneNumbers = listOf(
                         com.example.automation.engine.PhoneNumber(
-                            id = -999L,
+                            id = rawId,
                             label = "Number",
                             normalizedNumber = normalizedNumber
                         )
                     )
                 )
-                matches = listOf(syntheticMatch)
+                listOf(syntheticMatch)
+            } else {
+                searchContactAction.searchContacts(context, query)
             }
 
             if (matches.isEmpty()) {
                 PendingCallManager.clear()
+                com.example.automation.approval.ApprovalCoordinator.clearAll()
                 return ToolResult(
                     success = true,
                     toolName = name,
@@ -64,10 +69,49 @@ class SearchContactTool(private val searchContactAction: SearchContactAction) : 
                 )
             }
 
-            // Save the matches into the pending call state machine
-            PendingCallManager.setAwaitingContactSelection(matches)
+            // Save the matches into the pending call state machine with full execution context
+            PendingCallManager.setAwaitingContactSelection(
+                matches = matches,
+                originalUserIntent = "Call $query",
+                taskId = request.taskId,
+                stepId = request.stepId,
+                executionId = request.executionId.toString()
+            )
 
-            // Convert to JSON
+            // If exactly one match with one phone number exists, also prepare the confirmation target
+            if (matches.size == 1 && matches[0].phoneNumbers.size == 1) {
+                val singleMatch = matches[0]
+                val singlePhone = singleMatch.phoneNumbers[0]
+                val targetKind = if (singleMatch.lookupKey.startsWith("raw_number:")) {
+                    com.example.automation.engine.CallTargetKind.DIRECT_NUMBER
+                } else {
+                    com.example.automation.engine.CallTargetKind.CONTACT
+                }
+                val prepared = com.example.automation.engine.PreparedCallTarget(
+                    targetKind = targetKind,
+                    normalizedNumber = singlePhone.normalizedNumber,
+                    displayName = singleMatch.displayName,
+                    contactId = singleMatch.contactId,
+                    lookupKey = singleMatch.lookupKey,
+                    phoneId = singlePhone.id,
+                    numberLabel = singlePhone.label,
+                    originalUserIntent = "Call $query",
+                    taskId = request.taskId,
+                    stepId = request.stepId,
+                    executionId = request.executionId.toString()
+                )
+                PendingCallManager.setAwaitingConfirmation(
+                    contactId = singleMatch.contactId,
+                    lookupKey = singleMatch.lookupKey,
+                    phoneId = singlePhone.id,
+                    displayName = singleMatch.displayName,
+                    phoneNumber = singlePhone.normalizedNumber,
+                    originalUserIntent = "Call $query",
+                    preparedTarget = prepared
+                )
+            }
+
+            // Convert to JSON exposing normalized numbers and phone IDs
             val matchesJson = JSONArray()
             matches.forEach { match ->
                 val matchObj = JSONObject()
@@ -79,6 +123,8 @@ class SearchContactTool(private val searchContactAction: SearchContactAction) : 
                     val phoneObj = JSONObject()
                     phoneObj.put("phoneId", phone.id)
                     phoneObj.put("label", phone.label)
+                    phoneObj.put("normalizedNumber", phone.normalizedNumber)
+                    phoneObj.put("phoneNumber", phone.normalizedNumber)
                     phonesJson.put(phoneObj)
                 }
                 matchObj.put("phoneNumbers", phonesJson)
@@ -98,6 +144,8 @@ class SearchContactTool(private val searchContactAction: SearchContactAction) : 
                 message = resultJson.toString()
             )
         } catch (e: SecurityException) {
+            PendingCallManager.clear()
+            com.example.automation.approval.ApprovalCoordinator.clearAll()
             ToolResult(
                 success = false,
                 toolName = name,
@@ -105,6 +153,8 @@ class SearchContactTool(private val searchContactAction: SearchContactAction) : 
                 message = "I need permission to access your contacts before I can search them."
             )
         } catch (e: Exception) {
+            PendingCallManager.clear()
+            com.example.automation.approval.ApprovalCoordinator.clearAll()
             ToolResult(
                 success = false,
                 toolName = name,

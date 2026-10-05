@@ -40,6 +40,7 @@ fun MaxButton(
     isLoading: Boolean = false,
     variant: MaxButtonVariant = MaxButtonVariant.PRIMARY,
     height: Dp = MaxDimensions.buttonHeightMd,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
     leadingIcon: (@Composable RowScope.() -> Unit)? = null,
     trailingIcon: (@Composable RowScope.() -> Unit)? = null
 ) {
@@ -100,7 +101,7 @@ fun MaxButton(
                 alphaPressed = 0.85f,
                 onClick = onClick
             )
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .padding(contentPadding),
         contentAlignment = Alignment.Center
     ) {
         if (isLoading) {

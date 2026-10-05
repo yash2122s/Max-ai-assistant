@@ -2,11 +2,15 @@ package com.example.automation.tools
 
 import android.content.Context
 import com.example.automation.actions.CallPhoneAction
+import com.example.automation.actions.CallPermissionRequiredException
+import com.example.automation.actions.ContactNotFoundClarificationException
+import com.example.automation.actions.CallConfirmationRequiredException
 import com.example.automation.engine.ExecutionRequest
+import com.example.automation.engine.RequestValidator
 import com.example.automation.verification.RetryPolicy
 import org.json.JSONObject
 
-class CallTool(private val callPhoneAction: CallPhoneAction) : Tool {
+class CallTool(private val callPhoneAction: CallPhoneAction) : Tool, RequestValidator {
     override val name: String = "call_contact"
     override val supportedActions: Set<String> = setOf("CALL_PHONE")
     override val retryPolicy: RetryPolicy = RetryPolicy.NoRetry
@@ -19,7 +23,10 @@ class CallTool(private val callPhoneAction: CallPhoneAction) : Tool {
 
     override fun validate(request: ExecutionRequest): Boolean {
         val arguments = request.arguments
-        return (arguments.has("contactId") && arguments.has("phoneId")) || arguments.has("contact")
+        return (arguments.has("contactId") && arguments.has("phoneId")) || 
+            arguments.has("contact") ||
+            arguments.has("phoneNumber") ||
+            arguments.has("number")
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
@@ -29,14 +36,66 @@ class CallTool(private val callPhoneAction: CallPhoneAction) : Tool {
             ToolResult(
                 success = true,
                 toolName = name,
-                verificationRequired = true
+                verificationRequired = true,
+                message = "Call intent requested",
+                metadata = JSONObject().apply {
+                    put("status", "CALL_REQUESTED")
+                }
+            )
+        } catch (e: CallConfirmationRequiredException) {
+            ToolResult.needsInput(
+                toolName = name,
+                question = e.confirmationPrompt,
+                options = listOf("Call", "Cancel"),
+                targetParam = "confirmed"
+            ).copy(
+                errorCode = "CONFIRMATION_REQUIRED",
+                outputData = mapOf(
+                    "contactId" to e.contactId,
+                    "phoneId" to e.phoneId,
+                    "displayName" to e.displayName,
+                    "phoneNumber" to e.phoneNumber
+                ),
+                metadata = JSONObject().apply {
+                    put("status", "CONFIRMATION_REQUIRED")
+                    put("contactId", e.contactId)
+                    put("phoneId", e.phoneId)
+                    put("displayName", e.displayName)
+                    put("phoneNumber", e.phoneNumber)
+                }
+            )
+        } catch (e: CallPermissionRequiredException) {
+            ToolResult(
+                success = false,
+                toolName = name,
+                errorCode = "CALL_PERMISSION_REQUIRED",
+                message = e.message,
+                status = ToolResultStatus.USER_ACTION_REQUIRED,
+                metadata = JSONObject().apply {
+                    put("status", "PERMISSION_DENIED")
+                }
+            )
+        } catch (e: ContactNotFoundClarificationException) {
+            ToolResult(
+                success = false,
+                toolName = name,
+                errorCode = "CONTACT_SELECTION_REQUIRED",
+                message = e.clarificationMessage,
+                status = ToolResultStatus.NEEDS_INPUT,
+                needsInputQuestion = e.clarificationMessage,
+                metadata = JSONObject().apply {
+                    put("status", "CONTACT_SELECTION_REQUIRED")
+                }
             )
         } catch (e: Exception) {
             ToolResult(
                 success = false,
                 toolName = name,
                 errorCode = "CALL_ERROR",
-                message = e.message ?: "Call operation failed"
+                message = e.message ?: "Call operation failed",
+                metadata = JSONObject().apply {
+                    put("status", "CALL_FAILED")
+                }
             )
         }
     }

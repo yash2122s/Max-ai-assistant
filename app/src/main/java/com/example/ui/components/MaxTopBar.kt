@@ -65,7 +65,7 @@ fun MaxTopBar(
                     } else if (onBackClick != null) {
                         IconButton(
                             onClick = onBackClick,
-                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f, onClick = onBackClick)
+                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f)
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
@@ -77,7 +77,7 @@ fun MaxTopBar(
                     } else if (onMenuClick != null) {
                         IconButton(
                             onClick = onMenuClick,
-                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f, onClick = onMenuClick)
+                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Menu,

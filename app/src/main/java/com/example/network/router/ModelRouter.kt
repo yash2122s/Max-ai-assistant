@@ -120,7 +120,7 @@ class DefaultModelRouter : ModelRouter {
             }
         }
 
-        // Default to FAST mode for ultra low-latency conversational response
+        // gemini-3.8-live (FAST) is the primary real-time conversational model. DEEP is used when complex coding/debug/planning is requested.
         return GeminiModelMode.FAST
     }
 

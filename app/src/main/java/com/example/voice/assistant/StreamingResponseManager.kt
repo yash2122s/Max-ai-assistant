@@ -54,8 +54,13 @@ class StreamingResponseManager(
             currentTurnText.setLength(0)
             res
         }
+        val verifiedText = com.example.automation.engine.truth.ExecutionTruthCoordinator.validateOrCorrectAssistantResponse(fullText)
+        if (verifiedText != fullText) {
+            android.util.Log.w("StreamingResponseMgr", "Overriding final assembled turn text from '$fullText' to '$verifiedText'")
+            stopAllPlayback()
+        }
         onStateTransition(SessionState.CONNECTED)
-        AssistantEventBus.emit(AssistantEvent.TurnComplete(fullText))
+        AssistantEventBus.emit(AssistantEvent.TurnComplete(verifiedText))
     }
 
     fun handleToolCall(callId: String, toolName: String, args: String) {

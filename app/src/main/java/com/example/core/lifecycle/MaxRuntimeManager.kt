@@ -40,6 +40,9 @@ object MaxRuntimeManager {
     @Volatile
     private var initialized = false
 
+    @Volatile
+    var useComputerUseForMessaging: Boolean = true
+
     /**
      * Initializes the runtime state from persistent settings.
      */

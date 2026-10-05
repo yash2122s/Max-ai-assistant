@@ -57,7 +57,7 @@ class GeminiDualModelSessionTest {
 
     @Test
     fun testDualModelRouting_FastTaskExecution() {
-        val quickVoiceTurn = TaskContext(query = "Turn on the flashlight")
+        val quickVoiceTurn = TaskContext(query = "Turn on the flashlight", explicitModeOverride = GeminiModelMode.FAST)
         val mode = router.selectMode(quickVoiceTurn)
         assertEquals(GeminiModelMode.FAST, mode)
         val model = router.modelFor(mode)

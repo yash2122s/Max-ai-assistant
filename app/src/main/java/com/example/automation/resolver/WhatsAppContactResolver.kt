@@ -448,9 +448,12 @@ object WhatsAppContactResolver {
         val hasEntryField = allNodes.any { node ->
             val resId = (node.viewIdResourceName ?: "").lowercase(Locale.ROOT)
             val text = node.text?.toString() ?: ""
+            val desc = node.contentDescription?.toString() ?: ""
             resId.endsWith(":id/entry") || resId.endsWith(":id/text_entry") ||
                     text.contains("Type a message", ignoreCase = true) ||
-                    text.equals("Message", ignoreCase = true)
+                    text.equals("Message", ignoreCase = true) ||
+                    desc.contains("Type a message", ignoreCase = true) ||
+                    desc.equals("Message", ignoreCase = true)
         }
 
         if (!hasEntryField) {
@@ -461,8 +464,21 @@ object WhatsAppContactResolver {
         val variants = generateTargetVariants(targetContact, targetPhone)
         val normTarget = normalize(targetContact)
         val targetDigits = normalizeDigits(targetPhone.takeIf { !it.isNullOrBlank() } ?: targetContact)
+        val targetTokens = normTarget.split(" ").filter { it.isNotBlank() }
 
         Log.d(TAG, "isCorrectChatOpen: Verifying header for '$targetContact', variants=$variants")
+
+        fun matchesTarget(normText: String): Boolean {
+            if (normText.isBlank()) return false
+            if (normText == normTarget) return true
+            if (targetDigits.length >= 7 && normalizeDigits(normText).takeLast(10) == targetDigits.takeLast(10)) return true
+            if (normTarget.isNotBlank() && (normText.contains(normTarget) || normTarget.contains(normText))) return true
+            val textTokens = normText.split(" ").filter { it.isNotBlank() }
+            if (targetTokens.isNotEmpty() && textTokens.isNotEmpty()) {
+                if (textTokens.containsAll(targetTokens) || targetTokens.containsAll(textTokens)) return true
+            }
+            return false
+        }
 
         // 2. Check header nodes via known toolbar title view IDs
         for (node in allNodes) {
@@ -472,15 +488,9 @@ object WhatsAppContactResolver {
             if (isHeaderId) {
                 val text = node.text?.toString()?.trim() ?: ""
                 val normText = normalize(text)
-                if (normText.isNotBlank()) {
-                    if (normText == normTarget || (targetDigits.length >= 7 && normalizeDigits(normText).takeLast(10) == targetDigits.takeLast(10))) {
-                        Log.d(TAG, "isCorrectChatOpen: Header verified via ID '$resId' -> '$text'")
-                        return true
-                    }
-                    if (normTarget.isNotBlank() && normText.contains(normTarget)) {
-                        Log.d(TAG, "isCorrectChatOpen: Header verified via partial token in ID '$resId' -> '$text'")
-                        return true
-                    }
+                if (matchesTarget(normText)) {
+                    Log.d(TAG, "isCorrectChatOpen: Header verified via ID '$resId' -> '$text'")
+                    return true
                 }
             }
         }
@@ -493,14 +503,12 @@ object WhatsAppContactResolver {
             val rect = Rect()
             node.getBoundsInScreen(rect)
 
-            // The top toolbar in Android is at the top of the display (typically top <= 500px)
-            if (rect.top <= 500) {
+            // The top toolbar in Android is at the top of the display (typically top <= 750px across display densities)
+            if (rect.top <= 750) {
                 val nodeText = normalize(node.text?.toString())
-                if (nodeText.isNotBlank()) {
-                    if (nodeText == normTarget || nodeText.contains(normTarget) || (targetDigits.length >= 7 && normalizeDigits(nodeText).takeLast(10) == targetDigits.takeLast(10))) {
-                        Log.d(TAG, "isCorrectChatOpen: Header verified in top screen area (top=${rect.top}) -> '${node.text}'")
-                        return true
-                    }
+                if (matchesTarget(nodeText)) {
+                    Log.d(TAG, "isCorrectChatOpen: Header verified in top screen area (top=${rect.top}) -> '${node.text}'")
+                    return true
                 }
             }
         }

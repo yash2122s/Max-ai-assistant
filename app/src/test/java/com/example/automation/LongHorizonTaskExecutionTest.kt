@@ -24,6 +24,7 @@ import com.example.automation.tools.ToolResult
 import com.example.automation.verification.DeviceContext
 import com.example.automation.verification.KeyboardActionVerifier
 import com.example.core.lifecycle.MaxRuntimeManager
+import com.example.service.JarvisAccessibilityService
 import com.google.gson.JsonObject
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -31,6 +32,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -46,8 +48,11 @@ class LongHorizonTaskExecutionTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         WorldStateManager.reset()
+        JarvisAccessibilityService.testRootProvider = null
         MaxRuntimeManager.setGlobalEnabled(context, true)
     }
+
+    @After fun clearLiveRoot() { JarvisAccessibilityService.testRootProvider = null }
 
     // =========================================================================
     // 1. ACTION CONTRACTS & KEYBOARD SAFETY
@@ -81,6 +86,13 @@ class LongHorizonTaskExecutionTest {
 
     @Test
     fun testOpenAppContinuesToNextStep() = runBlocking {
+        val chrome = android.content.ComponentName("com.android.chrome", "com.android.chrome.Main")
+        org.robolectric.Shadows.shadowOf(context.packageManager).apply {
+            addActivityIfNotPresent(chrome)
+            addIntentFilterForActivity(chrome, android.content.IntentFilter(android.content.Intent.ACTION_MAIN).apply {
+                addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+            })
+        }
         WorldStateManager.setForegroundApp("com.android.chrome")
 
         val task = AgentTask(
@@ -109,10 +121,21 @@ class LongHorizonTaskExecutionTest {
         )
 
         val result = orchestrator.executeTask(task)
-        assertTrue(result.success)
+        assertTrue("Task failed: ${result.message}; steps=${task.steps.map { it.id to it.failureReason }}", result.success)
         assertEquals(2, result.executedSteps)
         assertEquals(TaskStatus.COMPLETED, task.status)
         assertEquals("com.android.chrome", task.context.currentApp)
+    }
+
+    @Test
+    fun testFailedDispatchCannotAdvanceFromCachedForeground() = runBlocking {
+        WorldStateManager.setForegroundApp("example.missing")
+        val task = AgentTask(originalIntent = "Open missing app", goal = "open_app", steps = listOf(
+            TaskStep("missing", UiStep.OpenApp("Missing", "example.missing"), ExpectedOutcome.PackageForeground("example.missing"))
+        ))
+        val result = LongTaskOrchestrator(context = context).executeTask(task)
+        assertFalse(result.success)
+        assertEquals(0, result.executedSteps)
     }
 
     @Test
@@ -145,6 +168,8 @@ class LongHorizonTaskExecutionTest {
     @Test
     fun testPlanExecutionThroughOrchestrator() = runBlocking {
         WorldStateManager.setForegroundApp("com.android.chrome")
+        val root = android.view.accessibility.AccessibilityNodeInfo.obtain().apply { packageName = "com.android.chrome" }
+        JarvisAccessibilityService.testRootProvider = { root }
 
         val steps = listOf(
             ActionStep(stepId = "s1", actionType = "OPEN_APP", targetText = "Chrome"),

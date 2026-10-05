@@ -74,8 +74,20 @@ fun LicenseActivationScreen(
         topBar = {
             MaxTopBar(
                 title = "Account & Licensing",
-                subtitle = "Firebase Cloud Licensing",
-                onBackClick = onNavigateBack
+                subtitle = "MAX Cloud Licensing",
+                navigationIcon = {
+                    IconButton(
+                        onClick = onNavigateBack,
+                        modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Menu,
+                            contentDescription = "Menu",
+                            tint = MaxTextPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
             )
         },
         containerColor = MaxBaseDark
@@ -85,8 +97,8 @@ fun LicenseActivationScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = MaxDimensions.spaceLg, vertical = MaxDimensions.spaceMd),
-            verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceLg)
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // 1. Google Account Card
             GoogleAccountSection(
@@ -239,6 +251,7 @@ fun GoogleAccountSection(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -258,26 +271,33 @@ fun GoogleAccountSection(
                         )
                     }
 
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = user.displayName ?: "Google User",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaxTextPrimary
+                            color = MaxTextPrimary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                         Text(
                             text = user.email ?: user.uid,
                             fontSize = 12.sp,
-                            color = MaxTextTertiary
+                            color = MaxTextTertiary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 MaxButton(
                     text = "Sign Out",
                     onClick = onSignOut,
                     variant = MaxButtonVariant.GHOST,
-                    height = 34.dp
+                    height = 36.dp,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                 )
             }
         } else {
@@ -350,7 +370,7 @@ fun CloudLicenseHeroCard(
     val formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm").withZone(ZoneId.systemDefault())
 
     val hero = when {
-        license.plan == LicensePlan.LIFETIME -> {
+        license.plan == LicensePlan.LIFETIME && license.status == LicenseStatus.ACTIVE -> {
             LicenseHeroConfig(
                 title = "LIFETIME PREMIUM ACTIVE",
                 subtitle = "Permanent Lifetime Access • Unlimited AI Messages",
@@ -368,14 +388,23 @@ fun CloudLicenseHeroCard(
                 accentGradient = listOf(Color(0xFF2A2311), MaxSurfaceCard)
             )
         }
+        license.plan == LicensePlan.LIFETIME && license.status != LicenseStatus.ACTIVE -> {
+            LicenseHeroConfig(
+                title = "Lifetime Inactive (${license.status.name})",
+                subtitle = "Your lifetime license is currently not active. Please re-activate or contact support.",
+                badgeColor = MaxDestructiveApple,
+                icon = Icons.Default.Warning,
+                accentGradient = listOf(Color(0xFF331418), MaxSurfaceCard)
+            )
+        }
         entitlement is Entitlement.Trial -> {
             val days = license.remainingTrialDays()
-            val usageStatus = "$dailyUsage/10 messages used today"
+            val usageStatus = "$dailyUsage/20 messages used today"
             LicenseHeroConfig(
                 title = "3-Day Free Trial Active",
                 subtitle = "$days days remaining • $usageStatus",
-                badgeColor = if (dailyUsage >= 10L) MaxDestructiveApple else MaxAccentCyan,
-                icon = if (dailyUsage >= 10L) Icons.Default.Warning else Icons.Default.HourglassTop,
+                badgeColor = if (dailyUsage >= 20L) MaxDestructiveApple else MaxAccentCyan,
+                icon = if (dailyUsage >= 20L) Icons.Default.Warning else Icons.Default.HourglassTop,
                 accentGradient = listOf(Color(0xFF0D253A), MaxSurfaceCard)
             )
         }
@@ -510,7 +539,8 @@ fun CloudLicenseHeroCard(
                         text = "Sync Now",
                         onClick = onSync,
                         variant = MaxButtonVariant.GHOST,
-                        height = 32.dp
+                        height = 36.dp,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }
             }

@@ -54,7 +54,41 @@ object ComputerUsePlanner {
             )
         }
 
-        // 3. Phase-driven action planning
+        // 3. Compound navigation or UI action handling
+        if (context.intentType == TaskIntentType.COMPOUND_UI_NAVIGATION || context.intentType == TaskIntentType.UI_ACTION) {
+            if (context.remainingSteps.isEmpty()) {
+                val lastStep = context.completedSteps.lastOrNull() ?: targetApp ?: "Target"
+                val isTelugu = isTeluguGoal(context.goal)
+                val msg = if (isTelugu) "$lastStep open chesi verify chesanu." else "Navigated to '$lastStep' and verified."
+                Log.i(TAG, "[DECIDE] action=FINISH_TASK reason='All navigation steps completed'")
+                return ComputerAction.FinishTask(success = true, message = msg)
+            }
+
+            val nextTarget = context.currentTarget!!
+            val stepNumber = context.currentStepIndex + (if (context.targetApp != null) 2 else 1)
+            val totalSteps = context.navigationSteps.size + (if (context.targetApp != null) 1 else 0)
+
+            Log.i(TAG, "[TASK_PROGRESS] step=$stepNumber/$totalSteps action=TapElement target=$nextTarget")
+
+            val snapshot = com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot()
+            val groundedNode = if (snapshot.nodes.isNotEmpty()) {
+                com.example.automation.grounding.ScoredTargetGroundingEngine.groundTarget(snapshot, nextTarget).bestCandidate
+            } else null
+
+            val targetRole = groundedNode?.className
+            val resId = groundedNode?.resourceId
+            val desc = groundedNode?.contentDescription
+
+            return ComputerAction.TapElement(
+                targetText = nextTarget,
+                resourceId = resId,
+                contentDescription = desc,
+                targetRole = targetRole,
+                expectation = ActionExpectation.TargetVerified(nextTarget)
+            )
+        }
+
+        // 4. Phase-driven action planning
         return when (currentPhase) {
             GoalState.INIT -> {
                 if (obs.isAppForeground) {
@@ -96,7 +130,7 @@ object ComputerUsePlanner {
                         ComputerAction.ObserveMore("Searching for search icon in app UI")
                     }
                 } else {
-                    val hasContent = obs.interactiveElements.isNotEmpty() || obs.visibleTexts.isNotEmpty() || obs.screenshotPath != null
+                    val hasContent = obs.isFresh() && (obs.interactiveElements.isNotEmpty() || obs.visibleTexts.isNotEmpty() || obs.hasScreenshot)
                     val isTelugu = isTeluguGoal(context.goal)
                     val displayName = targetApp ?: "App"
                     if (hasContent) {
@@ -187,6 +221,10 @@ object ComputerUsePlanner {
                     success = currentPhase == GoalState.COMPLETED,
                     message = "Task reached terminal state: $currentPhase"
                 )
+            }
+
+            else -> {
+                ComputerAction.ObserveMore("Observing screen in phase: $currentPhase")
             }
         }
     }

@@ -7,47 +7,139 @@ import android.net.Uri
 import android.provider.ContactsContract
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
+import com.example.automation.engine.CallTargetKind
+import com.example.automation.engine.ContactMatch
+import com.example.automation.engine.PendingCallManager
+import com.example.automation.engine.PhoneNumber
+import com.example.automation.engine.PreparedCallTarget
+
+class ContactNotFoundClarificationException(val clarificationMessage: String) : IllegalArgumentException(clarificationMessage)
+
+class CallConfirmationRequiredException(
+    val contactId: Long, 
+    val phoneId: Long, 
+    val displayName: String, 
+    val phoneNumber: String, 
+    val confirmationPrompt: String
+) : IllegalStateException(confirmationPrompt)
+
+class CallPermissionRequiredException : SecurityException(
+    "Phone call permission is required. Grant CALL_PHONE permission and try again."
+)
 
 class CallPhoneAction : BaseAction<JSONObject>() {
     override fun execute(context: Context, payload: JSONObject) {
         var contactId = payload.optLong("contactId", -1L)
         var phoneId = payload.optLong("phoneId", -1L)
         
-        // Try to resolve missing IDs from local text payload (e.g., from ChatViewModel interception)
+        val contactParam = payload.optString("contact").ifEmpty {
+            payload.optString("phoneNumber").ifEmpty {
+                payload.optString("number")
+            }
+        }.trim()
+
+        // Fix for LLM context hallucination: If the LLM re-submits an old contactId from a previous 
+        // AwaitingConfirmation turn, but the user changed the target (e.g., 'sai2' instead of 'sriramulu'),
+        // the contactParam will not match the pending display name. We must clear the IDs to force resolution.
+        if (contactId != -1L && contactParam.isNotEmpty()) {
+            val pending = PendingCallManager.state
+            var previousName: String? = null
+            
+            if (pending is com.example.automation.engine.CallState.AwaitingConfirmation) {
+                previousName = pending.displayName
+            } else if (pending is com.example.automation.engine.CallState.Confirmed) {
+                previousName = pending.displayName
+            }
+            
+            if (previousName != null) {
+                val isMatch = previousName.equals(contactParam, ignoreCase = true) || 
+                              previousName.contains(contactParam, ignoreCase = true) || 
+                              contactParam.contains(previousName, ignoreCase = true)
+                
+                if (!isMatch) {
+                    contactId = -1L
+                    phoneId = -1L
+                }
+            }
+        }
+
+        // Try to resolve missing IDs from local text payload
         if (contactId == -1L || phoneId == -1L) {
-            val contactName = payload.optString("contact").trim()
-            if (contactName.isNotEmpty()) {
-                val cleanContact = contactName.replace(Regex("[\\s\\-()]"), "")
+            if (contactParam.isNotEmpty()) {
+                val cleanContact = contactParam.replace(Regex("[\\s\\-()]"), "")
                 val isRawNumber = cleanContact.matches(Regex("""\+?\d{7,15}"""))
                 if (isRawNumber) {
-                    val normalized = android.telephony.PhoneNumberUtils.normalizeNumber(contactName) ?: contactName
-                    val syntheticMatch = com.example.automation.engine.ContactMatch(
-                        contactId = -999L,
+                    val normalized = android.telephony.PhoneNumberUtils.normalizeNumber(contactParam) ?: contactParam
+                    val rawId = -1000L - (normalized.hashCode().toLong().and(0x7fffffffL) % 1000000L)
+                    val syntheticMatch = ContactMatch(
+                        contactId = rawId,
                         lookupKey = "raw_number:$normalized",
                         displayName = "Raw Number",
                         phoneNumbers = listOf(
-                            com.example.automation.engine.PhoneNumber(
-                                id = -999L,
+                            PhoneNumber(
+                                id = rawId,
                                 label = "Number",
                                 normalizedNumber = normalized
                             )
                         )
                     )
-                    com.example.automation.engine.PendingCallManager.setAwaitingContactSelection(listOf(syntheticMatch))
-                    com.example.automation.engine.PendingCallManager.isCallPermitted(-999L, -999L)
-                    contactId = -999L
-                    phoneId = -999L
+                    val target = PreparedCallTarget(
+                        targetKind = CallTargetKind.DIRECT_NUMBER,
+                        normalizedNumber = normalized,
+                        displayName = "Raw Number",
+                        contactId = rawId,
+                        lookupKey = syntheticMatch.lookupKey,
+                        phoneId = rawId,
+                        numberLabel = "Number",
+                        originalUserIntent = "Call $contactParam"
+                    )
+                    PendingCallManager.setAwaitingConfirmation(
+                        contactId = rawId,
+                        lookupKey = syntheticMatch.lookupKey,
+                        phoneId = rawId,
+                        displayName = "Raw Number",
+                        phoneNumber = normalized,
+                        originalUserIntent = "Call $contactParam",
+                        preparedTarget = target
+                    )
+
+                    contactId = rawId
+                    phoneId = rawId
                 } else {
                     try {
-                        val matches = SearchContactAction().searchContacts(context, contactName)
-                        val match = matches.firstOrNull()
-                        val phone = match?.phoneNumbers?.firstOrNull()
-                        if (match != null && phone != null) {
-                            com.example.automation.engine.PendingCallManager.setAwaitingContactSelection(matches)
-                            com.example.automation.engine.PendingCallManager.isCallPermitted(match.contactId, phone.id)
+                        val matches = SearchContactAction().searchContacts(context, contactParam)
+                        if (matches.size == 1 && matches[0].phoneNumbers.size == 1) {
+                            val match = matches[0]
+                            val phone = match.phoneNumbers[0]
+                            val target = PreparedCallTarget(
+                                targetKind = CallTargetKind.CONTACT,
+                                normalizedNumber = phone.normalizedNumber,
+                                displayName = match.displayName,
+                                contactId = match.contactId,
+                                lookupKey = match.lookupKey,
+                                phoneId = phone.id,
+                                numberLabel = phone.label,
+                                originalUserIntent = "Call $contactParam"
+                            )
+                            PendingCallManager.setAwaitingConfirmation(
+                                contactId = match.contactId,
+                                lookupKey = match.lookupKey,
+                                phoneId = phone.id,
+                                displayName = match.displayName,
+                                phoneNumber = phone.normalizedNumber,
+                                originalUserIntent = "Call $contactParam",
+                                preparedTarget = target
+                            )
+
                             contactId = match.contactId
                             phoneId = phone.id
+                        } else if (matches.isNotEmpty()) {
+                            PendingCallManager.setAwaitingContactSelection(matches, originalUserIntent = "Call $contactParam")
+                            val clarificationMsg = "I found multiple contacts/numbers for '$contactParam'. Please choose which one to call."
+                            throw ContactNotFoundClarificationException(clarificationMsg)
                         }
+                    } catch (e: ContactNotFoundClarificationException) {
+                        throw e
                     } catch (e: Exception) {
                         logError("Failed to search contact locally during resolution", e)
                     }
@@ -56,23 +148,47 @@ class CallPhoneAction : BaseAction<JSONObject>() {
         }
         
         if (contactId == -1L || phoneId == -1L) {
-            val msg = "Missing contactId or phoneId for CALL_PHONE. Call aborted."
-            logError(msg)
-            throw IllegalArgumentException(msg)
+            PendingCallManager.clear()
+            com.example.automation.approval.ApprovalCoordinator.clearAll()
+            val clarificationMsg = if (contactParam.isNotEmpty()) {
+                "'$contactParam' అని ఏ కాంటాక్ట్ సేవ్ లేదు. ఎవరికి కాల్ చేయాలో పేరు లేదా నంబర్ చెప్పండి."
+            } else {
+                "ఎవరికి కాల్ చేయాలో కాంటాక్ట్ పేరు లేదా నంబర్ చెప్పండి."
+            }
+            logError(clarificationMsg)
+            throw ContactNotFoundClarificationException(clarificationMsg)
         }
+
+        // P1-3: Model-controlled confirmed=true rejected as independent consent.
+        // A call is permitted ONLY if PendingCallManager is ALREADY in Confirmed state
+        // via authentic user confirmation. Incoming payload "confirmed" flag cannot unilaterally
+        // transition PendingCallManager without verified user consent.
 
         // Enforce state machine rules
-        if (!com.example.automation.engine.PendingCallManager.isCallPermitted(contactId, phoneId)) {
-            val msg = "Call aborted: No valid pending confirmation state exists for this contact/phone."
+        if (!PendingCallManager.isCallPermitted(contactId, phoneId)) {
+            val pending = PendingCallManager.state
+            val (name, number) = when (pending) {
+                is com.example.automation.engine.CallState.AwaitingConfirmation -> pending.displayName to pending.phoneNumber
+                is com.example.automation.engine.CallState.Confirmed -> pending.displayName to pending.phoneNumber
+                else -> {
+                    (if (contactParam.isNotEmpty()) contactParam else "the contact") to ""
+                }
+            }
+            val prompt = if (number.isNotBlank()) {
+                "Are you sure you want to call $name ($number)? Please confirm."
+            } else {
+                "Are you sure you want to call $name? Please confirm."
+            }
+            val msg = "Call requires explicit user confirmation for $name ($number)"
             logError(msg)
-            throw IllegalStateException(msg)
+            throw CallConfirmationRequiredException(contactId, phoneId, name, number, prompt)
         }
 
-        val lookupKey = com.example.automation.engine.PendingCallManager.getLookupKeyForCall(contactId)
+        val lookupKey = PendingCallManager.getLookupKeyForCall(contactId)
         if (lookupKey == null) {
             val msg = "Call aborted: Cannot find lookup key for the pending call."
             logError(msg)
-            com.example.automation.engine.PendingCallManager.clear()
+            PendingCallManager.clear()
             throw IllegalStateException(msg)
         }
 
@@ -82,17 +198,30 @@ class CallPhoneAction : BaseAction<JSONObject>() {
             if (validatedNumber.isNullOrBlank()) {
                 val msg = "Call aborted: Contact or phone number no longer exists."
                 logError(msg)
-                com.example.automation.engine.PendingCallManager.clear()
+                PendingCallManager.clear()
                 throw IllegalStateException(msg)
             }
 
-            com.example.automation.engine.PendingCallManager.setCalling()
+            // Target immutability verification: ensure contact number has not changed since user confirmation
+            val confirmedState = PendingCallManager.state as? com.example.automation.engine.CallState.Confirmed
+            if (confirmedState != null && confirmedState.phoneNumber.isNotBlank()) {
+                val normApproved = android.telephony.PhoneNumberUtils.normalizeNumber(confirmedState.phoneNumber) ?: confirmedState.phoneNumber
+                val normCurrent = android.telephony.PhoneNumberUtils.normalizeNumber(validatedNumber) ?: validatedNumber
+                if (normApproved != normCurrent) {
+                    val msg = "Call aborted: Contact phone number has changed since confirmation."
+                    logError(msg)
+                    PendingCallManager.clear()
+                    throw IllegalStateException(msg)
+                }
+            }
+
+            PendingCallManager.setCalling()
             startCallOrDial(context, validatedNumber)
         } catch (e: Exception) {
             logError("Failed to make call for contactId: $contactId", e)
             throw e
         } finally {
-            com.example.automation.engine.PendingCallManager.clear()
+            PendingCallManager.clear()
         }
     }
 
@@ -145,16 +274,11 @@ class CallPhoneAction : BaseAction<JSONObject>() {
             }
             context.startActivity(callIntent)
         } else {
-            log("CALL_PHONE permission not granted, opening dialer instead")
-            openDialer(context, phoneNumber)
+            // ACTION_DIAL only opens a pre-filled dialer and does not place the
+            // requested call. Treating it as success caused the assistant to
+            // report a call that was never made.
+            logError("CALL_PHONE permission not granted; refusing to downgrade to ACTION_DIAL")
+            throw CallPermissionRequiredException()
         }
-    }
-
-    private fun openDialer(context: Context, phoneNumber: String) {
-        val dialIntent = Intent(Intent.ACTION_DIAL).apply {
-            data = Uri.parse("tel:${Uri.encode(phoneNumber)}")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-        }
-        context.startActivity(dialIntent)
     }
 }

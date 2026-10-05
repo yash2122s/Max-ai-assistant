@@ -66,8 +66,8 @@ data class SemanticUiCommand(
 object SemanticUiCommandParser {
 
     private val ACTION_VERBS = setOf(
-        "tap", "click", "press", "select", "hit", "touch", "find", "search", "type", "write", "enter", "input", "wait", "pause", "stay", "verify",
-        "నొక్కు", "ట్యాప్", "వెతుకు", "రాయి", "టైప్", "శోధించు", "ఆగు"
+        "tap", "click", "press", "select", "hit", "touch", "find", "search", "type", "write", "enter", "input", "wait", "pause", "stay", "verify", "sleep", "delay",
+        "నొక్కు", "ట్యాప్", "వెతుకు", "రాయి", "టైప్", "శోధించు", "ఆగు", "వెయిట్", "aagu", "aagali"
     )
 
     // 1. Tanglish / Telugu Compound App Search ("Google maps open chesi Palakollu ane search chey", "YouTube open chesi songs search chey")

@@ -155,7 +155,13 @@ object GoalPlanner {
 
             // 1. Bind input to step parameters
             val updatedParams = paused.step.params.toMutableMap()
-            updatedParams[targetParam] = userInput
+            if (targetParam == "confirmed") {
+                val isApproved = com.example.automation.approval.ApprovalCoordinator.parseReply(userInput) == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE
+                updatedParams["confirmed"] = isApproved.toString()
+                updatedParams["user_confirmed"] = isApproved.toString()
+            } else {
+                updatedParams[targetParam] = userInput
+            }
             val updatedStep = paused.step.copy(
                 params = updatedParams,
                 targetText = if (targetParam in listOf("text", "query", "target", "contact", "app_name")) userInput else paused.step.targetText,
@@ -239,19 +245,32 @@ object GoalPlanner {
                 planningProvider = planningProvider
             )
 
-            if (result.success || result.isCancelled || result.failedStepId != null) {
+            if (result.isWaitingForInput) {
+                val pausedStep = activeSteps.getOrNull(result.executedStepsCount) ?: activeSteps.lastOrNull()
+                if (pausedStep != null) {
+                    val lastRes = result.stepResults.lastOrNull()
+                    activeWaitingState = WaitingForInputState(
+                        planId = goalPrompt,
+                        step = pausedStep,
+                        question = lastRes?.needsInputQuestion ?: lastRes?.message ?: "Input required",
+                        options = lastRes?.needsInputOptions ?: emptyList(),
+                        targetParam = lastRes?.targetParam ?: "confirmed"
+                    )
+                }
+            } else {
                 clearGoal()
             }
             result
         } finally {
             activeCancellationToken = null
+            if (activeWaitingState == null) clearGoal()
         }
     }
 
     val BASE_PLANNER_ACTIONS = setOf(
         "OPEN_APP", "OPEN_SETTINGS", "LAUNCH_APP", "SETTINGS", "CLICK_ELEMENT", "CLICK_TEXT", "CLICK_INDEX", "CLICK_UI", "FIND_ELEMENT", "TYPE_TEXT", "CLEAR_TEXT", "SCROLL_SCREEN",
         "PRESS_ENTER", "IME_ENTER", "ENTER_KEY", "PERFORM_ENTER", "BACK", "PRESS_BACK",
-        "PRESS_KEY", "KEYBOARD_ACTION", "KEY_PRESS", "TAP", "SWIPE", "WAIT_FOR_UI",
+        "PRESS_KEY", "KEYBOARD_ACTION", "KEY_PRESS", "TAP", "SWIPE", "WAIT_FOR_UI", "WAIT", "WAIT_FOR_TIME", "DELAY", "SLEEP",
         "SYSTEM_ACTION", "SET_VOLUME", "SET_BRIGHTNESS", "SET_DND", "SET_RINGER_MODE",
         "GET_BATTERY_STATUS", "GET_DEVICE_STATUS", "SEND_WHATSAPP_MESSAGE", "SEND_WHATSAPP", "FLASHLIGHT_ON", "FLASHLIGHT_OFF",
         "CALL_PHONE", "CREATE_CONTACT", "YOUTUBE_SEARCH", "OPEN_WHATSAPP_CHAT", "UNLOCK_DEVICE", "TAKE_SCREENSHOT",
@@ -446,13 +465,31 @@ object GoalPlanner {
                         )
                     }
                     "WAIT", "WAIT_FOR_UI" -> {
-                        ActionStep(
-                            stepId = stepId,
-                            actionType = "WAIT_FOR_UI",
-                            targetText = act.target ?: "composer",
-                            params = act.params.ifEmpty { mapOf("timeout" to "5000") },
-                            dependsOn = dependsOn
-                        )
+                        val isTimeWait = act.action == "WAIT" ||
+                            (act.target != null && (
+                                act.target.contains(Regex("""\d+\s*(?:s|sec|seconds|ms|m|min|సెకన్లు|సెకండ్లు)""")) ||
+                                act.target.matches(Regex("""\d+"""))
+                            ))
+                        if (isTimeWait) {
+                            val duration = act.target ?: act.params["duration"] ?: "5s"
+                            val params = act.params.toMutableMap()
+                            params["duration"] = duration
+                            ActionStep(
+                                stepId = stepId,
+                                actionType = "WAIT",
+                                targetText = duration,
+                                params = params,
+                                dependsOn = dependsOn
+                            )
+                        } else {
+                            ActionStep(
+                                stepId = stepId,
+                                actionType = "WAIT_FOR_UI",
+                                targetText = act.target ?: "composer",
+                                params = act.params.ifEmpty { mapOf("timeout" to "5000") },
+                                dependsOn = dependsOn
+                            )
+                        }
                     }
                     else -> { // "CLICK" or "TAP"
                         ActionStep(
@@ -516,6 +553,52 @@ object GoalPlanner {
         }
     }
 
+    fun isSimplePlan(steps: List<ActionStep>): Boolean = steps.size == 1 &&
+        steps.single().dependsOn.isEmpty() && steps.single().actionType.uppercase() !in
+        setOf("WAIT", "WAIT_FOR_TIME", "DELAY", "SLEEP", "WAIT_FOR_UI", "TASK_INTENT", "COMPUTER_USE", "UI_AGENT")
+
+    private suspend fun executeSimplePlan(
+        context: Context, goal: String, step: ActionStep, token: CancellationToken
+    ): AgentExecutionResult {
+        // No shared queue/mutex, FGS or screen preflight for an atomic tool action.
+        // The same ExecutionEngine still authoritatively executes, verifies and persists it.
+        if (!com.example.core.lifecycle.MaxRuntimeManager.isMaxEnabled(context)) {
+            return AgentExecutionResult(false, goal, 0, 1, errorMessage = "MAX is OFF", isCancelled = true)
+        }
+        val taskId = java.util.UUID.randomUUID().toString()
+        val request = ExecutionRequest.fromStep(step, ExecutionSource.MANUAL, token, taskId)
+        request.arguments.addProperty("last_input_transcription", goal)
+        val settings = com.example.data.preferences.SettingsManager(context)
+        val approval = ActionAuthorizer.evaluateApproval(
+            mode = runCatching { ActionAuthorizer.ApprovalMode.valueOf(settings.approvalMode) }.getOrDefault(ActionAuthorizer.ApprovalMode.SAFE_AUTO),
+            actionType = request.action, userIntent = goal, target = step.targetText,
+            allowCautionAutoInFullAuto = settings.isCautionAutoAllowedInFullAuto)
+        if (approval.decision != ActionAuthorizer.ApprovalDecision.APPROVED) {
+            val message = if (approval.decision == ActionAuthorizer.ApprovalDecision.NEEDS_CONFIRMATION) {
+                com.example.automation.approval.ApprovalCoordinator.requestApproval(context, request.action, step.targetText,
+                    org.json.JSONObject(request.arguments.toString()).put("action", request.action))
+            } else approval.reason
+            com.example.automation.engine.truth.ExecutionTruthCoordinator.recordExecution(taskId = taskId, stepId = step.stepId,
+                executionId = request.executionId.toString(), actionName = request.action, executorSuccess = false, verifiedSuccess = false,
+                status = if (approval.decision == ActionAuthorizer.ApprovalDecision.NEEDS_CONFIRMATION) "WAITING_FOR_APPROVAL" else "BLOCKED", message = message)
+            return AgentExecutionResult(false, goal, 0, 1, errorMessage = message)
+        }
+        val unlocked = com.example.security.UnlockVerifier.assertUnlockedForAction(context, request.action)
+        if (unlocked.isFailure) {
+            val reason = unlocked.exceptionOrNull()?.message ?: "Device is locked"
+            com.example.automation.engine.truth.ExecutionTruthCoordinator.recordExecution(taskId = taskId, stepId = step.stepId,
+                executionId = request.executionId.toString(), actionName = request.action, executorSuccess = false, verifiedSuccess = false,
+                status = "BLOCKED", failureReason = reason)
+            return AgentExecutionResult(false, goal, 0, 1, errorMessage = reason)
+        }
+        val result = ExecutionEngine.execute(context, request)
+        return AgentExecutionResult(success = result.isVerifiedSuccess, goalPrompt = goal,
+            executedStepsCount = if (result.isVerifiedSuccess) 1 else 0, totalStepsCount = 1,
+            failedStepId = if (result.isVerifiedSuccess) null else step.stepId,
+            errorMessage = if (result.isVerifiedSuccess) null else result.message ?: "Action failed",
+            stepResults = listOf(result), isCancelled = token.isCancelled || result.errorCode == "EXECUTION_CANCELLED")
+    }
+
     /**
      * Checks if a goal is a bare ambiguous keyword or vague noun without an actionable verb.
      */
@@ -558,6 +641,7 @@ object GoalPlanner {
         cancellationToken: CancellationToken = CancellationToken()
     ): AgentExecutionResult {
         val executionId = java.util.UUID.randomUUID()
+        com.example.automation.engine.truth.ExecutionTruthCoordinator.clearTurnExecution()
         Log.d(TAG, "Starting planAndExecute() for goal: '$goal' (executionId: $executionId)")
 
         // 0. Ambiguity Check: prevent guessing or executing arbitrary tools on bare nouns
@@ -605,12 +689,18 @@ object GoalPlanner {
                 )
             }
 
+            if (isSimplePlan(fastPathPlan)) {
+                return executeSimplePlan(context, goal, fastPathPlan.single(), cancellationToken)
+            }
+
             com.example.automation.event.AutomationEventBus.publish(
                 com.example.automation.event.AutomationEvent.PlanCreated(executionId, fastPathPlan)
             )
 
-            initializeGoalPlan(goal, fastPathPlan)
-            return executePlan(context, cancellationToken)
+            return plannerMutex.withLock {
+                initializeGoalPlan(goal, fastPathPlan)
+                executePlanInternal(context, cancellationToken)
+            }
         }
 
         // 1.5. Skill Memory Recall (Phase 9) - Check if a verified skill exists for this goal
@@ -626,8 +716,11 @@ object GoalPlanner {
             val normalizedSteps = com.example.automation.engine.planning.ActionArgumentBoundaryNormalizer.normalizePlan(savedSkill.steps, goal)
             val validationError = validatePlan(normalizedSteps, goal)
             if (validationError == null) {
-                initializeGoalPlan(goal, normalizedSteps)
-                return executePlan(context, cancellationToken)
+                if (isSimplePlan(normalizedSteps)) return executeSimplePlan(context, goal, normalizedSteps.single(), cancellationToken)
+                return plannerMutex.withLock {
+                    initializeGoalPlan(goal, normalizedSteps)
+                    executePlanInternal(context, cancellationToken)
+                }
             } else {
                 Log.w(TAG, "Recalled skill failed validation ($validationError). Falling back to LLM planning.")
             }
@@ -743,8 +836,11 @@ object GoalPlanner {
         }
 
         // 5. Initialize goal plan in queue and execute via M6.1 runner
-        initializeGoalPlan(goal, plan)
-        return executePlan(context, cancellationToken)
+        if (isSimplePlan(plan)) return executeSimplePlan(context, goal, plan.single(), cancellationToken)
+        return plannerMutex.withLock {
+            initializeGoalPlan(goal, plan)
+            executePlanInternal(context, cancellationToken)
+        }
     }
 
     suspend fun planAndExecute(
@@ -756,4 +852,3 @@ object GoalPlanner {
         return planAndExecute(context, goal, cancellationToken)
     }
 }
-

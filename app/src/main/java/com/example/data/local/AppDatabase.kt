@@ -26,14 +26,15 @@ import com.example.firebase.cache.FirebaseLicenseCacheEntity
 import com.example.firebase.cache.FirebaseLicenseCacheDao
 
 @Database(
-    entities = [
+        entities = [
         ChatMessage::class, Reminder::class, AutoReplyRule::class, 
         ActionReward::class, InstalledApp::class, ScheduledTask::class, 
         TaskExecutionLog::class, PeriodLog::class, PermanentMemory::class,
         MemorySyncState::class, RagChunkEntity::class, LicenseStateEntity::class,
-        FirebaseLicenseCacheEntity::class
+        FirebaseLicenseCacheEntity::class, AgentTaskRecord::class, AgentTaskStepRecord::class,
+        AgentApprovalRecord::class, AgentTaskEventRecord::class
     ], 
-    version = 18, 
+    version = 20, 
     exportSchema = false
 )
 @TypeConverters(SchedulerTypeConverters::class, MemoryTypeConverters::class)
@@ -50,6 +51,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun ragChunkDao(): RagChunkDao
     abstract fun licenseStateDao(): LicenseStateDao
     abstract fun firebaseLicenseCacheDao(): FirebaseLicenseCacheDao
+    abstract fun agentTaskDao(): AgentTaskDao
 
     companion object {
         val MIGRATION_9_10 = object : Migration(9, 10) {
@@ -197,6 +199,113 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `agent_tasks` (
+                        `taskId` TEXT NOT NULL,
+                        `goal` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `currentStepIndex` INTEGER NOT NULL,
+                        `totalSteps` INTEGER NOT NULL,
+                        `approvalState` TEXT,
+                        `failureReason` TEXT,
+                        `recoveryState` TEXT,
+                        `createdAt` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        `interruptedAt` INTEGER,
+                        PRIMARY KEY(`taskId`)
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `agent_task_steps` (
+                        `taskId` TEXT NOT NULL,
+                        `stepId` TEXT NOT NULL,
+                        `actionType` TEXT NOT NULL,
+                        `stepIndex` INTEGER NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `executionId` TEXT,
+                        `failureReason` TEXT,
+                        `verificationResult` TEXT,
+                        `attemptCount` INTEGER NOT NULL,
+                        `updatedAt` INTEGER NOT NULL,
+                        PRIMARY KEY(`taskId`, `stepId`)
+                    )
+                """.trimIndent())
+            }
+        }
+
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add canonical identity and lifecycle fields to agent_tasks
+                db.execSQL("ALTER TABLE `agent_tasks` ADD COLUMN `requestId` TEXT")
+                db.execSQL("ALTER TABLE `agent_tasks` ADD COLUMN `source` TEXT")
+                db.execSQL("ALTER TABLE `agent_tasks` ADD COLUMN `requestHash` TEXT")
+                db.execSQL("ALTER TABLE `agent_tasks` ADD COLUMN `currentStepId` TEXT")
+                db.execSQL("ALTER TABLE `agent_tasks` ADD COLUMN `planVersion` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE `agent_tasks` ADD COLUMN `planHash` TEXT")
+                db.execSQL("ALTER TABLE `agent_tasks` ADD COLUMN `deadlineAt` INTEGER")
+                db.execSQL("ALTER TABLE `agent_tasks` ADD COLUMN `cancellationReason` TEXT")
+                db.execSQL("ALTER TABLE `agent_tasks` ADD COLUMN `terminalReason` TEXT")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_tasks_requestId` ON `agent_tasks` (`requestId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_tasks_status` ON `agent_tasks` (`status`)")
+
+                // Add canonical execution and verification fields to agent_task_steps
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `payloadJson` TEXT")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `payloadHash` TEXT")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `stepVersion` INTEGER NOT NULL DEFAULT 1")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `executorResultJson` TEXT")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `verificationId` TEXT")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `verificationEvidence` TEXT")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `approvalId` TEXT")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `approvalStatus` TEXT")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `deadlineAt` INTEGER")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `idempotencyKey` TEXT")
+                db.execSQL("ALTER TABLE `agent_task_steps` ADD COLUMN `hasExternalSideEffects` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_task_steps_idempotencyKey` ON `agent_task_steps` (`idempotencyKey`)")
+
+                // Create agent_approvals table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `agent_approvals` (
+                        `approvalId` TEXT NOT NULL PRIMARY KEY,
+                        `taskId` TEXT NOT NULL,
+                        `stepId` TEXT NOT NULL,
+                        `executionId` TEXT,
+                        `action` TEXT NOT NULL,
+                        `target` TEXT,
+                        `displayLabel` TEXT NOT NULL,
+                        `payloadJson` TEXT NOT NULL,
+                        `payloadHash` TEXT NOT NULL,
+                        `question` TEXT NOT NULL,
+                        `status` TEXT NOT NULL DEFAULT 'PENDING',
+                        `createdAt` INTEGER NOT NULL,
+                        `expiresAt` INTEGER NOT NULL,
+                        `consumedAt` INTEGER,
+                        `consumedEventId` TEXT
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_approvals_taskId` ON `agent_approvals` (`taskId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_approvals_status` ON `agent_approvals` (`status`)")
+
+                // Create agent_task_events table
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS `agent_task_events` (
+                        `eventId` TEXT NOT NULL PRIMARY KEY,
+                        `taskId` TEXT NOT NULL,
+                        `stepId` TEXT,
+                        `executionId` TEXT,
+                        `eventType` TEXT NOT NULL,
+                        `status` TEXT NOT NULL,
+                        `idempotencyKey` TEXT NOT NULL,
+                        `eventDataJson` TEXT,
+                        `timestamp` INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_agent_task_events_taskId` ON `agent_task_events` (`taskId`)")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_agent_task_events_idempotencyKey` ON `agent_task_events` (`idempotencyKey`)")
+            }
+        }
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
@@ -210,10 +319,8 @@ abstract class AppDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, 
                     MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16, MIGRATION_16_17, 
-                    MIGRATION_17_18
+                    MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20
                 )
-                .allowMainThreadQueries()
-                .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
                 INSTANCE = instance
                 instance

@@ -42,7 +42,7 @@ fun MaxApp(
     MaxTheme {
         ModalNavigationDrawer(
             drawerState = drawerState,
-            gesturesEnabled = (currentRoute == MaxDestinations.HOME),
+            gesturesEnabled = (currentRoute != MaxDestinations.ONBOARDING),
             drawerContent = {
                 ModalDrawerSheet(
                     drawerContainerColor = MaxSurfaceCard,

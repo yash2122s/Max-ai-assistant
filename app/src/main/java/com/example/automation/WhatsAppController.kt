@@ -6,6 +6,8 @@ import android.util.Log
 import com.example.automation.contact.Contact
 import com.example.automation.contact.ContactResolution
 import com.example.automation.contact.ContactResolver
+import com.example.automation.computeruse.ComputerUseEngine
+import com.example.core.lifecycle.MaxRuntimeManager
 import com.example.service.AutomationTask
 import com.example.service.JarvisAccessibilityService
 
@@ -103,8 +105,10 @@ class WhatsAppController(private val isScheduled: Boolean = false) : AppAutomati
                         return WhatsAppExecutionResult.Error("Invalid phone number format for '$contact'.")
                     }
 
-                    // For non-numeric contact names not in phonebook, fall back to search-based automation
-                    Log.d(TAG, "Contact '$contact' not found in phonebook. Falling back to search automation.")
+                    // For non-numeric contact names not in phonebook, fall back to native accessibility search automation
+                    Log.d(TAG, "Contact '$contact' not found in phonebook. Using native search automation.")
+
+                    JarvisAccessibilityService.lastSendVerificationResult = com.example.service.SendVerificationResult.VERIFICATION_PENDING
                     JarvisAccessibilityService.pendingTask = AutomationTask(
                         type = "SEND_MESSAGE",
                         contact = contact,
@@ -118,13 +122,19 @@ class WhatsAppController(private val isScheduled: Boolean = false) : AppAutomati
                     launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
                     context.startActivity(launchIntent)
 
+                    val statusMsg = if (message.isBlank()) {
+                        "Opening $actualAppName chat for '$contact'."
+                    } else {
+                        "Launching $actualAppName search automation to message '$contact'."
+                    }
+
                     return WhatsAppExecutionResult.Launched(
                         contact = contact,
                         contactDisplayName = contact,
                         phone = "",
                         message = message,
                         isDeepLink = false,
-                        messageStatus = "Launching $actualAppName search automation for '$contact'."
+                        messageStatus = statusMsg
                     )
                 }
             }
@@ -132,6 +142,61 @@ class WhatsAppController(private val isScheduled: Boolean = false) : AppAutomati
             Log.e(TAG, "Error executing WhatsApp automation", e)
             return WhatsAppExecutionResult.Error("Could not launch WhatsApp: ${e.localizedMessage}")
         }
+    }
+
+    /**
+     * Navigates to a specific screen or tab in WhatsApp (chats, updates, status, calls, communities, settings, new_chat, etc.).
+     */
+    fun navigateToScreen(context: Context, screen: String): WhatsAppExecutionResult {
+        try {
+            var targetPkg = "com.whatsapp"
+            var launchIntent = context.packageManager.getLaunchIntentForPackage(targetPkg)
+            var actualAppName = "WhatsApp"
+
+            if (launchIntent == null) {
+                targetPkg = "com.whatsapp.w4b"
+                launchIntent = context.packageManager.getLaunchIntentForPackage(targetPkg)
+                actualAppName = "WhatsApp Business"
+            }
+
+            if (launchIntent == null) {
+                return WhatsAppExecutionResult.Error("Neither WhatsApp nor WhatsApp Business is installed on this device.")
+            }
+
+            val normalizedScreen = screen.trim().lowercase(java.util.Locale.ROOT)
+            Log.d(TAG, "Navigating to WhatsApp screen: '$normalizedScreen'")
+
+            JarvisAccessibilityService.lastSendVerificationResult = com.example.service.SendVerificationResult.VERIFICATION_PENDING
+            JarvisAccessibilityService.pendingTask = AutomationTask(
+                type = "WHATSAPP_NAVIGATE",
+                contact = normalizedScreen,
+                message = normalizedScreen,
+                appName = actualAppName,
+                isScheduled = isScheduled
+            )
+
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            context.startActivity(launchIntent)
+
+            return WhatsAppExecutionResult.Launched(
+                contact = normalizedScreen,
+                contactDisplayName = normalizedScreen,
+                phone = "",
+                message = "",
+                isDeepLink = false,
+                messageStatus = "Navigating to $actualAppName screen: $normalizedScreen"
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Error navigating to WhatsApp screen: $screen", e)
+            return WhatsAppExecutionResult.Error("Could not navigate to WhatsApp screen '$screen': ${e.localizedMessage}")
+        }
+    }
+
+    /**
+     * Opens a specific contact's chat in WhatsApp without sending a message.
+     */
+    fun openChat(context: Context, contact: String): WhatsAppExecutionResult {
+        return executeDetailed(context, contact, "")
     }
 
     /**

@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancelChildren
 
 class AssistantEngine(private val context: Context) {
     val stateMachine = SessionStateMachine()
@@ -37,8 +38,12 @@ class AssistantEngine(private val context: Context) {
     lateinit var connectionManager: ConnectionManager
     lateinit var streamingResponseManager: StreamingResponseManager
     private var responseTimeoutJob: kotlinx.coroutines.Job? = null
+    private val localExecutionScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
 
     init {
+        com.example.automation.engine.TaskCancellationCoordinator.registerCancellationListener(this) {
+            localExecutionScope.coroutineContext.cancelChildren()
+        }
         connectionManager = ConnectionManager(
             context = context,
             emotionEngine = emotionEngine,
@@ -47,8 +52,9 @@ class AssistantEngine(private val context: Context) {
                 responseTimeoutJob = null
                 val sanitized = com.example.utils.InternalReasoningFilter.sanitize(text)
                 if (sanitized.isNotBlank()) {
-                    conversationManager.addMessage("Gemini", sanitized)
-                    streamingResponseManager.handleIncomingText(sanitized)
+                    val verified = com.example.automation.engine.truth.ExecutionTruthCoordinator.validateOrCorrectAssistantResponse(sanitized)
+                    conversationManager.addMessage("Gemini", verified)
+                    streamingResponseManager.handleIncomingText(verified)
                 }
             },
             onAudioReceived = { audioBytes ->
@@ -147,8 +153,7 @@ class AssistantEngine(private val context: Context) {
                                 put("reason", validationError)
                             }.toString()
                         } else {
-                            com.example.automation.engine.GoalPlanner.initializeGoalPlan(effectiveGoal, fastPathPlan)
-                            val planResult = com.example.automation.engine.GoalPlanner.executePlan(context)
+                            val planResult = com.example.automation.engine.GoalPlanner.planAndExecute(context, effectiveGoal)
                             android.util.Log.d("AssistantEngine", "[VOICE_RESULT] Finished execution for fast-path goal '$effectiveGoal' (success=${planResult.success})")
                             org.json.JSONObject().apply {
                                 put("status", if (planResult.success) "success" else "error")
@@ -184,7 +189,16 @@ class AssistantEngine(private val context: Context) {
                             com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, normalizedJson)
                         }
                     } else {
-                        val auth = com.example.automation.engine.ActionAuthorizer.authorizeAction(lastUserText.ifEmpty { effectiveGoal }, normalizedAction, target)
+                        val originalIntent = normalizedJson.optString("original_user_intent")
+                        val isApprovalReply = com.example.automation.approval.ApprovalCoordinator.parseReply(lastUserText) == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE
+                        val intentForAuth = if (normalizedAction == "CALL_PHONE" && originalIntent.isNotBlank()) {
+                            originalIntent
+                        } else if (normalizedAction == "CALL_PHONE" && isApprovalReply && com.example.automation.engine.PendingCallManager.state !is com.example.automation.engine.CallState.Idle) {
+                            com.example.automation.engine.PendingCallManager.getOriginalIntent() ?: (if (target.isNotBlank()) "Call $target" else "Call")
+                        } else {
+                            lastUserText.ifEmpty { effectiveGoal }
+                        }
+                        val auth = com.example.automation.engine.ActionAuthorizer.authorizeAction(intentForAuth, normalizedAction, target)
                         if (!auth.authorized) {
                             android.util.Log.w("AssistantEngine", "[VOICE_AUTH] Unsolicited/Rejected action '$normalizedAction' BLOCKED: ${auth.reason}")
                             com.example.automation.activity.AgentActivityTracker.addTrace("ActionAuthorizer", "Action '$normalizedAction' blocked: ${auth.reason}", isSuccess = false)
@@ -242,16 +256,47 @@ class AssistantEngine(private val context: Context) {
                                     }.toString()
                                 }
                                 com.example.automation.engine.ActionAuthorizer.ApprovalDecision.NEEDS_CONFIRMATION -> {
-                                    com.example.automation.approval.ApprovalCoordinator.requestApproval(
-                                        context = context,
-                                        action = normalizedAction,
-                                        target = target,
-                                        payload = normalizedJson
+                                    val approvalTaskId = "task_appr_" + java.util.UUID.randomUUID().toString().take(8)
+                                    val approvalStepId = "step_1"
+                                    val approvalExecId = java.util.UUID.randomUUID().toString()
+                                    val taskStore = com.example.automation.engine.state.AgentTaskStore(context)
+                                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                        taskStore.createTask(approvalTaskId, "Approve $normalizedAction", totalSteps = 1)
+                                        taskStore.updateStep(
+                                            taskId = approvalTaskId,
+                                            step = com.example.automation.state.ActionStep(stepId = approvalStepId, actionType = normalizedAction),
+                                            stepIndex = 0,
+                                            status = "READY",
+                                            executionId = approvalExecId
+                                        )
+                                        com.example.automation.approval.ApprovalCoordinator.requestApproval(
+                                            context = context,
+                                            action = normalizedAction,
+                                            target = target,
+                                            payload = normalizedJson,
+                                            parentTaskId = approvalTaskId,
+                                            stepId = approvalStepId,
+                                            executionId = approvalExecId,
+                                            taskStore = taskStore
+                                        )
+                                    }
+                                    com.example.automation.engine.truth.ExecutionTruthCoordinator.recordExecution(
+                                        taskId = approvalTaskId,
+                                        stepId = approvalStepId,
+                                        executionId = approvalExecId,
+                                        actionName = normalizedAction,
+                                        executorSuccess = false,
+                                        verifiedSuccess = false,
+                                        status = "WAITING_FOR_APPROVAL",
+                                        failureReason = "Confirmation requested from the user: ${evaluation.reason}"
                                     )
                                     org.json.JSONObject().apply {
                                         put("status", "awaiting_approval")
                                         put("success", false)
-                                        put("executionState", "RUNNING")
+                                        put("executionState", "WAITING_FOR_APPROVAL")
+                                        put("taskId", approvalTaskId)
+                                        put("stepId", approvalStepId)
+                                        put("executionId", approvalExecId)
                                         put("reason", "Confirmation requested from the user.")
                                     }.toString()
                                 }
@@ -270,6 +315,8 @@ class AssistantEngine(private val context: Context) {
 
                     executionResult
 
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
                 } catch (e: Exception) {
                     android.util.Log.e("AssistantEngine", "Error executing automation in voice assistant", e)
                     emotionEngine.processEvent(com.example.emotion.model.EmotionEvent.TaskFailure(jsonStr, e.message ?: "Execution error"))
@@ -318,28 +365,11 @@ class AssistantEngine(private val context: Context) {
     private fun handleUserTranscription(userText: String) {
         // 1. Pending approval reply routing (P1.2)
         if (com.example.automation.approval.ApprovalCoordinator.hasPending()) {
-            val intent = com.example.automation.approval.ApprovalCoordinator.parseReply(userText)
-            if (intent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE) {
-                val pending = com.example.automation.approval.ApprovalCoordinator.resolve()
-                if (pending != null) {
-                    android.util.Log.d("AssistantEngine", "[APPROVAL] User approved '${pending.action}'")
-                    AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", "Approved ${pending.displayLabel}. Running now."))
-                    val ctx = com.example.automation.approval.ApprovalCoordinator.context() ?: context
-                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
-                        try {
-                            com.example.automation.engine.ActionDispatcher.dispatchWithResult(ctx, pending.payload)
-                        } catch (e: Exception) {
-                            android.util.Log.e("AssistantEngine", "[APPROVAL] Execution after approval failed", e)
-                        }
-                    }
-                }
-                return
+            val ctx = com.example.automation.approval.ApprovalCoordinator.context() ?: context
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                com.example.automation.approval.ApprovalCoordinator.handleReply(userText, ctx)
             }
-            if (intent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY) {
-                com.example.automation.approval.ApprovalCoordinator.cancel()
-                android.util.Log.d("AssistantEngine", "[APPROVAL] User denied pending action")
-                return
-            }
+            return
         }
 
         // 2. Pending habit routine suggestion reply routing (P1.4)
@@ -376,9 +406,17 @@ class AssistantEngine(private val context: Context) {
             if (!quotaDecision.isAllowed) {
                 val blockMsg = when (quotaDecision) {
                     is com.example.firebase.manager.GateDecision.BlockDailyLimitReached ->
-                        "Daily free limit reached (${quotaDecision.messageCountToday}/10 messages). Upgrade to Premium to continue."
+                        "Daily free limit reached (${quotaDecision.messageCountToday}/${quotaDecision.limit} messages). Upgrade to Premium to continue."
                     is com.example.firebase.manager.GateDecision.BlockTrialExpired ->
                         "Your 3-day free trial has ended. Activate MAX Premium to continue."
+                    is com.example.firebase.manager.GateDecision.BlockLicenseRevoked ->
+                        "Your MAX license has been revoked by the issuer."
+                    is com.example.firebase.manager.GateDecision.BlockLicenseInactive ->
+                        quotaDecision.reason
+                    is com.example.firebase.manager.GateDecision.BlockNotAuthenticated ->
+                        "Google Sign-In required to use MAX."
+                    is com.example.firebase.manager.GateDecision.BlockError ->
+                        quotaDecision.message
                     else -> "Usage limit reached. Activate MAX Premium."
                 }
                 streamingResponseManager.stopAllPlayback()
@@ -428,18 +466,7 @@ class AssistantEngine(private val context: Context) {
             responseTimeoutJob = null
             
             // Execute locally through GoalPlanner
-            CoroutineScope(Dispatchers.IO).launch {
-                val planResult = com.example.automation.engine.GoalPlanner.planAndExecute(context, userText)
-                android.util.Log.i("AssistantEngine", "[DETERMINISTIC_VOICE_RESULT] Finished local execution for '$userText': success=${planResult.success}, error=${planResult.errorMessage}")
-                
-                val replyMessage = if (planResult.success) {
-                    "Done sir."
-                } else {
-                    planResult.errorMessage ?: "Action failed."
-                }
-                conversationManager.addMessage("MAX", replyMessage)
-                AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", replyMessage))
-            }
+            executeLocalGoal(userText)
             return
         }
 
@@ -543,11 +570,17 @@ class AssistantEngine(private val context: Context) {
         if (!voiceDecision.isAllowed) {
             val blockMsg = when (voiceDecision) {
                 is com.example.firebase.manager.GateDecision.BlockDailyLimitReached ->
-                    "Daily free limit reached (${voiceDecision.messageCountToday}/10 messages). Upgrade to Premium to continue."
+                    "Daily free limit reached (${voiceDecision.messageCountToday}/${voiceDecision.limit} messages). Upgrade to Premium to continue."
                 is com.example.firebase.manager.GateDecision.BlockTrialExpired ->
                     "Your 3-day free trial has ended. Activate MAX Premium to continue."
+                is com.example.firebase.manager.GateDecision.BlockLicenseRevoked ->
+                    "Your MAX license has been revoked by the issuer."
+                is com.example.firebase.manager.GateDecision.BlockLicenseInactive ->
+                    voiceDecision.reason
                 is com.example.firebase.manager.GateDecision.BlockNotAuthenticated ->
                     "Please sign in with Google to use MAX."
+                is com.example.firebase.manager.GateDecision.BlockError ->
+                    voiceDecision.message
                 else -> "Usage limit reached. Activate MAX Premium."
             }
             android.util.Log.w("AssistantEngine", "[LICENSE_GATE] Voice session BLOCKED: $blockMsg")
@@ -622,18 +655,7 @@ class AssistantEngine(private val context: Context) {
             android.util.Log.i("AssistantEngine", "[DETERMINISTIC_TEXT_ROUTE] Text is deterministic UI command: '$userText'. Intercepting locally with 0 Gemini calls.")
             conversationManager.addMessage("You", userText)
             AssistantEventBus.emit(AssistantEvent.TextTranscribed("You", userText))
-            CoroutineScope(Dispatchers.IO).launch {
-                gate?.checkAndConsumeQuota()
-                val planResult = com.example.automation.engine.GoalPlanner.planAndExecute(context, userText)
-                android.util.Log.i("AssistantEngine", "[DETERMINISTIC_TEXT_RESULT] Finished local execution for '$userText': success=${planResult.success}, error=${planResult.errorMessage}")
-                val replyMessage = if (planResult.success) {
-                    "Done sir."
-                } else {
-                    planResult.errorMessage ?: "Action failed."
-                }
-                conversationManager.addMessage("MAX", replyMessage)
-                AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", replyMessage))
-            }
+            executeLocalGoal(userText)
             return
         }
 
@@ -674,6 +696,32 @@ class AssistantEngine(private val context: Context) {
         }
     }
 
+    private fun executeLocalGoal(userText: String) {
+        localExecutionScope.launch {
+            val reply = try {
+                val result = com.example.automation.engine.GoalPlanner.planAndExecute(context, userText)
+                when {
+                    result.isCancelled -> result.errorMessage ?: "Task cancelled; remaining steps not executed."
+                    result.success -> result.stepResults.lastOrNull()?.message ?: "Task completed and verified."
+                    else -> result.errorMessage ?: "Action failed."
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", "Task cancelled; remaining steps not executed."))
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e("AssistantEngine", "Deterministic execution failed", e)
+                com.example.automation.event.AutomationEventBus.publish(
+                    com.example.automation.event.AutomationEvent.ExecutionFinished(java.util.UUID.randomUUID(), false))
+                "Action failed: ${e.message ?: "execution exception"}"
+            }
+            conversationManager.addMessage("MAX", reply)
+            AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", reply))
+            kotlinx.coroutines.withTimeoutOrNull(5000L) {
+                (context.applicationContext as? com.example.MyApplication)?.entitlementGate?.checkAndConsumeQuota()
+            }
+        }
+    }
+
     private fun sendTextMessageToModel(userText: String, promptText: String) {
         val settings = com.example.data.preferences.SettingsManager(context)
         val keyPresent = settings.hasValidGeminiApiKey()
@@ -708,13 +756,22 @@ class AssistantEngine(private val context: Context) {
             if (!decision.isAllowed) {
                 val blockMessage = when (decision) {
                     is com.example.firebase.manager.GateDecision.BlockDailyLimitReached -> {
-                        "Daily free limit reached (${decision.messageCountToday}/10 messages). Upgrade to Premium to continue."
+                        "Daily free limit reached (${decision.messageCountToday}/${decision.limit} messages). Upgrade to Premium to continue."
                     }
                     is com.example.firebase.manager.GateDecision.BlockTrialExpired -> {
                         "Your 3-day free trial has ended. Activate MAX Premium to continue."
                     }
+                    is com.example.firebase.manager.GateDecision.BlockLicenseRevoked -> {
+                        "Your MAX license has been revoked by the issuer."
+                    }
+                    is com.example.firebase.manager.GateDecision.BlockLicenseInactive -> {
+                        decision.reason
+                    }
                     is com.example.firebase.manager.GateDecision.BlockNotAuthenticated -> {
                         "Please sign in with your Google account to use MAX."
+                    }
+                    is com.example.firebase.manager.GateDecision.BlockError -> {
+                        decision.message
                     }
                     else -> "Message quota exceeded. Please activate MAX Premium."
                 }
@@ -775,6 +832,8 @@ class AssistantEngine(private val context: Context) {
     }
 
     fun destroy() {
+        localExecutionScope.coroutineContext.cancelChildren()
+        com.example.automation.engine.TaskCancellationCoordinator.unregisterCancellationListener(this)
         responseTimeoutJob?.cancel()
         responseTimeoutJob = null
         stop()

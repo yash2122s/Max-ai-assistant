@@ -251,7 +251,7 @@ class FirestoreLicenseRepository(
     suspend fun consumeDailyMessage(
         userId: String,
         period: String = getTodayPeriodKey(),
-        maxDailyLimit: Long = 10L
+        maxDailyLimit: Long = 20L
     ): Result<Pair<Long, Boolean>> = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not initialized"))
         try {

@@ -115,6 +115,14 @@ object IncomingCallManager {
         // Prevent duplicate announcements for the same active call
         if (currentCallState != IncomingCallFlowState.IDLE && 
             currentCallState != IncomingCallFlowState.INCOMING_CALL_COMPLETED) {
+            if (!number.isNullOrBlank() && currentPhoneNumber.isNullOrBlank()) {
+                Log.d(TAG, "Updating incoming number for active ringing call: $number")
+                currentPhoneNumber = number
+                scope.launch {
+                    val identity = resolveIdentity(context, number)
+                    currentCallerIdentity = identity
+                }
+            }
             Log.d(TAG, "Call already active (state=$currentCallState), ignoring duplicate broadcast")
             return
         }
@@ -268,80 +276,235 @@ object IncomingCallManager {
         terminateCallAssistantSession(context)
     }
 
-    private suspend fun resolveIdentity(context: Context, number: String?): String {
-        // Priority 1: If phone number is available, query ContactsContract
-        if (!number.isNullOrBlank()) {
-            val contactName = getContactName(context, number)
+    private val DIALER_IGNORED_LABELS = setOf(
+        "incoming call", "calling", "answer", "decline", "reject", "dismiss",
+        "swipe up to answer", "swipe down to decline", "phone", "call", "voice call",
+        "hd", "sim 1", "sim 2", "sim1", "sim2", "jio", "airtel", "vi", "bsnl", "vodafone",
+        "mobile", "home", "work", "main", "other", "custom", "cellular",
+        "emergency", "private number", "unknown", "unknown caller", "unknown number",
+        "speaker", "mute", "keypad", "bluetooth", "hold", "add call", "video call"
+    )
+
+    /**
+     * Resolves the incoming caller identity with strict confidence gating:
+     * 1. Telephony broadcast number (exact normalized match in ContactsContract).
+     * 2. Accessibility screen scraping (rejecting system/dialer/carrier labels).
+     * 3. Fresh CallLog entry only if timestamp is within last 15 seconds AND type is INCOMING/MISSED.
+     * 4. Explicit fallback to "unknown number".
+     */
+    suspend fun resolveIdentity(context: Context, number: String?): String {
+        val cleanRawNumber = number?.trim()
+        val normalizedRaw = cleanRawNumber?.let { normalizePhoneDigits(it) }
+
+        // Source 1: Telephony / Broadcast incoming number
+        if (!cleanRawNumber.isNullOrBlank() && !isGenericUnknownLabel(cleanRawNumber)) {
+            val contactName = getContactName(context, cleanRawNumber)
             if (!contactName.isNullOrBlank()) {
-                Log.d(TAG, "[CONTACT_MATCH] Found contact name '$contactName' for number '$number'")
+                logCallIdentity(
+                    source = "TELEPHONY_BROADCAST",
+                    rawNumber = cleanRawNumber,
+                    normalizedNumber = normalizedRaw,
+                    candidate = cleanRawNumber,
+                    matchedContact = contactName,
+                    confidence = "HIGH",
+                    fallbackUsed = "NONE"
+                )
                 return contactName
             }
-            // NEVER return raw phone number; return unknown number
-            Log.d(TAG, "[CALLER_NUMBER] Number available but no contact matched -> unknown number")
-            return "unknown number"
-        }
 
-        // Priority 2: Accessibility Scrape with retries
-        val scraped = scrapeCallerInfoWithRetry(context)
-        if (!scraped.isNullOrBlank()) {
-            val contactName = getContactName(context, scraped)
-            if (!contactName.isNullOrBlank()) {
-                Log.d(TAG, "[ACCESSIBILITY_CONTACT_FOUND] Found contact name '$contactName'")
-                return contactName
+            // Incoming number -> correlated call-log record -> contact lookup
+            val correlatedNumber = getCorrelatedCallLogEntry(context, cleanRawNumber, maxAgeSeconds = 15L)
+            if (!correlatedNumber.isNullOrBlank()) {
+                val correlatedContact = getContactName(context, correlatedNumber)
+                if (!correlatedContact.isNullOrBlank()) {
+                    logCallIdentity(
+                        source = "CORRELATED_CALL_LOG",
+                        rawNumber = cleanRawNumber,
+                        normalizedNumber = normalizedRaw,
+                        candidate = correlatedNumber,
+                        matchedContact = correlatedContact,
+                        confidence = "HIGH",
+                        fallbackUsed = "CALL_LOG_CORRELATED_CONTACT"
+                    )
+                    return correlatedContact
+                }
             }
-            // If scraped text was a contact name (not a phone number)
-            if (!scraped.matches(Regex("^[+]?[0-9\\s\\-()]{7,20}$"))) {
-                return scraped
+
+            logCallIdentity(
+                source = "TELEPHONY_BROADCAST",
+                rawNumber = cleanRawNumber,
+                normalizedNumber = normalizedRaw,
+                candidate = cleanRawNumber,
+                matchedContact = null,
+                confidence = "LOW",
+                fallbackUsed = "FALL_THROUGH_TO_SCRAPE"
+            )
+        }
+
+        // Source 2: Accessibility Screen Scrape (Fallback when EXTRA_INCOMING_NUMBER is null or unsaved in contacts)
+        val scrapedCandidate = scrapeCallerInfoWithRetry(context)
+        if (!scrapedCandidate.isNullOrBlank() && !isGenericUnknownLabel(scrapedCandidate)) {
+            val contactMatch = getContactName(context, scrapedCandidate)
+            if (!contactMatch.isNullOrBlank()) {
+                logCallIdentity(
+                    source = "ACCESSIBILITY_SCRAPE",
+                    rawNumber = cleanRawNumber,
+                    normalizedNumber = normalizedRaw,
+                    candidate = scrapedCandidate,
+                    matchedContact = contactMatch,
+                    confidence = "HIGH",
+                    fallbackUsed = "ACCESSIBILITY"
+                )
+                return contactMatch
             }
-            return "unknown number"
+
+            // Scraped text might already be a saved contact name displayed on the dialer
+            if (!scrapedCandidate.matches(Regex("^[+]?[0-9\\s\\-()]{7,20}$"))) {
+                logCallIdentity(
+                    source = "ACCESSIBILITY_SCRAPE",
+                    rawNumber = cleanRawNumber,
+                    normalizedNumber = normalizedRaw,
+                    candidate = scrapedCandidate,
+                    matchedContact = scrapedCandidate,
+                    confidence = "MEDIUM",
+                    fallbackUsed = "ACCESSIBILITY_DIRECT_NAME"
+                )
+                return scrapedCandidate
+            }
         }
 
-        // Priority 3: Query latest ringing entry from CallLog
-        val callLogEntry = getLatestCallLogEntry(context)
-        if (!callLogEntry.isNullOrBlank()) {
-            val name = getContactName(context, callLogEntry)
-            if (!name.isNullOrBlank()) return name
-            if (!callLogEntry.matches(Regex("^[+]?[0-9\\s\\-()]{7,20}$"))) return callLogEntry
-            return "unknown number"
-        }
-
-        // Priority 4: Fallback to unknown number
-        Log.d(TAG, "No contact, number, or accessibility candidate found. Falling back to unknown number")
+        // When correlation is unavailable, return unknown rather than guessing an uncorrelated cached name
+        logCallIdentity(
+            source = "FALLBACK_DEFAULT",
+            rawNumber = cleanRawNumber,
+            normalizedNumber = normalizedRaw,
+            candidate = null,
+            matchedContact = null,
+            confidence = "NONE",
+            fallbackUsed = "UNKNOWN_NUMBER"
+        )
         return "unknown number"
     }
 
-    private fun getContactName(context: Context, phoneNumber: String): String? {
-        val cleanNumber = phoneNumber.trim()
-        if (cleanNumber.isEmpty()) return null
+    private fun logCallIdentity(
+        source: String,
+        rawNumber: String?,
+        normalizedNumber: String?,
+        candidate: String?,
+        matchedContact: String?,
+        confidence: String,
+        fallbackUsed: String
+    ) {
+        Log.i(
+            TAG,
+            "CALL_IDENTITY:\n" +
+                    "source=$source\n" +
+                    "rawNumber=${rawNumber ?: "null"}\n" +
+                    "normalizedNumber=${normalizedNumber ?: "null"}\n" +
+                    "candidate=${candidate ?: "null"}\n" +
+                    "matchedContact=${matchedContact ?: "null"}\n" +
+                    "confidence=$confidence\n" +
+                    "fallbackUsed=$fallbackUsed"
+        )
+    }
 
-        // 1. Query ContactsContract.PhoneLookup
+    fun normalizePhoneDigits(input: String): String {
+        return input.replace(Regex("[^0-9]"), "")
+    }
+
+    fun isGenericUnknownLabel(text: String): Boolean {
+        val lower = text.trim().lowercase(Locale.ROOT)
+        return lower.isEmpty() ||
+                lower == "unknown" ||
+                lower == "unknown caller" ||
+                lower == "unknown number" ||
+                lower == "private" ||
+                lower == "private number" ||
+                lower == "null" ||
+                lower == "restricted" ||
+                lower == "withheld"
+    }
+
+    fun isIgnoredDialerLabel(text: String): Boolean {
+        val lower = text.trim().lowercase(Locale.ROOT)
+        if (lower.isEmpty()) return true
+        if (DIALER_IGNORED_LABELS.contains(lower)) return true
+
+        // Check if starts with carrier / SIM label patterns
+        if (lower.startsWith("sim ") || lower.startsWith("sim1") || lower.startsWith("sim2")) return true
+        if (lower.startsWith("calling via") || lower.startsWith("incoming via")) return true
+        if (lower.startsWith("hd ") || lower.endsWith(" call")) return true
+
+        return false
+    }
+
+    @Volatile
+    var testContactLookupHook: ((String) -> String?)? = null
+
+    /**
+     * Resolves contact name strictly with exact number verification.
+     * Uses PhoneLookup first, then verifies CommonDataKinds.Phone with normalized digit equality.
+     */
+    fun getContactName(context: Context, phoneNumber: String): String? {
+        val cleanNumber = phoneNumber.trim()
+        if (cleanNumber.isEmpty() || isGenericUnknownLabel(cleanNumber)) return null
+
+        testContactLookupHook?.let { hook ->
+            return hook.invoke(cleanNumber)
+        }
+
+        val targetDigits = normalizePhoneDigits(cleanNumber)
+        if (targetDigits.length < 5) return null
+
+        // 1. Primary: ContactsContract.PhoneLookup
         try {
             val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(cleanNumber))
-            val projection = arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME)
+            val projection = arrayOf(
+                ContactsContract.PhoneLookup.DISPLAY_NAME,
+                ContactsContract.PhoneLookup.NUMBER
+            )
             context.contentResolver.query(uri, projection, null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) {
-                    val name = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.PhoneLookup.DISPLAY_NAME))
-                    if (!name.isNullOrBlank()) return name
+                while (cursor.moveToNext()) {
+                    val nameIdx = cursor.getColumnIndex(ContactsContract.PhoneLookup.DISPLAY_NAME)
+                    if (nameIdx >= 0) {
+                        val name = cursor.getString(nameIdx)
+                        val numIdx = cursor.getColumnIndex(ContactsContract.PhoneLookup.NUMBER)
+                        if (numIdx >= 0) {
+                            val candNumber = cursor.getString(numIdx) ?: ""
+                            val candDigits = normalizePhoneDigits(candNumber)
+                            if (candDigits.isEmpty() || isNumberMatch(targetDigits, candDigits)) {
+                                if (!name.isNullOrBlank()) return name
+                            }
+                        } else {
+                            if (!name.isNullOrBlank()) return name
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error querying PhoneLookup for '$cleanNumber': ${e.message}")
         }
 
-        // 2. Query ContactsContract.CommonDataKinds.Phone with normalized digits matching
+        // 2. Secondary: ContactsContract.CommonDataKinds.Phone
         try {
-            val digitsOnly = cleanNumber.replace(Regex("[^0-9]"), "")
-            val matchPattern = if (digitsOnly.length >= 10) digitsOnly.takeLast(10) else digitsOnly
-            if (matchPattern.isNotEmpty()) {
-                context.contentResolver.query(
-                    ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-                    arrayOf(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME, ContactsContract.CommonDataKinds.Phone.NUMBER),
-                    "${ContactsContract.CommonDataKinds.Phone.NUMBER} LIKE ?",
-                    arrayOf("%$matchPattern%"),
-                    null
-                )?.use { cursor ->
-                    if (cursor.moveToFirst()) {
-                        val name = cursor.getString(cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME))
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                ),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (cursor.moveToNext()) {
+                    val name = if (nameIdx >= 0) cursor.getString(nameIdx) else null
+                    val candNumber = if (numIdx >= 0) cursor.getString(numIdx) ?: "" else ""
+                    val candDigits = normalizePhoneDigits(candNumber)
+
+                    if (isNumberMatch(targetDigits, candDigits)) {
                         if (!name.isNullOrBlank()) return name
                     }
                 }
@@ -350,20 +513,67 @@ object IncomingCallManager {
             Log.e(TAG, "Error querying CommonDataKinds.Phone: ${e.message}")
         }
 
+        // 3. Tertiary: ContactsContract.Data table directly (ensures compatibility with all mock providers)
+        try {
+            context.contentResolver.query(
+                ContactsContract.Data.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER,
+                    ContactsContract.Data.MIMETYPE
+                ),
+                "${ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(ContactsContract.CommonDataKinds.Phone.CONTENT_ITEM_TYPE),
+                null
+            )?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val numIdx = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (cursor.moveToNext()) {
+                    val name = if (nameIdx >= 0) cursor.getString(nameIdx) else null
+                    val candNumber = if (numIdx >= 0) cursor.getString(numIdx) ?: "" else ""
+                    val candDigits = normalizePhoneDigits(candNumber)
+
+                    if (isNumberMatch(targetDigits, candDigits)) {
+                        if (!name.isNullOrBlank()) return name
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error querying Data table: ${e.message}")
+        }
+
         return null
+    }
+
+    /**
+     * Compares two normalized digit strings for match.
+     * Requires minimum 7-10 trailing digits exact match or full equality.
+     */
+    fun isNumberMatch(digitsA: String, digitsB: String): Boolean {
+        if (digitsA.isEmpty() || digitsB.isEmpty()) return false
+        if (digitsA == digitsB) return true
+
+        val minLen = minOf(digitsA.length, digitsB.length)
+        if (minLen >= 10) {
+            return digitsA.takeLast(10) == digitsB.takeLast(10)
+        }
+        if (minLen >= 7) {
+            return digitsA.takeLast(7) == digitsB.takeLast(7)
+        }
+        return false
     }
 
     private suspend fun scrapeCallerInfoWithRetry(context: Context): String? {
         val service = JarvisAccessibilityService.instance ?: return null
 
-        // Retry window: 6 attempts x 500ms = 3.0s max
-        for (attempt in 1..6) {
+        // Retry window: 4 attempts x 350ms = 1.4s max
+        for (attempt in 1..4) {
             val nodes = service.dumpScreenFlat()
-            
+
             for (node in nodes) {
                 val text = ((node["text"] as? String) ?: "").trim()
                 val contentDesc = ((node["contentDescription"] as? String) ?: "").trim()
-                val viewId = ((node["viewId"] as? String) ?: "").lowercase()
+                val viewId = ((node["viewId"] as? String) ?: "").lowercase(Locale.ROOT)
 
                 val candidate = when {
                     text.isNotEmpty() -> text
@@ -372,61 +582,63 @@ object IncomingCallManager {
                 }
 
                 if (candidate.isEmpty()) continue
+                if (isIgnoredDialerLabel(candidate)) continue
 
-                // Ignore common dialer UI action buttons and static labels
-                val isStaticLabel = candidate.equals("Incoming call", ignoreCase = true) ||
-                        candidate.equals("Calling", ignoreCase = true) ||
-                        candidate.equals("Answer", ignoreCase = true) ||
-                        candidate.equals("Decline", ignoreCase = true) ||
-                        candidate.equals("Reject", ignoreCase = true) ||
-                        candidate.equals("Dismiss", ignoreCase = true) ||
-                        candidate.equals("Swipe up to answer", ignoreCase = true) ||
-                        candidate.equals("Swipe down to decline", ignoreCase = true) ||
-                        candidate.equals("Phone", ignoreCase = true)
-
-                if (isStaticLabel) continue
-
-                // Check viewId keywords
-                if (viewId.contains("name") || viewId.contains("caller") || 
-                    viewId.contains("contact") || viewId.contains("title") ||
-                    viewId.contains("primary_info")) {
+                // Check viewId keywords for caller identity
+                if (viewId.contains("name") || viewId.contains("caller") ||
+                    viewId.contains("contact") || viewId.contains("primary_info")
+                ) {
                     Log.d(TAG, "[ACCESSIBILITY_CALLER_FOUND] Found node match ($viewId): '$candidate'")
-                    // If the text looks like a phone number, resolve against contacts
-                    val contactMatch = getContactName(context, candidate)
-                    return contactMatch ?: candidate
+                    return candidate
                 }
 
                 // Check if candidate text is formatted as phone number
                 if (candidate.matches(Regex("^[+]?[0-9\\s\\-()]{7,20}$"))) {
-                    val contactMatch = getContactName(context, candidate)
-                    return contactMatch ?: candidate
+                    return candidate
                 }
             }
 
-            delay(500)
+            delay(350)
         }
         return null
     }
 
-    private fun getLatestCallLogEntry(context: Context): String? {
+    /**
+     * Reads CallLog ONLY if a ringing or missed call matching [incomingNumber] was recorded within [maxAgeSeconds].
+     * Never guesses from an uncorrelated record.
+     */
+    fun getCorrelatedCallLogEntry(context: Context, incomingNumber: String?, maxAgeSeconds: Long = 15L): String? {
+        if (incomingNumber.isNullOrBlank() || isGenericUnknownLabel(incomingNumber)) return null
+        val targetDigits = normalizePhoneDigits(incomingNumber)
+        if (targetDigits.isEmpty()) return null
+
         try {
+            val minTimestamp = System.currentTimeMillis() - (maxAgeSeconds * 1000L)
             val cursor = context.contentResolver.query(
                 CallLog.Calls.CONTENT_URI,
-                arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.CACHED_NAME, CallLog.Calls.TYPE),
-                null,
-                null,
+                arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.TYPE, CallLog.Calls.DATE),
+                "${CallLog.Calls.DATE} >= ? AND (${CallLog.Calls.TYPE} = ? OR ${CallLog.Calls.TYPE} = ?)",
+                arrayOf(
+                    minTimestamp.toString(),
+                    CallLog.Calls.INCOMING_TYPE.toString(),
+                    CallLog.Calls.MISSED_TYPE.toString()
+                ),
                 "${CallLog.Calls.DATE} DESC"
             )
             cursor?.use {
-                if (it.moveToFirst()) {
-                    val cachedName = it.getString(it.getColumnIndexOrThrow(CallLog.Calls.CACHED_NAME))
-                    val number = it.getString(it.getColumnIndexOrThrow(CallLog.Calls.NUMBER))
-                    if (!cachedName.isNullOrBlank()) return cachedName
-                    if (!number.isNullOrBlank()) return number
+                while (it.moveToNext()) {
+                    val date = it.getLong(it.getColumnIndexOrThrow(CallLog.Calls.DATE))
+                    if (date >= minTimestamp) {
+                        val number = it.getString(it.getColumnIndexOrThrow(CallLog.Calls.NUMBER)) ?: ""
+                        val candDigits = normalizePhoneDigits(number)
+                        if (isNumberMatch(targetDigits, candDigits)) {
+                            return number
+                        }
+                    }
                 }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "CallLog query skipped: ${e.message}")
+            Log.d(TAG, "Correlated CallLog query skipped: ${e.message}")
         }
         return null
     }

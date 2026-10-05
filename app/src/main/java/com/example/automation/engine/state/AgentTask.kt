@@ -4,6 +4,7 @@ import java.util.UUID
 
 /**
  * The core stateful representation of an active long-horizon user goal.
+ * Enforces authoritative parent task completion derived strictly from child-step state.
  */
 data class AgentTask(
     val id: String = UUID.randomUUID().toString(),
@@ -18,11 +19,20 @@ data class AgentTask(
         return if (currentStepIndex in steps.indices) steps[currentStepIndex] else null
     }
 
-    fun advance() {
+    /**
+     * Advances task step index or resolves parent completion.
+     * Invariant: A task can only reach COMPLETED if all steps succeeded.
+     */
+    fun advance(lastStepSuccess: Boolean = true) {
+        if (!lastStepSuccess) {
+            status = TaskStatus.FAILED
+            return
+        }
         if (currentStepIndex < steps.size - 1) {
             currentStepIndex++
         } else {
-            status = TaskStatus.COMPLETED
+            val allSucceeded = steps.isNotEmpty() && steps.all { it.status == "SUCCESS" }
+            status = if (allSucceeded) TaskStatus.COMPLETED else TaskStatus.FAILED
         }
     }
 }

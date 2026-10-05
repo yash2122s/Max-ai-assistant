@@ -7,7 +7,9 @@ import com.example.automation.event.AutomationEvent
 import com.example.automation.event.AutomationEventBus
 import com.example.automation.tools.Tool
 import com.example.automation.tools.ToolResult
+import com.example.automation.tools.ToolResultStatus
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 
 object RetryEngine {
     private const val TAG = "RetryEngine"
@@ -17,13 +19,17 @@ object RetryEngine {
         tool: Tool,
         request: ExecutionRequest,
         executeBlock: suspend (attempt: Int) -> ToolResult,
-        verifyBlock: (result: ToolResult) -> VerificationResult
+        verifyBlock: suspend (result: ToolResult) -> VerificationResult
     ): ToolResult {
         val policy = tool.retryPolicy
         var attempt = 1
         var lastResult: ToolResult
 
         while (true) {
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (request.cancellationToken.isCancelled) {
+                return ToolResult.failure(tool.name, "EXECUTION_CANCELLED", "Task cancelled before dispatch")
+            }
             if (attempt > 1) {
                 AutomationEventBus.publish(AutomationEvent.RetryStarted(request.executionId, tool.name, attempt))
             }
@@ -35,9 +41,44 @@ object RetryEngine {
             }
 
             val verificationResult = verifyBlock(lastResult)
+            val finalSuccess = lastResult.success && verificationResult.success
+            val isCallRequested = verificationResult.reason?.startsWith("CALL_REQUESTED") == true ||
+                (lastResult.metadata.optString("status") == "CALL_REQUESTED" && !verificationResult.success)
+
+            val updatedStatus = when {
+                finalSuccess -> ToolResultStatus.SUCCESS
+                isCallRequested -> ToolResultStatus.ACCEPTED
+                lastResult.status == ToolResultStatus.NEEDS_INPUT -> ToolResultStatus.NEEDS_INPUT
+                lastResult.status == ToolResultStatus.USER_ACTION_REQUIRED -> ToolResultStatus.USER_ACTION_REQUIRED
+                lastResult.status == ToolResultStatus.PENDING_USER_ACTION -> ToolResultStatus.PENDING_USER_ACTION
+                else -> ToolResultStatus.FAILURE
+            }
+
+            val updatedMetadata = org.json.JSONObject(lastResult.metadata.toString()).apply {
+                put("executorSuccess", lastResult.success)
+                if (verificationResult.reason?.startsWith("CALL_PLACED") == true) {
+                    put("status", "CALL_PLACED")
+                } else if (isCallRequested) {
+                    put("status", "CALL_REQUESTED")
+                }
+            }
+
             val updatedResult = lastResult.copy(
+                success = finalSuccess,
+                status = updatedStatus,
                 verification = verificationResult,
-                attemptCount = attempt
+                attemptCount = attempt,
+                metadata = updatedMetadata,
+                message = if (!verificationResult.success && lastResult.success) {
+                    verificationResult.reason ?: "Verification failed"
+                } else {
+                    lastResult.message
+                },
+                errorCode = if (!verificationResult.success && lastResult.success) {
+                    if (isCallRequested) "CALL_REQUESTED" else "VERIFICATION_FAILED"
+                } else {
+                    lastResult.errorCode
+                }
             )
 
             if (verificationResult.success) {
@@ -47,7 +88,8 @@ object RetryEngine {
                 return updatedResult
             }
 
-            if (!updatedResult.retryable || !verificationResult.retryRecommended) {
+            if (!updatedResult.retryable || !verificationResult.retryRecommended ||
+                com.example.automation.engine.execution.DurableRecoveryCoordinator.isIrreversibleExternalAction(request.action)) {
                 if (attempt > 1) {
                     AutomationEventBus.publish(AutomationEvent.RetryFinished(request.executionId, tool.name, false))
                 }

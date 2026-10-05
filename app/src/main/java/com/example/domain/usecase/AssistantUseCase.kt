@@ -95,7 +95,9 @@ class AssistantUseCase(private val context: Context) {
         val offlineResult = OfflineCommandEngine.executeIfMatched(appContext, text)
         if (offlineResult != null) {
             val app = appContext as? com.example.MyApplication
-            app?.entitlementGate?.checkAndConsumeQuota()
+            // Local execution already returned truth. Cloud usage sync cannot
+            // hold its terminal response indefinitely (e.g. offline Firestore).
+            kotlinx.coroutines.withTimeoutOrNull(5000L) { app?.entitlementGate?.checkAndConsumeQuota() }
             return offlineResult
         }
 

@@ -328,4 +328,66 @@ class LicenseEntitlementTest {
         assertEquals(LicenseStatus.EXPIRED, LicenseStatus.fromString("EXPIRED"))
         assertEquals(LicenseStatus.REVOKED, LicenseStatus.fromString("REVOKED"))
     }
+
+    // 21. Entitlement State Matrix Tests
+    @Test
+    fun testEntitlementMatrix_lifetimeActive_isEntitled() {
+        val license = CloudLicense(
+            userId = "user_lt_active",
+            plan = LicensePlan.LIFETIME,
+            status = LicenseStatus.ACTIVE
+        )
+        assertTrue(license.isEntitled())
+        assertFalse(license.isExpired())
+    }
+
+    @Test
+    fun testEntitlementMatrix_lifetimeRevoked_notEntitled() {
+        val license = CloudLicense(
+            userId = "user_lt_revoked",
+            plan = LicensePlan.LIFETIME,
+            status = LicenseStatus.REVOKED
+        )
+        assertFalse(license.isEntitled())
+    }
+
+    @Test
+    fun testEntitlementMatrix_lifetimeNonActive_notEntitled() {
+        // e.g. EXPIRED or unexpected status
+        val license = CloudLicense(
+            userId = "user_lt_expired_status",
+            plan = LicensePlan.LIFETIME,
+            status = LicenseStatus.EXPIRED
+        )
+        assertFalse(license.isEntitled())
+        assertTrue(license.isExpired())
+    }
+
+    @Test
+    fun testEntitlementMatrix_trialActive_isEntitled() {
+        val now = 1700000000000L
+        val license = CloudLicense(
+            userId = "user_trial_active",
+            plan = LicensePlan.TRIAL,
+            status = LicenseStatus.TRIAL,
+            trialStartedAtEpochMillis = now,
+            trialExpiresAtEpochMillis = now + 100000L
+        )
+        assertTrue(license.isEntitled(now))
+        assertFalse(license.isExpired(now))
+    }
+
+    @Test
+    fun testEntitlementMatrix_trialExpired_notEntitled() {
+        val now = 1700000000000L
+        val license = CloudLicense(
+            userId = "user_trial_exp",
+            plan = LicensePlan.TRIAL,
+            status = LicenseStatus.TRIAL,
+            trialStartedAtEpochMillis = now - 200000L,
+            trialExpiresAtEpochMillis = now - 100000L
+        )
+        assertFalse(license.isEntitled(now))
+        assertTrue(license.isExpired(now))
+    }
 }

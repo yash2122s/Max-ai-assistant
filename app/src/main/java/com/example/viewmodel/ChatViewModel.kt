@@ -284,31 +284,122 @@ class ChatViewModel : ViewModel() {
         // P1.2 — typed reply to a pending approval (Allow / Cancel)
         if (com.example.automation.approval.ApprovalCoordinator.hasPending()) {
             viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                val intent = com.example.automation.approval.ApprovalCoordinator.parseReply(text)
-                when (intent) {
-                    com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE -> {
-                        val pending = com.example.automation.approval.ApprovalCoordinator.resolve()
-                        if (pending != null) {
-                            val actCtx = com.example.automation.approval.ApprovalCoordinator.context()
-                                ?: appContext
-                            if (actCtx != null) {
-                                try {
-                                    com.example.automation.engine.ActionDispatcher.dispatchWithResult(actCtx, pending.payload)
-                                } catch (e: Exception) {
-                                    _uiState.update { it.copy(isThinking = false, error = e.message) }
-                                }
-                            }
-                        }
-                    }
-                    com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY ->
-                        com.example.automation.approval.ApprovalCoordinator.cancel()
-                    com.example.automation.approval.ApprovalCoordinator.ReplyIntent.OTHER -> Unit
+                val actCtx = com.example.automation.approval.ApprovalCoordinator.context()
+                    ?: appContext
+                if (actCtx != null) {
+                    com.example.automation.approval.ApprovalCoordinator.handleReply(text, actCtx)
                 }
-                if (intent != com.example.automation.approval.ApprovalCoordinator.ReplyIntent.OTHER) {
-                    _uiState.update { it.copy(isThinking = false) }
-                }
+                _uiState.update { it.copy(isThinking = false) }
             }
             return
+        }
+
+        // P1-4: Typed selection for multi-contact disambiguation
+        if (com.example.automation.engine.PendingCallManager.state is com.example.automation.engine.CallState.AwaitingContactSelection) {
+            val replyIntent = com.example.automation.approval.ApprovalCoordinator.parseReply(text)
+            if (replyIntent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY) {
+                com.example.automation.engine.PendingCallManager.cancel()
+                val reply = "Call cancelled."
+                persistChatMessage("Gemini", reply)
+                thinkingTimeoutJob?.cancel()
+                _uiState.update { state ->
+                    state.copy(
+                        messages = listOf(ChatMessage("MAX", reply)) + state.messages,
+                        isThinking = false,
+                        liveAiCaption = reply
+                    )
+                }
+                scheduleCaptionClear()
+                return
+            }
+
+            val selectedCandidate = com.example.automation.engine.PendingCallManager.resolveAndSelectCandidate(text)
+            if (selectedCandidate != null) {
+                val confirmPrompt = "Do you want to call ${selectedCandidate.contactMatch.displayName} (${selectedCandidate.phoneNumber.normalizedNumber})? Please say yes to confirm or cancel."
+                persistChatMessage("Gemini", confirmPrompt)
+                thinkingTimeoutJob?.cancel()
+                _uiState.update { state ->
+                    state.copy(
+                        messages = listOf(ChatMessage("MAX", confirmPrompt)) + state.messages,
+                        isThinking = false,
+                        liveAiCaption = confirmPrompt
+                    )
+                }
+                scheduleCaptionClear()
+                return
+            } else {
+                val clarification = "Please choose which number or contact to call (e.g., 1, 2, Mobile, or Work)."
+                persistChatMessage("Gemini", clarification)
+                thinkingTimeoutJob?.cancel()
+                _uiState.update { state ->
+                    state.copy(
+                        messages = listOf(ChatMessage("MAX", clarification)) + state.messages,
+                        isThinking = false,
+                        liveAiCaption = clarification
+                    )
+                }
+                scheduleCaptionClear()
+                return
+            }
+        }
+
+        // Typed reply to a pending phone call confirmation
+        if (com.example.automation.engine.PendingCallManager.hasPendingConfirmation()) {
+            val replyIntent = com.example.automation.approval.ApprovalCoordinator.parseReply(text)
+            if (replyIntent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE) {
+                val pending = com.example.automation.engine.PendingCallManager.getPendingConfirmation()
+                if (pending != null) {
+                    com.example.automation.engine.PendingCallManager.confirmPendingCall(pending.contactId, pending.phoneId)
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val actCtx = com.example.automation.approval.ApprovalCoordinator.context() ?: appContext ?: ctx
+                        val callArgs = org.json.JSONObject().apply {
+                            put("action", "CALL_PHONE")
+                            put("contactId", pending.contactId)
+                            put("phoneId", pending.phoneId)
+                            put("contact", pending.displayName)
+                            put("phoneNumber", pending.phoneNumber)
+                            put("confirmed", true)
+                            put("user_confirmed", true)
+                            put("last_input_transcription", text)
+                        }
+                        val resultJsonStr = if (actCtx != null) {
+                            com.example.automation.engine.ActionDispatcher.dispatchWithResult(actCtx, callArgs)
+                        } else "{}"
+                        val resultObj = runCatching { org.json.JSONObject(resultJsonStr) }.getOrNull()
+                        val isSuccess = resultObj?.optBoolean("success", false) == true
+                        val reply = if (isSuccess) {
+                            "Calling ${pending.displayName}..."
+                        } else {
+                            resultObj?.optString("message") ?: "Failed to place call."
+                        }
+                        persistChatMessage("Gemini", reply)
+                        thinkingTimeoutJob?.cancel()
+                        _uiState.update { state ->
+                            state.copy(
+                                messages = listOf(ChatMessage("MAX", reply)) + state.messages,
+                                isThinking = false,
+                                liveAiCaption = reply
+                            )
+                        }
+                        scheduleCaptionClear()
+                    }
+                    return
+                }
+            } else if (replyIntent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY) {
+                com.example.automation.engine.PendingCallManager.cancel()
+                val reply = "Call cancelled."
+                persistChatMessage("Gemini", reply)
+                thinkingTimeoutJob?.cancel()
+                _uiState.update { state ->
+                    state.copy(
+                        messages = listOf(ChatMessage("MAX", reply)) + state.messages,
+                        isThinking = false,
+                        liveAiCaption = reply
+                    )
+                }
+                scheduleCaptionClear()
+                return
+            }
         }
 
         if (ctx != null) {
@@ -316,7 +407,7 @@ class ChatViewModel : ViewModel() {
                 val offlineResult = com.example.automation.engine.OfflineCommandEngine.executeIfMatched(ctx, text)
                 if (offlineResult != null) {
                     val rawMsg = offlineResult.message ?: if (offlineResult.success) "Action executed." else "Action failed."
-                    val replyText = if (offlineResult.success) rawMsg else "Failed: $rawMsg"
+                    val replyText = if (offlineResult.success || offlineResult.status == com.example.automation.tools.ToolResultStatus.NEEDS_INPUT) rawMsg else "Failed: $rawMsg"
                     persistChatMessage("Gemini", replyText)
                     thinkingTimeoutJob?.cancel()
                     _uiState.update { state ->

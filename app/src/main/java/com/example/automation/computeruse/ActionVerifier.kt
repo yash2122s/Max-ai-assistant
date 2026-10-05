@@ -17,6 +17,10 @@ object ActionVerifier {
             return Pair(false, note)
         }
 
+        if (action !is ComputerAction.Wait && action !is ComputerAction.ObserveMore && !after.isFresh()) {
+            return false to "Fresh foreground observation is required for verification"
+        }
+
         // 1. Evaluate explicit ActionExpectation if attached
         val expectation = action.expectation
         if (expectation != null) {
@@ -33,7 +37,7 @@ object ActionVerifier {
                 val targetPkg = executionResult.targetApp ?: action.packageName ?: ""
                 val currentPkg = after.foregroundPackage
                 val isForeground = if (targetPkg.isNotBlank()) {
-                    currentPkg.contains(targetPkg, ignoreCase = true) || targetPkg.contains(currentPkg, ignoreCase = true)
+                    currentPkg.isNotBlank() && currentPkg.equals(targetPkg, ignoreCase = true)
                 } else {
                     after.isAppForeground && currentPkg != before.foregroundPackage
                 }
@@ -46,9 +50,7 @@ object ActionVerifier {
 
             is ComputerAction.TypeText -> {
                 val text = action.text.trim()
-                val textPresent = after.visibleTexts.any { it.contains(text, ignoreCase = true) } ||
-                    after.editableElements.any { it.text?.contains(text, ignoreCase = true) == true } ||
-                    (action.pressEnterAfter && before.hasScreenChanged(after))
+                val textPresent = text.isNotEmpty() && after.editableElements.any { it.text?.contains(text) == true }
 
                 if (textPresent) {
                     Pair(true, "Text '$text' verified entered into field")
@@ -63,16 +65,30 @@ object ActionVerifier {
                     elem.isSelected && (
                         elem.text?.contains(action.targetText, ignoreCase = true) == true ||
                         elem.contentDescription?.contains(action.targetText, ignoreCase = true) == true ||
-                        elem.id == action.resourceId
+                        (action.resourceId != null && elem.id == action.resourceId)
                     )
                 }
                 val targetFocused = after.focusedElement?.let { elem ->
                     elem.text?.contains(action.targetText, ignoreCase = true) == true ||
-                    elem.id == action.resourceId
+                    (action.resourceId != null && elem.id == action.resourceId)
                 } ?: false
 
-                if (screenChanged || targetSelected || targetFocused) {
-                    Pair(true, if (screenChanged) "Screen transitioned after tap on '${action.targetText}'" else "Control '${action.targetText}' focused/selected")
+                val isTargetVerifiedExp = action.expectation is ActionExpectation.TargetVerified
+                val targetPresent = after.visibleTexts.any { it.contains(action.targetText, ignoreCase = true) } ||
+                    after.interactiveElements.any { elem ->
+                        elem.text?.contains(action.targetText, ignoreCase = true) == true ||
+                        elem.contentDescription?.contains(action.targetText, ignoreCase = true) == true ||
+                        (action.resourceId != null && elem.id == action.resourceId)
+                    }
+
+                if (screenChanged || targetSelected || targetFocused || (isTargetVerifiedExp && targetPresent)) {
+                    val msg = when {
+                        screenChanged -> "Screen transitioned after tap on '${action.targetText}'"
+                        targetSelected -> "Control '${action.targetText}' focused/selected"
+                        targetFocused -> "Control '${action.targetText}' focused"
+                        else -> "Target '${action.targetText}' verified present on screen"
+                    }
+                    Pair(true, msg)
                 } else {
                     Pair(false, "Tap on '${action.targetText}' produced no state transition or selection change")
                 }
@@ -89,7 +105,7 @@ object ActionVerifier {
 
             is ComputerAction.PressEnter -> {
                 val screenChanged = before.hasScreenChanged(after)
-                Pair(true, "Dispatched Enter key (screenChanged=$screenChanged)")
+                Pair(screenChanged || action.expectation != null, "Enter dispatch requires an observed transition or verified expectation (screenChanged=$screenChanged)")
             }
 
             is ComputerAction.Scroll -> {
@@ -130,7 +146,7 @@ object ActionVerifier {
 
             is ComputerAction.PressKey -> {
                 val screenChanged = before.hasScreenChanged(after)
-                Pair(true, "Dispatched key '${action.keyNameOrCode}' (screenChanged=$screenChanged)")
+                Pair(screenChanged || action.expectation != null, "Key dispatch requires an observed transition or verified expectation (screenChanged=$screenChanged)")
             }
 
             is ComputerAction.Wait -> {
@@ -142,7 +158,7 @@ object ActionVerifier {
             }
 
             is ComputerAction.FinishTask -> {
-                Pair(action.success, action.message)
+                Pair(false, "Task completion must be derived from verified goal state")
             }
         }
 
@@ -175,7 +191,7 @@ object ActionVerifier {
             }
 
             is ActionExpectation.AppForeground -> {
-                if (after.foregroundPackage.contains(expectation.packageName, ignoreCase = true)) {
+                if (expectation.packageName.isNotBlank() && after.foregroundPackage.equals(expectation.packageName, ignoreCase = true)) {
                     Pair(true, "Target app '${expectation.packageName}' is in foreground")
                 } else {
                     Pair(false, "Target app '${expectation.packageName}' not in foreground (current: '${after.foregroundPackage}')")
@@ -207,7 +223,30 @@ object ActionVerifier {
                     Pair(false, "Element '${expectation.target}' is not selected")
                 }
             }
+
+            is ActionExpectation.TargetVerified -> {
+                val target = expectation.target
+                val selected = after.interactiveElements.any {
+                    it.isSelected && (
+                        it.text?.contains(target, ignoreCase = true) == true ||
+                        it.contentDescription?.contains(target, ignoreCase = true) == true ||
+                        it.id?.contains(target, ignoreCase = true) == true
+                    )
+                }
+                val present = after.visibleTexts.any { it.contains(target, ignoreCase = true) } ||
+                    after.interactiveElements.any {
+                        it.text?.contains(target, ignoreCase = true) == true ||
+                        it.contentDescription?.contains(target, ignoreCase = true) == true
+                    }
+                val changed = before.hasScreenChanged(after)
+                if (selected || (present && changed)) {
+                    Pair(true, "Target '$target' verified on screen (selected=$selected, screenChanged=$changed)")
+                } else if (present) {
+                    Pair(true, "Target '$target' present on screen")
+                } else {
+                    Pair(false, "Target '$target' not verified after action")
+                }
+            }
         }
     }
 }
-

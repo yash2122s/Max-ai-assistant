@@ -10,7 +10,7 @@ import com.example.automation.IncomingCallManager
 class IncomingCallReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "IncomingCallReceiver"
-        private var lastState = TelephonyManager.CALL_STATE_IDLE
+        private val lastTelephonyState = java.util.concurrent.atomic.AtomicInteger(TelephonyManager.CALL_STATE_IDLE)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -26,18 +26,22 @@ class IncomingCallReceiver : BroadcastReceiver() {
             else -> return
         }
 
-        Log.d(TAG, "Phone state changed: $stateStr (from $lastState to $state)")
+        val previous = lastTelephonyState.getAndSet(state)
+        Log.d(TAG, "Phone state changed: $stateStr (from $previous to $state, managerState=${IncomingCallManager.currentCallState})")
 
-        if (lastState == TelephonyManager.CALL_STATE_IDLE && state == TelephonyManager.CALL_STATE_RINGING) {
-            val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
-            Log.d(TAG, "[CALL_DETECTED] Ringing transition detected. Incoming number: ${incomingNumber ?: "NULL"}")
-            IncomingCallManager.handleIncomingCall(context, incomingNumber)
-        } else if (state == TelephonyManager.CALL_STATE_OFFHOOK) {
-            IncomingCallManager.handleCallOffhook(context)
-        } else if (state == TelephonyManager.CALL_STATE_IDLE) {
-            IncomingCallManager.handleCallEnded(context)
+        when (state) {
+            TelephonyManager.CALL_STATE_RINGING -> {
+                val incomingNumber = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
+                Log.d(TAG, "[CALL_DETECTED] Ringing broadcast received. Incoming number: ${incomingNumber ?: "NULL"}")
+                // Delegate to IncomingCallManager state architecture to handle deduplication and transitions safely
+                IncomingCallManager.handleIncomingCall(context, incomingNumber)
+            }
+            TelephonyManager.CALL_STATE_OFFHOOK -> {
+                IncomingCallManager.handleCallOffhook(context)
+            }
+            TelephonyManager.CALL_STATE_IDLE -> {
+                IncomingCallManager.handleCallEnded(context)
+            }
         }
-
-        lastState = state
     }
 }

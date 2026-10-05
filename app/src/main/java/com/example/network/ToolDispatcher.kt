@@ -4,6 +4,9 @@ import android.util.Log
 import org.json.JSONObject
 import com.example.utils.asStringOrNull
 import com.example.utils.asLongOrNull
+import com.example.automation.engine.ActionDispatcher
+import com.example.automation.engine.PendingCallManager
+import com.example.automation.approval.ApprovalCoordinator
 
 object ToolDispatcher {
     private const val TAG = "ToolDispatcher"
@@ -13,6 +16,8 @@ object ToolDispatcher {
         "execute_automation", 
         "open_app", 
         "send_whatsapp_message", 
+        "open_whatsapp_chat",
+        "navigate_whatsapp",
         "flashlight", 
         "schedule_task", 
         "cancel_task", 
@@ -80,7 +85,9 @@ object ToolDispatcher {
         "press_key",
         "clear_text",
         "computer_use",
-        "ui_agent"
+        "ui_agent",
+        "wait",
+        "delay"
     )
 
     private val functionToActionMap = mapOf(
@@ -99,6 +106,8 @@ object ToolDispatcher {
         "reject_call" to "REJECT_CALL",
         "send_sms" to "SEND_SMS",
         "send_whatsapp_message" to "SEND_WHATSAPP",
+        "open_whatsapp_chat" to "OPEN_WHATSAPP_CHAT",
+        "navigate_whatsapp" to "NAVIGATE_WHATSAPP",
         "get_battery_status" to "GET_BATTERY_STATUS",
         "get_dnd_status" to "GET_DND",
         "set_dnd" to "SET_DND",
@@ -145,7 +154,10 @@ object ToolDispatcher {
         "save_memory" to "SAVE_MEMORY",
         "forget_memory" to "FORGET_MEMORY",
         "set_reminder" to "SET_REMINDER",
-        "create_reminder" to "SET_REMINDER"
+        "create_reminder" to "SET_REMINDER",
+        "execute_automation" to "EXECUTE_AUTOMATION",
+        "wait" to "WAIT",
+        "delay" to "WAIT"
     )
 
     fun dispatch(functionCall: FunctionCall, lastInputTranscription: String): String {
@@ -167,12 +179,16 @@ object ToolDispatcher {
         if (action != null) {
             argsObj.put("action", action)
             // Perform basic parameter normalization
-            if (name == "send_whatsapp_message") {
+            if (name == "send_whatsapp_message" || name == "open_whatsapp_chat") {
                 val contact = argsObj.optString("contact").ifEmpty { argsObj.optString("name") }
                 val message = argsObj.optString("message").ifEmpty { argsObj.optString("text") }
                 argsObj.put("contact", contact)
                 argsObj.put("message", message)
                 argsObj.put("text", message)
+            }
+            if (name == "navigate_whatsapp") {
+                val screen = argsObj.optString("screen").ifEmpty { argsObj.optString("tab").ifEmpty { argsObj.optString("target") } }
+                argsObj.put("screen", screen)
             }
             if (name == "send_sms") {
                 val num = argsObj.optString("number").ifEmpty { argsObj.optString("phone") }
@@ -206,49 +222,111 @@ object ToolDispatcher {
         // Special handling / fallback cases
         when (name) {
             "call_contact" -> {
-                val lowerTranscription = lastInputTranscription.trim().lowercase()
-                val isMessagingIntent = lowerTranscription.contains("whatsapp") ||
-                    lowerTranscription.contains("send ") ||
-                    lowerTranscription.contains("message") ||
-                    lowerTranscription.contains("msg") ||
-                    lowerTranscription.contains("text ") ||
-                    lowerTranscription.contains("tell ") ||
-                    lowerTranscription.contains("పంపు") ||
-                    lowerTranscription.contains("పెట్టు") ||
-                    lowerTranscription.contains("మెసేజ్")
+                val isWhatsAppCall = ActionDispatcher.isWhatsAppCallUtterance(lastInputTranscription)
+                val isMessaging = ActionDispatcher.isMessagingUtterance(lastInputTranscription)
+                val isExplicitCellularCall = ActionDispatcher.isExplicitCallUtterance(lastInputTranscription)
 
-                val isExplicitVoiceCall = lowerTranscription.startsWith("call ") ||
-                    lowerTranscription.startsWith("dial ") ||
-                    lowerTranscription.contains("call on whatsapp") ||
-                    lowerTranscription.contains("whatsapp call") ||
-                    lowerTranscription.contains("phone chey") ||
-                    lowerTranscription.contains("call chey")
-
-                if (isMessagingIntent && !isExplicitVoiceCall) {
-                    Log.w(TAG, "Intercepted spurious call_contact tool call for messaging utterance: '$lastInputTranscription'")
-                    // Reroute to TASK_INTENT
+                if (isWhatsAppCall) {
+                    Log.w(TAG, "Intercepted call_contact tool call for WhatsApp call utterance: '$lastInputTranscription'")
                     argsObj.put("action", "TASK_INTENT")
-                    argsObj.put("goal", "send_whatsapp_message")
+                    argsObj.put("goal", "whatsapp_call")
                     argsObj.put("target_entity", "WhatsApp")
-                    argsObj.put("required_outcome", "MessageSent")
-                    
+                    argsObj.put("required_outcome", "CallPlaced")
                     val params = JSONObject()
                     if (argsObj.has("contact")) params.put("contact", argsObj.optString("contact"))
-                    if (argsObj.has("message")) params.put("message", argsObj.optString("message"))
                     argsObj.put("parameters", params)
                     argsObj.put("function_name", "task_intent")
+                    argsObj.put("unsupported_reason", "WhatsApp call execution is not supported by the existing runtime.")
+                } else if (isMessaging && !isExplicitCellularCall) {
+                    Log.w(TAG, "Intercepted spurious call_contact tool call for messaging utterance: '$lastInputTranscription'")
+                    val lower = lastInputTranscription.trim().lowercase()
+                    if (lower.contains("whatsapp") || lower.contains("వాట్సాప్")) {
+                        argsObj.put("action", "TASK_INTENT")
+                        argsObj.put("goal", "send_whatsapp_message")
+                        argsObj.put("target_entity", "WhatsApp")
+                        argsObj.put("required_outcome", "MessageSent")
+                        val params = JSONObject()
+                        if (argsObj.has("contact")) params.put("contact", argsObj.optString("contact"))
+                        if (argsObj.has("message")) params.put("message", argsObj.optString("message"))
+                        argsObj.put("parameters", params)
+                        argsObj.put("function_name", "task_intent")
+                    } else if (lower.contains("telegram") || lower.contains("టెలిగ్రామ్")) {
+                        argsObj.put("action", "TASK_INTENT")
+                        argsObj.put("goal", "send_telegram_message")
+                        argsObj.put("target_entity", "Telegram")
+                        argsObj.put("required_outcome", "MessageSent")
+                        val params = JSONObject()
+                        if (argsObj.has("contact")) params.put("contact", argsObj.optString("contact"))
+                        if (argsObj.has("message")) params.put("message", argsObj.optString("message"))
+                        argsObj.put("parameters", params)
+                        argsObj.put("function_name", "task_intent")
+                    } else if (lower.contains("instagram")) {
+                        argsObj.put("action", "TASK_INTENT")
+                        argsObj.put("goal", "send_instagram_message")
+                        argsObj.put("target_entity", "Instagram")
+                        argsObj.put("required_outcome", "MessageSent")
+                        val params = JSONObject()
+                        if (argsObj.has("contact")) params.put("contact", argsObj.optString("contact"))
+                        if (argsObj.has("message")) params.put("message", argsObj.optString("message"))
+                        argsObj.put("parameters", params)
+                        argsObj.put("function_name", "task_intent")
+                    } else {
+                        Log.w(TAG, "Generic messaging utterance did not mention WhatsApp, rejecting CALL_PHONE")
+                        argsObj.put("action", "NONE")
+                        argsObj.put("error", "CALL_PHONE rejected: utterance is messaging but target app was not specified.")
+                    }
                 } else {
                     val contactIdVal = functionCall.args?.get("contactId").asLongOrNull() ?: -1L
                     val phoneIdVal = functionCall.args?.get("phoneId").asLongOrNull() ?: -1L
+                    val contactVal = functionCall.args?.get("contact").asStringOrNull() ?: ""
+                    val phoneNumberVal = functionCall.args?.get("phoneNumber").asStringOrNull() 
+                        ?: functionCall.args?.get("number").asStringOrNull() ?: ""
+
+                    // Check if explicit user confirmation is present in utterance
+                    val userReply = ApprovalCoordinator.parseReply(lastInputTranscription)
+                    if (userReply == ApprovalCoordinator.ReplyIntent.DENY) {
+                        PendingCallManager.cancel()
+                        argsObj.put("action", "NONE")
+                        argsObj.put("cancelled", true)
+                        argsObj.put("error", "Call cancelled by user.")
+                        return argsObj.toString()
+                    }
+
+                    if (userReply == ApprovalCoordinator.ReplyIntent.APPROVE) {
+                        PendingCallManager.confirmPendingCall(
+                            if (contactIdVal != -1L) contactIdVal else null,
+                            if (phoneIdVal != -1L) phoneIdVal else null
+                        )
+                        argsObj.put("confirmed", true)
+                        argsObj.put("user_confirmed", true)
+                    } else {
+                        // Reject model-controlled confirmed flags without user approval
+                        argsObj.remove("confirmed")
+                        argsObj.remove("user_confirmed")
+                    }
+
+                    val originalIntent = PendingCallManager.getOriginalIntent()
+                    if (!originalIntent.isNullOrBlank()) {
+                        argsObj.put("original_user_intent", originalIntent)
+                    }
+
                     argsObj.put("action", "CALL_PHONE")
                     argsObj.put("contactId", contactIdVal)
                     argsObj.put("phoneId", phoneIdVal)
+                    if (contactVal.isNotEmpty()) argsObj.put("contact", contactVal)
+                    if (phoneNumberVal.isNotEmpty()) argsObj.put("phoneNumber", phoneNumberVal)
                 }
             }
             "youtube_search" -> {
                 val queryVal = functionCall.args?.get("query").asStringOrNull() ?: ""
                 argsObj.put("action", "YOUTUBE_SEARCH")
                 argsObj.put("query", queryVal)
+            }
+            "flashlight" -> {
+                val enabled = argsObj.optBoolean("enabled", true)
+                argsObj.put("action", if (enabled) "FLASHLIGHT_ON" else "FLASHLIGHT_OFF")
+                argsObj.put("enabled", enabled)
+                argsObj.put("state", enabled)
             }
             "open_app" -> {
                 val appName = functionCall.args?.get("app_name").asStringOrNull() ?: ""
@@ -264,11 +342,36 @@ object ToolDispatcher {
                     else -> null
                 }
                 
+                val isWhatsAppScreen = when {
+                    normalizedApp in listOf("whatsapp status", "whatsapp updates", "whatsapp status screen", "whatsapp update") ||
+                    normalizedApp.contains("వాట్సాప్ స్టేటస్") || normalizedApp.contains("వాట్సాప్ అప్‌డేట్స్") -> "status"
+                    normalizedApp in listOf("whatsapp calls", "whatsapp call screen", "whatsapp calls screen") ||
+                    normalizedApp.contains("వాట్సాప్ కాల్స్") -> "calls"
+                    normalizedApp in listOf("whatsapp settings", "whatsapp setting") ||
+                    normalizedApp.contains("వాట్సాప్ సెట్టింగ్స్") -> "settings"
+                    normalizedApp in listOf("whatsapp communities", "whatsapp community") ||
+                    normalizedApp.contains("వాట్సాప్ కమ్యూనిటీస్") -> "communities"
+                    normalizedApp in listOf("whatsapp new chat", "whatsapp newchat") ||
+                    normalizedApp.contains("వాట్సాప్ న్యూ చాట్") -> "new_chat"
+                    normalizedApp in listOf("whatsapp chats", "whatsapp chat list") ||
+                    normalizedApp.contains("వాట్సాప్ చాట్స్") -> "chats"
+                    normalizedApp in listOf("whatsapp starred messages", "whatsapp starred") ||
+                    normalizedApp.contains("వాట్సాప్ స్టార్డ్") -> "starred_messages"
+                    normalizedApp in listOf("whatsapp linked devices", "whatsapp linked") ||
+                    normalizedApp.contains("వాట్సాప్ లింక్డ్") -> "linked_devices"
+                    else -> null
+                }
+
                 if (mappedSystemAction != null) {
                     Log.d(TAG, "Legacy Normalization: converting open_app('$appName') to SYSTEM_ACTION '$mappedSystemAction'")
                     argsObj.put("action", "SYSTEM_ACTION")
                     argsObj.put("system_action_str", mappedSystemAction)
                     argsObj.put("function_name", "system_action")
+                } else if (isWhatsAppScreen != null) {
+                    Log.d(TAG, "Legacy Normalization: converting open_app('$appName') to NAVIGATE_WHATSAPP screen='$isWhatsAppScreen'")
+                    argsObj.put("action", "NAVIGATE_WHATSAPP")
+                    argsObj.put("screen", isWhatsAppScreen)
+                    argsObj.put("function_name", "navigate_whatsapp")
                 } else if (normalizedApp in listOf("youtube", "yt", "యూట్యూబ్", "యూట్యూబ్లో", "యూట్యూబ్‌లో") || 
                     normalizedApp.contains("youtube") || normalizedApp.contains("యూట్యూబ్")) {
                     val queryText = lastInputTranscription.lowercase()

@@ -12,7 +12,14 @@ import org.json.JSONObject
 class WhatsAppTool : Tool {
     private val TAG = "WhatsAppTool"
     override val name: String = "send_whatsapp_message"
-    override val supportedActions: Set<String> = setOf("SEND_WHATSAPP", "OPEN_WHATSAPP_CHAT", "SEND_WHATSAPP_MESSAGE")
+    override val supportedActions: Set<String> = setOf(
+        "SEND_WHATSAPP",
+        "OPEN_WHATSAPP_CHAT",
+        "SEND_WHATSAPP_MESSAGE",
+        "NAVIGATE_WHATSAPP",
+        "OPEN_WHATSAPP_SCREEN",
+        "WHATSAPP_NAVIGATE"
+    )
     override val retryPolicy: RetryPolicy = RetryPolicy.WaitForUi(3000L)
     override val capabilities: ToolCapabilities = ToolCapabilities(
         supportsPlanner = true,
@@ -23,26 +30,83 @@ class WhatsAppTool : Tool {
 
     override fun validate(request: ExecutionRequest): Boolean {
         val arguments = request.arguments
+        val action = request.action
+
+        if (action in setOf("NAVIGATE_WHATSAPP", "OPEN_WHATSAPP_SCREEN", "WHATSAPP_NAVIGATE")) {
+            val screen = arguments.get("screen")?.asString
+                ?: arguments.get("target")?.asString
+                ?: arguments.get("tab")?.asString
+                ?: arguments.get("destination")?.asString
+                ?: ""
+            return screen.isNotBlank()
+        }
+
         val contact = arguments.get("contact")?.asString
             ?: arguments.get("contact_name")?.asString
             ?: arguments.get("phone")?.asString
             ?: arguments.get("phoneNumber")?.asString
             ?: ""
-            
-        val message = arguments.get("message")?.asString
-            ?: arguments.get("text")?.asString
-            ?: arguments.get("message_text")?.asString
-            ?: ""
 
-        return if (request.action == "OPEN_WHATSAPP_CHAT") {
-            contact.isNotEmpty()
-        } else {
-            contact.isNotEmpty() && message.isNotEmpty()
-        }
+        return contact.isNotEmpty()
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
         val arguments = request.arguments
+        val action = request.action
+
+        if (action in setOf("NAVIGATE_WHATSAPP", "OPEN_WHATSAPP_SCREEN", "WHATSAPP_NAVIGATE")) {
+            val screen = arguments.get("screen")?.asString
+                ?: arguments.get("target")?.asString
+                ?: arguments.get("tab")?.asString
+                ?: arguments.get("destination")?.asString
+                ?: "chats"
+            Log.d(TAG, "Executing WhatsApp navigation to screen: '$screen'")
+            return try {
+                val controller = WhatsAppController(isScheduled = false)
+                val result = controller.navigateToScreen(context, screen)
+                when (result) {
+                    is WhatsAppExecutionResult.Launched -> {
+                        ToolResult(
+                            success = true,
+                            toolName = name,
+                            verificationRequired = true,
+                            message = result.messageStatus,
+                            metadata = JSONObject()
+                                .put("message", result.messageStatus)
+                                .put("screen", screen)
+                        )
+                    }
+                    is WhatsAppExecutionResult.Error -> {
+                        ToolResult(
+                            success = false,
+                            toolName = name,
+                            errorCode = "WHATSAPP_NAV_ERROR",
+                            message = result.error,
+                            retryable = true
+                        )
+                    }
+                    is WhatsAppExecutionResult.NeedsInput -> {
+                        ToolResult(
+                            success = false,
+                            toolName = name,
+                            errorCode = "NEEDS_INPUT",
+                            message = result.question,
+                            retryable = false
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed navigating WhatsApp screen", e)
+                ToolResult(
+                    success = false,
+                    toolName = name,
+                    errorCode = "WHATSAPP_NAV_EXCEPTION",
+                    message = e.message ?: "Unknown error",
+                    retryable = true
+                )
+            }
+        }
+
         val contact = arguments.get("contact")?.asString
             ?: arguments.get("contact_name")?.asString
             ?: arguments.get("phone")?.asString
