@@ -21,6 +21,7 @@ debug.keystore
 *.keystore
 keystore.properties
 release-keystore.properties
+MAX_RELEASE_BUILD/
 
 # Python
 __pycache__/

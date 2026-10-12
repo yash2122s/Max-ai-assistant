@@ -189,6 +189,18 @@ object ActionDispatcher {
             return false
         }
 
+        if (actionName == "TASK_COMPLETED") {
+            val summary = normalized.optString("summary").ifEmpty {
+                normalized.optString("message", "Task completed successfully.")
+            }
+            Log.i(TAG, "[DISPATCH] TASK_COMPLETED: '$summary'")
+            return true
+        }
+
+        if (actionName == "INSPECT_SCREEN" || actionName == "GET_SCREEN_CONTEXT") {
+            return true
+        }
+
         if (actionName == "COMPUTER_USE" || actionName == "UI_AGENT") {
             Log.i(TAG, "[DISPATCH] COMPUTER_USE_RECEIVED actionName=$actionName")
             val goal = normalized.optString("goal").ifEmpty {
@@ -386,6 +398,40 @@ object ActionDispatcher {
                     put("data", JSONObject())
                 }.toString()
             }
+        }
+
+        if (actionName == "TASK_COMPLETED") {
+            val summary = normalized.optString("summary").ifEmpty {
+                normalized.optString("message", "Task completed successfully.")
+            }
+            Log.i(TAG, "[DISPATCH] DWR_TASK_COMPLETED: '$summary'")
+            return JSONObject().apply {
+                put("status", "success")
+                put("success", true)
+                put("executionState", "COMPLETED")
+                put("message", summary)
+                put("actionName", "TASK_COMPLETED")
+                put("system_directive", "TASK COMPLETED: Confirm completion to the user in a brief natural sentence: '$summary'.")
+                put("data", JSONObject().apply {
+                    put("summary", summary)
+                    put("completed", true)
+                })
+            }.toString()
+        }
+
+        if (actionName == "INSPECT_SCREEN" || actionName == "GET_SCREEN_CONTEXT") {
+            val summary = com.example.service.JarvisAccessibilityService.getFormattedScreenSummary()
+            return JSONObject().apply {
+                put("status", "success")
+                put("success", true)
+                put("executionState", "COMPLETED")
+                put("message", "Screen inspected successfully.")
+                put("actionName", actionName)
+                put("screen_summary", summary)
+                put("data", JSONObject().apply {
+                    put("screen_summary", summary)
+                })
+            }.toString()
         }
 
         if (actionName == "COMPUTER_USE" || actionName == "UI_AGENT") {
@@ -596,6 +642,15 @@ object ActionDispatcher {
                     dataObj.put(k, v)
                 }
                 put("data", dataObj)
+
+                val uiActions = setOf("CLICK_ELEMENT", "TYPE_TEXT", "SCROLL_SCREEN", "OPEN_APP", "PRESS_KEY", "PRESS_ENTER", "CLEAR_TEXT", "SYSTEM_ACTION", "CLICK_TEXT")
+                if (actionName in uiActions) {
+                    val summary = com.example.service.JarvisAccessibilityService.getFormattedScreenSummary()
+                    put("screen_summary", summary)
+                    if (isSuccess) {
+                        put("system_directive", "ACTION $actionName EXECUTED. Inspect the fresh screen_summary. If the overall goal is not yet finished, take the next concrete action. NEVER call task_completed until the ultimate goal is fully achieved on screen!")
+                    }
+                }
             }
             returnJson.toString()
         } catch (e: kotlinx.coroutines.CancellationException) {

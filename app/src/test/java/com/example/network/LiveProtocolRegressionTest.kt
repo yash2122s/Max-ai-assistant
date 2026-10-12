@@ -18,7 +18,8 @@ class LiveProtocolRegressionTest {
     private fun client(
         events: MutableList<String> = mutableListOf(),
         level: LiveThinkingLevel = LiveThinkingLevel.HIGH
-    ) = GeminiWebSocketClient("", onMessageReceived = { events += it }, onAudioReceived = {},
+    ) = GeminiWebSocketClient("", preferredModel = com.example.network.model.GeminiLiveModels.DEEP,
+        onMessageReceived = { events += it }, onAudioReceived = {},
         onConnectionError = {}, onConnectionStateChanged = {}, onExecuteAutomation = { "{}" },
         onTurnComplete = { events += "IDLE_CALLBACK" },
         onThoughtSummaryDelta = { _, full -> events += full }, thinkingLevel = level)

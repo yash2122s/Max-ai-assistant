@@ -326,6 +326,14 @@ class ConnectionManager(
     }
 
     @Synchronized
+    fun sendClientContinuation(continuationText: String) {
+        webSocketClient?.sendClientContinuation(continuationText)
+    }
+
+    val isSessionReady: Boolean
+        get() = webSocketClient?.isSetupComplete == true
+
+    @Synchronized
     fun disconnect() {
         isExplicitlyDisconnected = true
         cancelReconnectJob()

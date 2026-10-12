@@ -134,6 +134,40 @@ class JarvisAccessibilityService : AccessibilityService() {
             return false
         }
 
+        fun getFormattedScreenSummary(maxElements: Int = 40): String {
+            val svc = instance
+            if (svc != null) {
+                val root = getActiveRoot() ?: svc.rootInActiveWindow
+                if (root != null) {
+                    val elements = svc.updateIndexedElements(root)
+                    val pkg = root.packageName?.toString() ?: "unknown"
+                    if (elements.isEmpty()) {
+                        return "Current App: $pkg | Screen: no interactive elements found."
+                    }
+                    val sb = StringBuilder()
+                    sb.append("Current App: $pkg\n")
+                    sb.append("Interactive Elements (${elements.size.coerceAtMost(maxElements)}):\n")
+                    elements.take(maxElements).forEach { el ->
+                        sb.append(el.toDisplayString()).append("\n")
+                    }
+                    return sb.toString().trimEnd()
+                }
+            }
+            val fallbackRoot = getActiveRoot() ?: return "Screen context unavailable: Accessibility Service is not active."
+            val pkg = fallbackRoot.packageName?.toString() ?: "unknown"
+            val (elements, _) = AccessibilityTreePruner.pruneAndIndexTree(fallbackRoot)
+            if (elements.isEmpty()) {
+                return "Current App: $pkg | Screen: no interactive elements found."
+            }
+            val sb = StringBuilder()
+            sb.append("Current App: $pkg\n")
+            sb.append("Interactive Elements (${elements.size.coerceAtMost(maxElements)}):\n")
+            elements.take(maxElements).forEach { el ->
+                sb.append(el.toDisplayString()).append("\n")
+            }
+            return sb.toString().trimEnd()
+        }
+
         fun triggerAssistantLaunch(context: android.content.Context, source: String = "accessibility") {
             try {
                 val intent = Intent(context, com.example.MainActivity::class.java).apply {

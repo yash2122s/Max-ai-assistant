@@ -40,6 +40,26 @@ class AssistantEngine(private val context: Context) {
     private var responseTimeoutJob: kotlinx.coroutines.Job? = null
     private val localExecutionScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
 
+    @Volatile var isAutonomousTaskRunning = false
+        private set
+    @Volatile var currentAutonomousGoal = ""
+        private set
+    @Volatile private var autonomousStepCount = 0
+    @Volatile private var autonomousHardStop = false
+    @Volatile private var consecutiveToolFailures = 0
+    private var autonomousContinuationJob: kotlinx.coroutines.Job? = null
+
+    fun cancelAutonomousTask(reason: String = "User cancelled") {
+        android.util.Log.i("AssistantEngine", "[AUTONOMOUS_TASK] Cancelled: $reason")
+        isAutonomousTaskRunning = false
+        currentAutonomousGoal = ""
+        autonomousStepCount = 0
+        autonomousHardStop = false
+        consecutiveToolFailures = 0
+        autonomousContinuationJob?.cancel()
+        autonomousContinuationJob = null
+    }
+
     init {
         com.example.automation.engine.TaskCancellationCoordinator.registerCancellationListener(this) {
             localExecutionScope.coroutineContext.cancelChildren()
@@ -84,8 +104,12 @@ class AssistantEngine(private val context: Context) {
                         when (functionName) {
                             "open_app" -> "OPEN_APP"
                             "send_whatsapp_message" -> "SEND_WHATSAPP"
-                            "click_element" -> "CLICK_TEXT"
+                            "click_element" -> "CLICK_ELEMENT"
+                            "type_text" -> "TYPE_TEXT"
                             "scroll_screen" -> "SCROLL_SCREEN"
+                            "press_key" -> "PRESS_KEY"
+                            "task_completed" -> "TASK_COMPLETED"
+                            "inspect_screen" -> "INSPECT_SCREEN"
                             "computer_use", "ui_agent" -> "COMPUTER_USE"
                             "flashlight" -> {
                                 val state = jsonObj.optBoolean("enabled", true)
@@ -162,7 +186,9 @@ class AssistantEngine(private val context: Context) {
                                 put("reason", planResult.errorMessage ?: (if (planResult.success) "Goal completed successfully." else "Goal execution failed."))
                             }.toString()
                         }
-                    } else if (functionName == "execute_automation" || normalizedAction in setOf("EXECUTE_AUTOMATION", "CLICK_TEXT", "TYPE_TEXT", "PRESS_ENTER", "SCROLL_SCREEN")) {
+                    } else if (functionName == "execute_automation" ||
+                        functionName in setOf("task_completed", "inspect_screen", "click_element", "type_text", "scroll_screen", "press_key", "open_app") ||
+                        normalizedAction in setOf("EXECUTE_AUTOMATION", "CLICK_TEXT", "CLICK_ELEMENT", "TYPE_TEXT", "PRESS_ENTER", "PRESS_KEY", "SCROLL_SCREEN", "OPEN_APP", "TASK_COMPLETED", "INSPECT_SCREEN")) {
                         // Gemini Live WebSocket ALREADY structured the tool call with action/app/query/target.
                         // Dispatch the structured action directly through ActionDispatcher (ZERO additional LLM calls)!
                         android.util.Log.d("AssistantEngine", "[VOICE_DIRECT_DISPATCH] Dispatching structured action '$normalizedAction' directly to ActionDispatcher.")
@@ -175,18 +201,22 @@ class AssistantEngine(private val context: Context) {
                             normalizedJson.put("app", target)
                         }
                         
-                        // Authorize and dispatch
-                        val auth = com.example.automation.engine.ActionAuthorizer.authorizeAction(lastUserText.ifEmpty { effectiveGoal }, normalizedAction, target.ifEmpty { goalParam })
-                        if (!auth.authorized) {
-                            android.util.Log.w("AssistantEngine", "[VOICE_AUTH] Action '$normalizedAction' BLOCKED: ${auth.reason}")
-                            org.json.JSONObject().apply {
-                                put("status", "blocked")
-                                put("success", false)
-                                put("executionState", "BLOCKED")
-                                put("reason", auth.reason)
-                            }.toString()
-                        } else {
+                        if (normalizedAction in setOf("TASK_COMPLETED", "INSPECT_SCREEN") || functionName in setOf("task_completed", "inspect_screen")) {
                             com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, normalizedJson)
+                        } else {
+                            // Authorize and dispatch
+                            val auth = com.example.automation.engine.ActionAuthorizer.authorizeAction(lastUserText.ifEmpty { effectiveGoal }, normalizedAction, target.ifEmpty { goalParam })
+                            if (!auth.authorized) {
+                                android.util.Log.w("AssistantEngine", "[VOICE_AUTH] Action '$normalizedAction' BLOCKED: ${auth.reason}")
+                                org.json.JSONObject().apply {
+                                    put("status", "blocked")
+                                    put("success", false)
+                                    put("executionState", "BLOCKED")
+                                    put("reason", auth.reason)
+                                }.toString()
+                            } else {
+                                com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, normalizedJson)
+                            }
                         }
                     } else {
                         val originalIntent = normalizedJson.optString("original_user_intent")
@@ -313,6 +343,32 @@ class AssistantEngine(private val context: Context) {
                         emotionEngine.processEvent(com.example.emotion.model.EmotionEvent.TaskFailure(resolvedAction.ifEmpty { functionName }, reason))
                     }
 
+                    // Track autonomous execution state
+                    if (resolvedAction == "TASK_COMPLETED" || functionName == "task_completed" || normalizedAction == "TASK_COMPLETED") {
+                        android.util.Log.i("AssistantEngine", "[AUTONOMOUS_TASK] Task completed. Resetting autonomous task state.")
+                        cancelAutonomousTask("Task completed signal received")
+                    } else {
+                        val isAutomationTool = normalizedAction in setOf("CLICK_TEXT", "CLICK_ELEMENT", "TYPE_TEXT", "PRESS_ENTER", "PRESS_KEY", "SCROLL_SCREEN", "OPEN_APP", "COMPUTER_USE") ||
+                            functionName in setOf("click_element", "type_text", "scroll_screen", "open_app", "press_key")
+                        if (isAutomationTool) {
+                            isAutonomousTaskRunning = true
+                            autonomousStepCount++
+                            if (currentAutonomousGoal.isBlank()) {
+                                currentAutonomousGoal = lastUserText.ifBlank { "Autonomous UI task" }
+                            }
+                            val isSuccess = parsed?.optBoolean("success", true) ?: true
+                            if (isSuccess) {
+                                consecutiveToolFailures = 0
+                            } else {
+                                consecutiveToolFailures++
+                            }
+                            if (consecutiveToolFailures >= 3 || autonomousStepCount >= 25) {
+                                autonomousHardStop = true
+                                android.util.Log.w("AssistantEngine", "[AUTONOMOUS_TASK] Safety limit reached: consecutiveFailures=$consecutiveToolFailures, stepCount=$autonomousStepCount")
+                            }
+                        }
+                    }
+
                     executionResult
 
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -336,6 +392,23 @@ class AssistantEngine(private val context: Context) {
                 responseTimeoutJob = null
                 audioProcessor.reset()
                 streamingResponseManager.handleTurnComplete()
+
+                // Autonomous task continuation loop: nudge Gemini 3.8 Live with fresh screen observation
+                if (isAutonomousTaskRunning && !autonomousHardStop && autonomousStepCount < 25) {
+                    autonomousContinuationJob?.cancel()
+                    autonomousContinuationJob = localExecutionScope.launch {
+                        delay(650)
+                        if (!isAutonomousTaskRunning || autonomousHardStop) return@launch
+                        val screenSummary = com.example.service.JarvisAccessibilityService.getFormattedScreenSummary()
+                        android.util.Log.i("AssistantEngine", "[AUTONOMOUS_CONTINUATION] Step $autonomousStepCount finished. Auto-nudging Gemini 3.8 Live with screen summary.")
+                        val continuationPrompt = "Continue the existing task from the fresh phone state; this is an automatic continuation, not a new user command. " +
+                            "Do not quote, paraphrase, repeat, or summarize previous assistant messages; use task state and this fresh screen only. " +
+                            "Latest screen observation:\n$screenSummary\n" +
+                            "Use the current observation to select the next action or recover if the screen changed. " +
+                            "Keep speech silent while working. If the goal is not yet finished, call the next tool. When the goal is 100% finished on screen, call task_completed with a concise summary."
+                        connectionManager.sendClientContinuation(continuationPrompt)
+                    }
+                }
             },
             onThoughtSummaryDelta = { delta, fullSummary ->
                 AssistantEventBus.emit(AssistantEvent.ThoughtSummaryDelta(delta, fullSummary))
@@ -392,6 +465,18 @@ class AssistantEngine(private val context: Context) {
                 com.example.automation.habits.HabitSuggestionCoordinator.cancel()
                 return
             }
+        }
+
+        val lowerText = userText.trim().lowercase()
+        val isStop = lowerText in setOf("stop", "cancel", "never mind", "quit", "halt", "ఆపు", "వద్దు", "చాలు") ||
+            lowerText.startsWith("stop ") || lowerText.startsWith("cancel ")
+        if (isStop && isAutonomousTaskRunning) {
+            cancelAutonomousTask("User requested stop: '$userText'")
+        } else if (!isStop && userText.isNotBlank()) {
+            currentAutonomousGoal = userText.trim()
+            autonomousStepCount = 0
+            autonomousHardStop = false
+            consecutiveToolFailures = 0
         }
 
         conversationManager.addMessage("You", userText)
@@ -818,6 +903,7 @@ class AssistantEngine(private val context: Context) {
     fun pause() {
         responseTimeoutJob?.cancel()
         responseTimeoutJob = null
+        cancelAutonomousTask("Pause requested")
         stopListening()
         streamingResponseManager.stopAllPlayback()
         connectionManager.sendInterruptionSignal()

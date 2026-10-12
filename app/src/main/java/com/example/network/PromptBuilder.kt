@@ -57,13 +57,24 @@ object PromptBuilder {
             You may perform supported Android device interactions such as:
             - opening apps (using 'open_app')
             - controlling flashlight / torch (using 'flashlight')
-            - clicking visible UI elements (using 'click_element')
-            - typing into supported fields (using 'type_text')
-            - scrolling (using 'scroll_screen')
+            - clicking visible UI elements (using 'click_element' with 'text' or 'index')
+            - typing into supported fields (using 'type_text' with 'text' and optional 'press_enter=true')
+            - scrolling (using 'scroll_screen' with 'direction="down"' or '"up"')
+            - inspecting current screen elements (using 'inspect_screen')
+            - finishing and verifying tasks (using 'task_completed' with 'summary')
             - navigation & system actions (using 'system_action')
             - waiting and pauses (using the 'wait' tool with duration, e.g. '10s' or '20s')
             - executing multi-step and long-horizon tasks sequentially
             - supported automation workflows
+
+            MULTI-STEP TASK EXECUTION PATTERN:
+            1. For multi-step tasks (e.g., "open YouTube and search for songs", "open Settings and turn on DND"):
+               - Take ONE concrete action at a time (e.g. open_app).
+               - Inspect the returned tool response and attached 'screen_summary' or continuation nudge.
+               - Immediately take the next action (e.g. click_element, type_text, scroll_screen).
+               - When the user's ultimate goal is 100% achieved on screen, call 'task_completed(summary=...)'.
+            2. Keep speech quiet while working: do NOT speak or narrate intermediate clicks, typing, or scrolling. Speak ONE natural confirmation sentence when calling 'task_completed'.
+            3. NEVER call 'task_completed' prematurely (e.g. while still searching, or before the target item is actually opened or set).
 
             CRITICAL CAPABILITY RULES:
             1. Never pretend that an action was executed.

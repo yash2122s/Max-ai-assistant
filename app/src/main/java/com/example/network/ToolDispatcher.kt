@@ -87,10 +87,14 @@ object ToolDispatcher {
         "computer_use",
         "ui_agent",
         "wait",
-        "delay"
+        "delay",
+        "task_completed",
+        "inspect_screen"
     )
 
     private val functionToActionMap = mapOf(
+        "task_completed" to "TASK_COMPLETED",
+        "inspect_screen" to "INSPECT_SCREEN",
         "computer_use" to "COMPUTER_USE",
         "ui_agent" to "COMPUTER_USE",
         "task_intent" to "TASK_INTENT",
@@ -179,6 +183,18 @@ object ToolDispatcher {
         if (action != null) {
             argsObj.put("action", action)
             // Perform basic parameter normalization
+            if (name == "task_completed") {
+                val summary = argsObj.optString("summary").ifEmpty { argsObj.optString("message", "Task completed.") }
+                argsObj.put("summary", summary)
+                argsObj.put("message", summary)
+            }
+            if (name == "click_element") {
+                val target = argsObj.optString("text").ifEmpty { argsObj.optString("target_name") }
+                if (target.isNotEmpty()) {
+                    argsObj.put("text", target)
+                    argsObj.put("target", target)
+                }
+            }
             if (name == "send_whatsapp_message" || name == "open_whatsapp_chat") {
                 val contact = argsObj.optString("contact").ifEmpty { argsObj.optString("name") }
                 val message = argsObj.optString("message").ifEmpty { argsObj.optString("text") }
