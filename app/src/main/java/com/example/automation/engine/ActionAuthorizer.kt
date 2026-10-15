@@ -43,6 +43,13 @@ object ActionAuthorizer {
         "FACTORY_RESET", "WIPE", "FORMAT", "RECOVERY", "UNLOCK"
     )
 
+    /** External side effects are never silently auto-approved. */
+    private val HIGH_IMPACT_ACTIONS = setOf(
+        "CALL_PHONE", "CALL_CONTACT", "SEND_WHATSAPP", "SEND_WHATSAPP_MESSAGE", "SEND_SMS",
+        "DELETE_MEMORY", "DELETE_CONTACT", "DELETE_FILE", "PURCHASE", "ACCOUNT_CHANGE",
+        "TRANSFER_FUNDS", "SEND_PAYMENT", "WHATSAPP_CALL"
+    )
+
     /**
      * P0-2 — Security-sensitive actions that require an explicit user
      * confirmation in EVERY approval mode (MANUAL, SAFE_AUTO, FULL_AUTO),
@@ -90,8 +97,10 @@ object ActionAuthorizer {
     private val DIRECT_COMMAND_VERBS = listOf(
         "run", "send", "pay", "enter", "type", "execute", "open", "create",
         "start", "launch", "do ", "command", "shell", "adb", "set", "call",
-        "message", "sms", "whatsapp", "unlock", "submit", "transfer", "enable",
-        "disable", "turn", "play", "search", "delete", "click", "scroll", "install"
+        "message", "sms", "whatsapp", "వాట్సాప్", "unlock", "submit", "transfer", "enable",
+        "disable", "turn", "play", "search", "delete", "click", "scroll", "install",
+        "pampu", "pettu", "rayi", "chey", "cheyyi", "vellu", "ఓపెన్",
+        "wait", "sleep", "delay", "aagu", "aagali", "ఆగు", "వెయిట్"
     )
 
     private fun looksLikeDirectCommand(intent: String?): Boolean {
@@ -108,6 +117,7 @@ object ActionAuthorizer {
         allowCautionAutoInFullAuto: Boolean = false
     ): ApprovalEvaluation {
         val risk = classifyRisk(actionType)
+        val highImpact = actionType.uppercase() in HIGH_IMPACT_ACTIONS
         val isNeverAuto = isNeverAutoAction(actionType)
         val explicitUserCommand = !userIntent.isNullOrBlank() &&
             looksLikeDirectCommand(userIntent) &&
@@ -129,6 +139,13 @@ object ActionAuthorizer {
             return ApprovalEvaluation(
                 ApprovalDecision.BLOCKED,
                 "Action '$actionType' is in a hard security domain and can never be auto-approved."
+            )
+        }
+
+        if (highImpact) {
+            return ApprovalEvaluation(
+                ApprovalDecision.NEEDS_CONFIRMATION,
+                "High-impact action '$actionType' requires task-scoped explicit confirmation."
             )
         }
 
@@ -277,15 +294,15 @@ object ActionAuthorizer {
 
                 // Canonical entity resolution through InstalledAppsRepository
                 val plannedPackage = com.example.knowledge.apps.InstalledAppsRepository.findApp(null, targetLower) ?: targetLower
-                val requestedPackage = com.example.knowledge.apps.InstalledAppsRepository.extractAndMatchApp(null, intent)
+                val requestedPackages = com.example.knowledge.apps.InstalledAppsRepository.extractAllMatchedApps(null, intent)
 
-                if (requestedPackage != null && plannedPackage.isNotBlank()) {
-                    if (plannedPackage.equals(requestedPackage, ignoreCase = true)) {
+                if (requestedPackages.isNotEmpty() && plannedPackage.isNotBlank()) {
+                    if (requestedPackages.any { plannedPackage.equals(it, ignoreCase = true) }) {
                         return AuthorizationResult(true, "Canonical app entity '$plannedPackage' authorized by user intent.")
                     } else if (intent.contains(targetLower) || (plannedPackage.contains("instagram") && (intent.contains("instagram") || intent.contains("insta")))) {
                         return AuthorizationResult(true, "App entity '$target' explicitly mentioned in user intent.")
                     } else {
-                        return AuthorizationResult(false, "Opening '$target' not requested in '$userIntent' (conflicts with requested '$requestedPackage').")
+                        return AuthorizationResult(false, "Opening '$target' not requested in '$userIntent' (conflicts with requested '${requestedPackages.joinToString()}').")
                     }
                 }
 
@@ -334,14 +351,53 @@ object ActionAuthorizer {
             }
 
             "SEND_WHATSAPP_MESSAGE", "SEND_WHATSAPP" -> {
+                val isExplicitOpenOnly = intent in listOf("open whatsapp", "open whatsapp.", "open whatsapp app", "launch whatsapp", "whatsapp open chey", "వాట్సాప్ ఓపెన్ చెయ్")
+                if (isExplicitOpenOnly) {
+                    return AuthorizationResult(false, "App opening requested, not messaging.")
+                }
+
                 val msgKeywords = listOf(
-                    "send", "message", "msg", "text", "pettu", "pettandi",
-                    "హలో", "మెసేజ్", "మెసేజ్ పెట్టు", "పంపు", "చెప్పు", "పెట్టు", "టైప్", "type", "say", "hello"
+                    "send", "message", "msg", "text", "pettu", "pettandi", "pampu", "pampinchu", "rayi", "rayandi",
+                    "హలో", "మెసేజ్", "మెసేజ్ పెట్టు", "చెప్పు", "టైప్", "type", "say", "hello"
                 )
-                if (msgKeywords.any { intent.contains(it) }) {
+                val isWaMessagingConstruct = (intent.contains("whatsapp lo") || intent.contains("వాట్సాప్‌లో") || intent.contains("వాట్సాప్ లో")) &&
+                    (intent.contains(" ki") || intent.contains("ki ") || intent.contains("ani") || intent.contains("message") || intent.contains("pampu") || intent.contains("pettu"))
+
+                if (msgKeywords.any { intent.contains(it) } || isWaMessagingConstruct) {
                     AuthorizationResult(true, "WhatsApp messaging requested by user.")
                 } else {
                     AuthorizationResult(false, "Messaging not requested in '$userIntent'.")
+                }
+            }
+
+            "OPEN_WHATSAPP_CHAT" -> {
+                val isExplicitOpenOnly = intent in listOf("open whatsapp", "open whatsapp.", "open whatsapp app", "launch whatsapp", "whatsapp open chey", "వాట్సాప్ ఓపెన్ చెయ్")
+                if (isExplicitOpenOnly) {
+                    return AuthorizationResult(false, "App opening requested, not opening specific chat.")
+                }
+
+                val chatKeywords = listOf("chat", "conversation", "చాట్")
+                val isWaChatConstruct = (intent.contains("whatsapp") || intent.contains("వాట్సాప్")) &&
+                    (intent.contains("chat") || intent.contains("conversation") || intent.contains("చాట్"))
+
+                if (chatKeywords.any { intent.contains(it) } || isWaChatConstruct || (targetLower.isNotBlank() && intent.contains(targetLower))) {
+                    AuthorizationResult(true, "WhatsApp chat open requested by user.")
+                } else {
+                    AuthorizationResult(false, "WhatsApp chat open not requested in '$userIntent'.")
+                }
+            }
+
+            "NAVIGATE_WHATSAPP", "OPEN_WHATSAPP_SCREEN", "WHATSAPP_NAVIGATE" -> {
+                val isExplicitOpenOnly = intent in listOf("open whatsapp", "open whatsapp.", "open whatsapp app", "launch whatsapp", "whatsapp open chey", "వాట్సాప్ ఓపెన్ చెయ్")
+                if (isExplicitOpenOnly) {
+                    return AuthorizationResult(false, "Main app open requested, not specific screen navigation.")
+                }
+
+                val navKeywords = listOf("status", "updates", "calls", "chats", "communities", "settings", "starred", "linked", "స్టేటస్", "కాల్స్", "సెట్టింగ్స్", "చాట్స్", "అప్‌డేట్స్")
+                if (navKeywords.any { intent.contains(it) }) {
+                    AuthorizationResult(true, "WhatsApp navigation requested by user.")
+                } else {
+                    AuthorizationResult(false, "WhatsApp navigation not requested in '$userIntent'.")
                 }
             }
 
@@ -477,32 +533,20 @@ object ActionAuthorizer {
                 }
             }
 
+            "WAIT", "WAIT_FOR_TIME", "DELAY", "SLEEP", "WAIT_FOR_UI", "WAIT_FOR_ELEMENT" -> {
+                AuthorizationResult(true, "Wait/delay step authorized as part of execution workflow.")
+            }
+
             "TASK_INTENT" -> {
                 AuthorizationResult(true, "Structured task intent authorized.")
             }
 
             "CALL_PHONE" -> {
-                val isExplicitVoiceCall = intent.startsWith("call ") ||
-                    intent.startsWith("dial ") ||
-                    intent.startsWith("make a call") ||
-                    intent.startsWith("phone ") ||
-                    intent.contains("call on whatsapp") ||
-                    intent.contains("whatsapp call") ||
-                    intent.contains("phone chey") ||
-                    intent.contains("call chey") ||
-                    intent.contains("కాల్ చేయి") ||
-                    intent.contains("ఫోన్ చేయి")
-
-                val isMessagingUtterance = intent.contains("send ") ||
-                    intent.contains("whatsapp") ||
-                    intent.contains("message") ||
-                    intent.contains("msg") ||
-                    intent.contains("text ") ||
-                    intent.contains("tell ") ||
-                    intent.contains("saying ") ||
-                    intent.contains("that i ") ||
-                    intent.contains("పంపు") ||
-                    intent.contains("పెట్టు")
+                if (com.example.automation.engine.ActionDispatcher.isWhatsAppCallUtterance(intent)) {
+                    return AuthorizationResult(false, "CALL_PHONE rejected: user intent is a WhatsApp call, not a cellular phone call.")
+                }
+                val isExplicitVoiceCall = com.example.automation.engine.ActionDispatcher.isExplicitCallUtterance(intent)
+                val isMessagingUtterance = com.example.automation.engine.ActionDispatcher.isMessagingUtterance(intent)
 
                 if (isMessagingUtterance && !isExplicitVoiceCall) {
                     AuthorizationResult(false, "CALL_PHONE rejected: user intent is a messaging command, not a phone call.")
@@ -533,8 +577,15 @@ object ActionAuthorizer {
             return false
         }
 
-        val hasActionVerb = listOf("open ", "search ", "play ", "send ", "click ", "tap ", "turn on ", "turn off ", "set ", "call ")
-            .any { lower.contains(it) }
+        val hasActionVerb = listOf(
+            "open", "search", "play", "send", "click", "tap", "type", "enter", "clear", "press", "scroll", "swipe",
+            "turn on", "turn off", "turn", "set", "call", "whatsapp", "వాట్సాప్", "message", "msg", "pampu",
+            "pampinchu", "pettu", "rayi", "chey", "cheyyi", "vellu", "kottu", "తెరువు", "పంపు", "పెట్టు", "రాయి",
+            "ఓపెన్", "గొట్టు", "కొట్టు", "టైప్", "ఎంటర్", "flashlight", "torch", "wifi", "bluetooth",
+            "dnd", "alarm", "timer", "reminder", "brightness", "volume", "routine", "unlock", "lock",
+            "wait", "sleep", "delay", "aagu", "ఆగు",
+            "contact", "sms", "notification", "quick settings", "home", "recent", "back"
+        ).any { lower.contains(it) }
         if (hasActionVerb) return false
 
         // Assistant comparison, personality, feelings, creator inquiries
@@ -549,22 +600,25 @@ object ActionAuthorizer {
         }
 
         val conversationalPhrases = listOf(
-            "tell me about", "what is", "who is", "explain", "how does", "how to", "why is",
-            "hello", "hi max", "hey max", "good morning", "good evening", "how are you",
-            "what's the weather", "what is the weather", "weather today", "forecast",
-            "can you", "do you", "are you", "should i", "which is", "where is",
-            "చెప్పు", "ఎలా", "ఎవరు", "ఏంటి", "బాగున్నావా", "హలో", "నమస్తే",
-            "batao", "kaise", "kaun", "kya", "namaste"
+            "tell me", "tell a", "tell", "say", "write", "sing", "explain", "recommend", "suggest",
+            "give me", "help me", "what is", "who is", "where is", "why is", "why", "how to", "how do",
+            "how is", "how does", "hello", "hi", "hey", "good morning", "good afternoon", "good evening",
+            "how are you", "what's the weather", "what is the weather", "weather today", "forecast",
+            "can you", "do you", "are you", "should i", "which is", "joke", "story", "poem", "song",
+            "quote", "advice", "tips", "meaning", "definition", "translate", "summarize",
+            "చెప్పు", "ఎలా", "ఎవరు", "ఏంటి", "బాగున్నావా", "హలో", "నమస్తే", "ధన్యవాదాలు",
+            "batao", "kaise", "kaun", "kya", "namaste", "thanks", "thank you", "ok", "okay"
         )
         if (conversationalPhrases.any { lower.contains(it) }) {
             return true
         }
 
-        // Generic interrogative sentences ending with ? without action verbs
+        // Generic interrogative sentences or non-action statements
         if (lower.endsWith("?") || lower.contains(" better aa") || lower.contains(" aa?") || lower.contains(" kante ") || lower.contains(" kanna ")) {
             return true
         }
 
-        return false
+        // Default to pure conversation when no explicit device action or screen keywords are present
+        return true
     }
 }

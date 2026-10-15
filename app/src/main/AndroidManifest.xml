@@ -66,7 +66,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:theme="@style/Theme.MyApplication">
         <activity
             android:name=".MainActivity"
@@ -124,6 +124,7 @@
             android:name=".receiver.AutoReplyActionReceiver"
             android:exported="false">
             <intent-filter>
+                <action android:name="com.example.ACTION_CONFIRM_REPLY"/>
                 <action android:name="com.example.ACTION_CANCEL_REPLY"/>
                 <action android:name="com.example.ACTION_SEND_REPLY_NOW"/>
                 <action android:name="com.example.ACTION_QUICK_REPLY"/>
@@ -163,7 +164,7 @@
 
         <receiver
             android:name=".automation.scheduler.TaskReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="com.example.scheduler.ACTION_RUN_TASK" />
                 <action android:name="com.example.automation.scheduler.ACTION_RUN_TASK" />
@@ -249,6 +250,14 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Interactive Dynamic Capsule Floating Overlay and HUD system for AI voice assistant" />
+        </service>
+        <service 
+            android:name=".automation.service.TaskExecutionForegroundService" 
+            android:foregroundServiceType="specialUse" 
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Autonomous task execution engine with step-by-step progress notification and user cancellation controls" />
         </service>
         <service
             android:name=".service.NotificationListenerBridge"

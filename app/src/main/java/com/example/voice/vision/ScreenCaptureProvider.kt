@@ -46,40 +46,10 @@ object ScreenCaptureProvider {
     }
 
     private fun captureBitmap(): Bitmap? {
-        // Tier 1: Shizuku Silent In-Memory Screencap (RAM ONLY - Executes as Root/ADB process)
-        if (com.example.automation.ShizukuManager.isShizukuAvailable() && com.example.automation.ShizukuManager.isPermissionGranted()) {
-            try {
-                val pngBytes = com.example.automation.ShizukuShellPlugin.runCommandBytes("screencap -p")
-                if (pngBytes != null && pngBytes.isNotEmpty()) {
-                    val bitmap = android.graphics.BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size)
-                    if (bitmap != null) {
-                        Log.d(TAG, "Captured screen frame in RAM via Tier 1 (Shizuku screencap stream, ${pngBytes.size} bytes)")
-                        return bitmap
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Tier 1 Shizuku screencap stream attempt failed: ${e.message}")
-            }
-        }
-
-        // Tier 2: Try Direct Root su -c screencap -p RAM Stream
-        try {
-            val process = Runtime.getRuntime().exec(arrayOf("su", "-c", "screencap -p"))
-            val pngBytes = process.inputStream.buffered().readBytes()
-            if (pngBytes.isNotEmpty()) {
-                val bitmap = android.graphics.BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size)
-                if (bitmap != null) {
-                    Log.d(TAG, "Captured screen frame in RAM via Tier 2 (Root su screencap stream, ${pngBytes.size} bytes)")
-                    return bitmap
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Tier 2 Root su screencap stream attempt failed: ${e.message}")
-        }
-
-        // Tier 2: AccessibilityService takeScreenshot (Android 11 / API 30+)
+        // Tier 1: AccessibilityService takeScreenshot (Android 11 / API 30+ - Official, Instant, No-Root)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val service = ServiceRegistry.get<JarvisAccessibilityService>(ServiceType.ACCESSIBILITY)
+                ?: JarvisAccessibilityService.instance
             if (service != null) {
                 val latch = CountDownLatch(1)
                 var resultBitmap: Bitmap? = null
@@ -104,21 +74,38 @@ object ScreenCaptureProvider {
                             }
 
                             override fun onFailure(errorCode: Int) {
-                                Log.e(TAG, "Accessibility takeScreenshot failed with error code: $errorCode")
+                                Log.w(TAG, "Accessibility takeScreenshot failed with error code: $errorCode")
                                 latch.countDown()
                             }
                         }
                     )
-                    latch.await(2, TimeUnit.SECONDS)
-                    if (resultBitmap != null) {
-                        Log.d(TAG, "Captured screen frame via Tier 2 (Accessibility takeScreenshot)")
+                    val completed = latch.await(1500, TimeUnit.MILLISECONDS)
+                    if (completed && resultBitmap != null) {
+                        Log.d(TAG, "Captured screen frame via Tier 1 (Accessibility takeScreenshot, instant)")
                         return resultBitmap
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Accessibility takeScreenshot exception: ${e.message}", e)
+                    Log.w(TAG, "Accessibility takeScreenshot exception: ${e.message}", e)
                 }
             }
         }
+
+        // Tier 2: Shizuku Silent In-Memory Screencap (RAM ONLY - Executes as ADB process if available)
+        if (com.example.automation.ShizukuManager.isShizukuAvailable() && com.example.automation.ShizukuManager.isPermissionGranted()) {
+            try {
+                val pngBytes = com.example.automation.ShizukuShellPlugin.runCommandBytes("screencap -p")
+                if (pngBytes != null && pngBytes.isNotEmpty()) {
+                    val bitmap = android.graphics.BitmapFactory.decodeByteArray(pngBytes, 0, pngBytes.size)
+                    if (bitmap != null) {
+                        Log.d(TAG, "Captured screen frame in RAM via Tier 2 (Shizuku screencap stream, ${pngBytes.size} bytes)")
+                        return bitmap
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Tier 2 Shizuku screencap stream attempt failed: ${e.message}")
+            }
+        }
+
         Log.w(TAG, "Screen capture unavailable across all tiers")
         return null
     }

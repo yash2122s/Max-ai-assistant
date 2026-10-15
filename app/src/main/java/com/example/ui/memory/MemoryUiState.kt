@@ -2,6 +2,7 @@ package com.example.ui.memory
 
 import com.example.memory.data.MemoryType
 import com.example.memory.data.PermanentMemory
+import com.example.memory.sync.MemoryConflict
 
 data class MemoryUiState(
     val memories: List<PermanentMemory> = emptyList(),
@@ -13,6 +14,7 @@ data class MemoryUiState(
     val error: String? = null,
     val selectedMemoryForEdit: PermanentMemory? = null,
     val isCreatingNew: Boolean = false
+    ,val conflicts: List<MemoryConflict> = emptyList()
 )
 
 sealed interface MemoryUiEvent {

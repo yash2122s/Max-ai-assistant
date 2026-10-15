@@ -55,23 +55,23 @@ class DynamicCapsuleView @JvmOverloads constructor(
     private var currentHeightPx: Int = (28 * density).toInt()
     private var onBoundsChangeListener: ((Int, Int) -> Unit)? = null
 
-    // Palette for vibrant visualizer bars
+    // Palette for vibrant visualizer bars (Luminous Neon Pink & Magenta)
     private val barColors = intArrayOf(
-        Color.parseColor("#00F5D4"), // Neon Mint / Cyan
-        Color.parseColor("#00BBF9"), // Electric Sky
-        Color.parseColor("#4361EE"), // Royal Blue
-        Color.parseColor("#7209B7"), // Neon Violet
-        Color.parseColor("#F72585"), // Neon Magenta
-        Color.parseColor("#FF5400")  // Neon Coral
+        Color.parseColor("#FF2E93"), // Radiant Neon Pink
+        Color.parseColor("#E11D48"), // Deep Magenta
+        Color.parseColor("#F43F5E"), // Bright Rose
+        Color.parseColor("#FB7185"), // Pastel Rose
+        Color.parseColor("#FDA4AF"), // Soft Rose
+        Color.parseColor("#FF2E93")  // Neon Pink
     )
 
     init {
-        // High-performance Glassmorphic Container with sleek micro-border
+        // High-performance Glassmorphic Container with sleek micro-border (Luminous White & Pink)
         backgroundDrawable = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = 20 * density
-            setColor(Color.parseColor("#F00A0E17")) // Deep obsidian glass
-            setStroke((1.2f * density).toInt(), Color.parseColor("#00F5D4")) // Neon Cyan glow
+            setColor(Color.parseColor("#F5FFFFFF")) // Frosted Luminous White Milk Glass
+            setStroke((1.2f * density).toInt(), Color.parseColor("#FBCFE8")) // Soft Rose Glowing Border
         }
 
         containerLayout = LinearLayout(context).apply {
@@ -86,9 +86,9 @@ class DynamicCapsuleView @JvmOverloads constructor(
 
         // Cute glowing icon indicator
         iconView = TextView(context).apply {
-            text = "✦"
-            textSize = 11.5f
-            setTextColor(Color.parseColor("#00F5D4"))
+            text = "•"
+            textSize = 12f
+            setTextColor(Color.parseColor("#FF2E93"))
             gravity = Gravity.CENTER
             setPadding(0, 0, (5 * density).toInt(), 0)
         }
@@ -97,7 +97,7 @@ class DynamicCapsuleView @JvmOverloads constructor(
         titleView = TextView(context).apply {
             text = "MAX"
             textSize = 11f
-            setTextColor(Color.WHITE)
+            setTextColor(Color.parseColor("#0F172A")) // Deep Slate 900
             typeface = Typeface.DEFAULT_BOLD
             letterSpacing = 0.06f
             gravity = Gravity.CENTER_VERTICAL
@@ -237,25 +237,25 @@ class DynamicCapsuleView @JvmOverloads constructor(
             }
             CapsuleState.IDLE -> {
                 visibility = View.VISIBLE
-                iconView.text = "✦"
-                iconView.setTextColor(Color.parseColor("#00F5D4"))
+                iconView.text = "•"
+                iconView.setTextColor(Color.parseColor("#FF2E93"))
                 titleView.text = "MAX"
-                titleView.setTextColor(Color.WHITE)
+                titleView.setTextColor(Color.parseColor("#0F172A"))
                 visualizerContainer.visibility = View.GONE
                 processingDotsContainer.visibility = View.GONE
-                backgroundDrawable.setStroke((1.2f * density).toInt(), Color.parseColor("#00F5D4"))
+                backgroundDrawable.setStroke((1.2f * density).toInt(), Color.parseColor("#FBCFE8"))
                 startBreathingAnimation()
                 animateToDimensions(widthDp = 90, heightDp = 28, animate = animate)
             }
             CapsuleState.LISTENING -> {
                 visibility = View.VISIBLE
-                iconView.text = "🎙"
-                iconView.setTextColor(Color.parseColor("#F72585")) // Vivid Neon Magenta/Rose
+                iconView.text = "•"
+                iconView.setTextColor(Color.parseColor("#FF2E93")) // Radiant Neon Pink
                 titleView.text = "Listening"
-                titleView.setTextColor(Color.parseColor("#FFD1DC"))
+                titleView.setTextColor(Color.parseColor("#0F172A"))
                 visualizerContainer.visibility = View.VISIBLE
                 processingDotsContainer.visibility = View.GONE
-                backgroundDrawable.setStroke((1.5f * density).toInt(), Color.parseColor("#F72585"))
+                backgroundDrawable.setStroke((1.5f * density).toInt(), Color.parseColor("#FF2E93"))
                 visualizerBars.forEachIndexed { index, bar ->
                     (bar.background as? GradientDrawable)?.setColor(barColors[index % barColors.size])
                 }
@@ -263,25 +263,25 @@ class DynamicCapsuleView @JvmOverloads constructor(
             }
             CapsuleState.PROCESSING -> {
                 visibility = View.VISIBLE
-                iconView.text = "✦"
-                iconView.setTextColor(Color.parseColor("#7209B7")) // Neon Purple
+                iconView.text = "•"
+                iconView.setTextColor(Color.parseColor("#E11D48")) // Deep Magenta
                 titleView.text = "Thinking"
-                titleView.setTextColor(Color.parseColor("#E0AAFF"))
+                titleView.setTextColor(Color.parseColor("#0F172A"))
                 visualizerContainer.visibility = View.GONE
                 processingDotsContainer.visibility = View.VISIBLE
-                backgroundDrawable.setStroke((1.5f * density).toInt(), Color.parseColor("#7209B7"))
+                backgroundDrawable.setStroke((1.5f * density).toInt(), Color.parseColor("#E11D48"))
                 startProcessingAnimation()
                 animateToDimensions(widthDp = 132, heightDp = 30, animate = animate)
             }
             CapsuleState.SPEAKING -> {
                 visibility = View.VISIBLE
-                iconView.text = "⚡"
-                iconView.setTextColor(Color.parseColor("#00BBF9")) // Electric Sky Blue
+                iconView.text = "•"
+                iconView.setTextColor(Color.parseColor("#FF2E93")) // Electric Pink
                 titleView.text = "MAX"
-                titleView.setTextColor(Color.WHITE)
+                titleView.setTextColor(Color.parseColor("#0F172A"))
                 visualizerContainer.visibility = View.VISIBLE
                 processingDotsContainer.visibility = View.GONE
-                backgroundDrawable.setStroke((1.5f * density).toInt(), Color.parseColor("#00BBF9"))
+                backgroundDrawable.setStroke((1.5f * density).toInt(), Color.parseColor("#FF2E93"))
                 visualizerBars.forEachIndexed { index, bar ->
                     (bar.background as? GradientDrawable)?.setColor(barColors[index % barColors.size])
                 }
@@ -290,13 +290,13 @@ class DynamicCapsuleView @JvmOverloads constructor(
             }
             CapsuleState.EXPANDED -> {
                 visibility = View.VISIBLE
-                iconView.text = "💬"
-                iconView.setTextColor(Color.parseColor("#00F5D4"))
+                iconView.text = "•"
+                iconView.setTextColor(Color.parseColor("#FF2E93"))
                 titleView.text = textPayload?.takeIf { it.isNotBlank() } ?: "Processing..."
-                titleView.setTextColor(Color.WHITE)
+                titleView.setTextColor(Color.parseColor("#0F172A"))
                 visualizerContainer.visibility = View.GONE
                 processingDotsContainer.visibility = View.GONE
-                backgroundDrawable.setStroke((1.4f * density).toInt(), Color.parseColor("#00F5D4"))
+                backgroundDrawable.setStroke((1.4f * density).toInt(), Color.parseColor("#FF2E93"))
                 animateToDimensions(widthDp = 210, heightDp = 38, animate = animate)
             }
         }
@@ -334,10 +334,10 @@ class DynamicCapsuleView @JvmOverloads constructor(
                 containerLayout.scaleY = scaleFactor
 
                 val strokeWidth = ((1.2f + (smoothedRms * 1.4f)) * density).toInt()
-                backgroundDrawable.setStroke(strokeWidth, Color.parseColor("#00BBF9"))
+                backgroundDrawable.setStroke(strokeWidth, Color.parseColor("#FF2E93"))
             } else if (currentState == CapsuleState.LISTENING) {
                 val strokeWidth = ((1.2f + (smoothedRms * 1.4f)) * density).toInt()
-                backgroundDrawable.setStroke(strokeWidth, Color.parseColor("#F72585"))
+                backgroundDrawable.setStroke(strokeWidth, Color.parseColor("#FF2E93"))
             }
         }
     }

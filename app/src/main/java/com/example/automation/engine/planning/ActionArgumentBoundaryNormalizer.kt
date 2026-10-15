@@ -46,9 +46,10 @@ object ActionArgumentBoundaryNormalizer {
         "search", "find",
         "enter", "submit", "done",
         "directions", "navigate", "route",
-        "wait", "pause", "stay", "verify",
+        "wait", "pause", "stay", "verify", "sleep", "delay",
         // Telugu / Tanglish action directives
-        "ఓపెన్", "ట్యాప్", "నొక్కు", "క్లిక్", "ప్లే", "డైరెక్షన్స్", "వెళ్లు", "చూడు", "ఆగు"
+        "ఓపెన్", "ట్యాప్", "నొక్కు", "క్లిక్", "ప్లే", "డైరెక్షన్స్", "వెళ్లు", "చూడు", "ఆగు", "వెయిట్", "aagu", "aagali",
+        "టైప్", "రాయి", "రాసి", "type", "enter", "write", "type chey", "click chey", "tap chey", "search chey"
     )
 
     private val ORDINAL_PATTERNS = listOf(
@@ -59,7 +60,7 @@ object ActionArgumentBoundaryNormalizer {
     )
 
     private val DELIMITER_REGEX = Regex(
-        "(?:,\\s*(?:and then|then|and)\\s+|\\s+(?:and then|then)\\s+|,\\s*|\\s+and\\s+|\\s+(?:మరియు|తర్వాత)\\s+)",
+        "(?:,\\s*(?:and then|then|and)\\s+|\\s+(?:and then|then)\\s+|,\\s*|\\s+and\\s+|\\s+(?:మరియు|తర్వాత|చేసి|chesi)\\s+)",
         RegexOption.IGNORE_CASE
     )
 
@@ -196,10 +197,11 @@ object ActionArgumentBoundaryNormalizer {
         val trimmed = clause.trim()
         if (trimmed.isBlank()) return emptyList()
 
-        // 0. Wait / Pause actions ("wait", "wait for UI", "wait for screen", "pause", "stay")
-        val waitMatch = Regex("^(?:wait|stay|pause)(?:\\s+for\\s+(?:the\\s+)?(.+))?$", RegexOption.IGNORE_CASE).find(trimmed)
+        // 0. Wait / Pause actions ("wait", "wait for 10 seconds", "wait 10s", "10 seconds aagu", "pause", "stay")
+        val waitMatch = Regex("^(?:wait|stay|pause|aagu|aagali|ఆగు|వెయిట్)(?:\\s+(?:for\\s+)?(?:the\\s+)?(.+))?$", RegexOption.IGNORE_CASE).find(trimmed)
+            ?: Regex("^(\\d+\\s*(?:s|sec|seconds|ms|సెకన్లు|సెకండ్లు))\\s*(?:wait|aagu|aagali|ఆగు)?$", RegexOption.IGNORE_CASE).find(trimmed)
         if (waitMatch != null) {
-            val target = waitMatch.groupValues[1].trim().ifBlank { "composer" }
+            val target = waitMatch.groupValues[1].trim().ifBlank { "5s" }
             return listOf(ParsedAction("WAIT", target = target))
         }
 
@@ -255,18 +257,30 @@ object ActionArgumentBoundaryNormalizer {
             return listOf(ParsedAction("CLICK", target = rawTarget))
         }
 
-        // 5. In-App Open on element / tab / button ("open first video", "open first result", "open profile", "open Message")
-        val openInAppMatch = Regex("^(?:open|go to|ఓపెన్|వెళ్లు)\\s+(?:the\\s+)?(.+)$", RegexOption.IGNORE_CASE).find(trimmed)
+        // 5. App or In-App Open ("open YouTube", "open first video", "open Reels and wait 20 seconds")
+        val openInAppMatch = Regex("^(?:open|launch|start|go to|ఓపెన్|వెళ్లు)\\s+(?:the\\s+)?(.+)$", RegexOption.IGNORE_CASE).find(trimmed)
         if (openInAppMatch != null) {
             val rawTarget = openInAppMatch.groupValues[1].trim()
-            if (rawTarget.contains(Regex("(?i)\\s+(?:and then|then|and)\\s+(?:wait|stay|pause)$"))) {
-                val cleanTarget = rawTarget.replace(Regex("(?i)\\s+(?:and then|then|and)\\s+(?:wait|stay|pause)$"), "").trim()
-                return listOf(
-                    ParsedAction("CLICK", target = cleanTarget),
-                    ParsedAction("WAIT", target = if (cleanTarget.equals("Message", ignoreCase = true)) "Message composer" else cleanTarget)
-                )
+            val hasWait = rawTarget.contains(Regex("(?i)\\s+(?:and then|then|and|,)\\s*(?:wait|pause|stay|aagu|aagali|ఆగు)(?:\\s+(?:for\\s+)?(.+))?$"))
+            val cleanTarget = if (hasWait) {
+                rawTarget.replace(Regex("(?i)\\s+(?:and then|then|and|,)\\s*(?:wait|pause|stay|aagu|aagali|ఆగు)(?:\\s+(?:for\\s+)?(.+))?$"), "").trim()
+            } else rawTarget
+
+            val waitClause = if (hasWait) {
+                val waitMatch = Regex("(?i)\\b(?:wait|pause|stay|aagu|aagali|ఆగు)\\s*(?:for\\s+)?(.+)?$").find(rawTarget)
+                waitMatch?.groupValues?.get(1)?.trim()?.ifBlank { "5s" } ?: "5s"
+            } else null
+
+            val knownApps = setOf("whatsapp", "youtube", "instagram", "telegram", "chrome", "settings", "maps", "camera", "spotify", "facebook")
+            val isApp = knownApps.any { cleanTarget.lowercase().contains(it) } ||
+                com.example.knowledge.apps.InstalledAppsRepository.findApp(null, cleanTarget) != null
+
+            val actionType = if (isApp) "OPEN_APP" else "CLICK"
+            val actions = mutableListOf(ParsedAction(actionType, target = cleanTarget))
+            if (waitClause != null) {
+                actions.add(ParsedAction("WAIT", target = waitClause))
             }
-            return listOf(ParsedAction("CLICK", target = rawTarget))
+            return actions
         }
 
         // 6. Scroll

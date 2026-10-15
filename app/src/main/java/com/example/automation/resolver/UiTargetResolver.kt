@@ -204,6 +204,78 @@ object UiTargetResolver {
         }
 
         // =========================================================================
+        // 2.5 DUAL-ANCHOR SWITCH & TOGGLE SNAPPING (Confidence 0.96)
+        // If user intent is toggling/switching an item (e.g. "Wireless Debugging", "Dark Theme", "Bluetooth"),
+        // find the label first and snap directly to the adjacent switch/checkbox on the same row!
+        // =========================================================================
+        val qLower = cleanQuery.lowercase(Locale.ROOT)
+        val isToggleIntent = targetRole == "switch" || targetRole == "checkbox" ||
+                qLower.startsWith("turn on ") || qLower.startsWith("turn off ") ||
+                qLower.startsWith("enable ") || qLower.startsWith("disable ") ||
+                qLower.startsWith("toggle ") || qLower.endsWith(" toggle") ||
+                qLower.endsWith(" switch") || qLower.contains("switch") || qLower.contains("toggle")
+
+        if (isToggleIntent) {
+            val strippedToggleQuery = qLower
+                .removePrefix("turn on ")
+                .removePrefix("turn off ")
+                .removePrefix("enable ")
+                .removePrefix("disable ")
+                .removePrefix("toggle ")
+                .removeSuffix(" toggle")
+                .removeSuffix(" switch")
+                .trim()
+
+            if (strippedToggleQuery.length >= 3) {
+                val labelCandidate = allNodes.filter { node ->
+                    val t = node.text?.toString()?.lowercase(Locale.ROOT) ?: ""
+                    val d = node.contentDescription?.toString()?.lowercase(Locale.ROOT) ?: ""
+                    t.contains(strippedToggleQuery) || d.contains(strippedToggleQuery) ||
+                    strippedToggleQuery.contains(t.takeIf { it.length >= 3 } ?: "____")
+                }.minByOrNull { node ->
+                    val t = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
+                    kotlin.math.abs(t.length - strippedToggleQuery.length)
+                }
+
+                if (labelCandidate != null) {
+                    val labelBounds = Rect()
+                    labelCandidate.getBoundsInScreen(labelBounds)
+
+                    val adjacentSwitch = allNodes.filter { candidate ->
+                        val isSwitch = candidate.isCheckable ||
+                                (candidate.className?.toString()?.contains("Switch", ignoreCase = true) == true) ||
+                                (candidate.className?.toString()?.contains("CheckBox", ignoreCase = true) == true) ||
+                                (candidate.className?.toString()?.contains("ToggleButton", ignoreCase = true) == true)
+                        if (!isSwitch) return@filter false
+
+                        val candBounds = Rect()
+                        candidate.getBoundsInScreen(candBounds)
+                        val dy = kotlin.math.abs(candBounds.centerY() - labelBounds.centerY())
+                        dy < 150 && candBounds.centerX() >= labelBounds.centerX()
+                    }.minByOrNull { candidate ->
+                        val candBounds = Rect()
+                        candidate.getBoundsInScreen(candBounds)
+                        kotlin.math.abs(candBounds.centerY() - labelBounds.centerY())
+                    }
+
+                    if (adjacentSwitch != null) {
+                        val target = createUiTarget(adjacentSwitch, 0.96f, TargetResolutionMethod.SEMANTIC)
+                        Log.i(TAG, "Grounded adjacent toggle switch for label '${labelCandidate.text ?: labelCandidate.contentDescription}': confidence=${target.confidence}")
+                        return UiTargetResolutionResult(
+                            success = true,
+                            target = target,
+                            matchedNode = adjacentSwitch,
+                            confidence = target.confidence,
+                            method = TargetResolutionMethod.SEMANTIC,
+                            reason = "Dual-anchor adjacent switch for '${labelCandidate.text ?: labelCandidate.contentDescription}'",
+                            candidateCount = 1
+                        )
+                    }
+                }
+            }
+        }
+
+        // =========================================================================
         // 3. ORDINAL & RELATIVE TARGET MATCHING (Confidence 0.91)
         // e.g. "first result", "second video", "top link", "first account"
         // =========================================================================
@@ -228,7 +300,6 @@ object UiTargetResolver {
         // =========================================================================
         // 4. STRICTLY RANKED SEMANTIC CANDIDATE SCORING & RESOLUTION
         // =========================================================================
-        val qLower = cleanQuery.lowercase(Locale.ROOT)
         val semanticAliases = resolveSemanticAliases(cleanQuery)
         val negativeTerms = resolveNegativeFilters(cleanQuery)
 
@@ -339,8 +410,17 @@ object UiTargetResolver {
         requireEditable: Boolean,
         requireClickable: Boolean
     ): ScoredCandidate {
-        val nodeText = node.text?.toString()?.trim() ?: ""
+        var nodeText = node.text?.toString()?.trim() ?: ""
         val nodeDesc = node.contentDescription?.toString()?.trim() ?: ""
+
+        // JARVIS migration: coalesce descendant text for clickable rows
+        if (nodeText.isBlank() && nodeDesc.isBlank() && node.isClickable && node.childCount > 0) {
+            val childTexts = collectNodeText(node)
+            if (childTexts.isNotEmpty()) {
+                nodeText = childTexts.joinToString(" • ")
+            }
+        }
+
         val rawId = node.viewIdResourceName ?: ""
         val nodeId = rawId.substringAfterLast('/').lowercase(Locale.ROOT)
         val q = query.lowercase(Locale.ROOT).trim()
@@ -501,6 +581,24 @@ object UiTargetResolver {
             finalScore += 0.03f
         }
 
+        // Explicit button query penalty for input fields (JARVIS Pattern)
+        val isExplicitButtonQuery = q.contains("send button") || q.contains("generate button") ||
+                q.contains("submit button") || q.contains("enter button") ||
+                q.contains("create button") || q.contains("go button") ||
+                q == "send" || q == "generate" || q == "submit" ||
+                q == "enter" || q == "done" || q == "run" ||
+                q.contains("click send") || q.contains("press send") ||
+                q.contains("press enter") || q.contains("press generate")
+        if (isExplicitButtonQuery && (isSearchEdit || node.isEditable)) {
+            finalScore -= 0.60f
+        }
+
+        // Web search results priority: avoid clicking the search / URL bar when targeting content links
+        val isExplicitSearchQuery = q.contains("search") || q.contains("url") || q.contains("address") || q.contains("omnibox")
+        if (!isExplicitSearchQuery && (nodeId.contains("url_bar") || nodeId.contains("omnibox") || (bounds.top < 200 && (isSearchEdit || node.isEditable)))) {
+            finalScore -= 0.40f
+        }
+
         // 6. Generic decorative / avatar / story node penalty:
         // When user intent is finding or opening an item/account, avoid selecting avatar/story/ring nodes
         val isExplicitAvatar = q.contains("avatar") || q.contains("story") || q.contains("stories") ||
@@ -543,9 +641,18 @@ object UiTargetResolver {
         if (requireClickable) {
             val clickable = nodes.firstOrNull { it.isClickable }
             if (clickable != null) return clickable
+            for (node in nodes) {
+                val ancestor = findClickableAncestor(node)
+                if (ancestor != null) return ancestor
+            }
         }
         // Prefer interactive nodes
-        return nodes.firstOrNull { it.isClickable || it.isEditable } ?: nodes.first()
+        for (node in nodes) {
+            if (node.isClickable || node.isEditable) return node
+            val ancestor = findClickableAncestor(node)
+            if (ancestor != null) return ancestor
+        }
+        return nodes.first()
     }
 
     private fun findClickableAncestor(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
@@ -566,15 +673,44 @@ object UiTargetResolver {
     ): UiTarget {
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
+        var text = node.text?.toString()
+        val desc = node.contentDescription?.toString()
+        if (text.isNullOrBlank() && desc.isNullOrBlank() && node.isClickable && node.childCount > 0) {
+            val childTexts = collectNodeText(node)
+            if (childTexts.isNotEmpty()) {
+                text = childTexts.joinToString(" • ")
+            }
+        }
         return UiTarget(
             resourceId = node.viewIdResourceName,
-            text = node.text?.toString(),
-            contentDescription = node.contentDescription?.toString(),
+            text = text,
+            contentDescription = desc,
             role = node.className?.toString(),
             bounds = bounds,
             confidence = confidence,
-            method = method
+            method = method,
+            className = node.className?.toString() ?: "",
+            viewId = node.viewIdResourceName ?: "",
+            isClickable = node.isClickable,
+            isCheckable = node.isCheckable,
+            isChecked = node.isChecked,
+            isEditable = node.isEditable,
+            isScrollable = node.isScrollable
         )
+    }
+
+    private fun collectNodeText(node: AccessibilityNodeInfo, depth: Int = 0): List<String> {
+        if (depth > 3) return emptyList()
+        val list = mutableListOf<String>()
+        for (i in 0 until node.childCount) {
+            val child = try { node.getChild(i) } catch (_: Throwable) { null } ?: continue
+            val ct = child.text?.toString()?.trim()
+                ?: child.contentDescription?.toString()?.trim()
+                ?: ""
+            if (ct.isNotBlank() && !list.contains(ct)) list.add(ct)
+            if (child.childCount > 0) list.addAll(collectNodeText(child, depth + 1))
+        }
+        return list
     }
 
     private fun collectNodes(node: AccessibilityNodeInfo, list: MutableList<AccessibilityNodeInfo>, depth: Int = 0) {

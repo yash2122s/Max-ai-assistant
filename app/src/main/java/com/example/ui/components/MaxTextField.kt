@@ -9,16 +9,13 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
 
 /**
- * iOS Inset Grouped Text Field with refined dark background, hairline border, and active focus state.
+ * Modernized Text Field with MaxType typography and MaxSemanticColors tokens.
  */
 @Composable
 fun MaxTextField(
@@ -46,12 +43,12 @@ fun MaxTextField(
         modifier = modifier.fillMaxWidth(),
         enabled = enabled,
         readOnly = readOnly,
-        label = if (label != null) { { Text(label, fontSize = 13.sp, fontWeight = FontWeight.Medium, color = MaxTextSecondary) } } else null,
-        placeholder = { Text(placeholder, color = MaxTextTertiary, fontSize = 15.sp) },
+        label = if (label != null) { { Text(label, style = MaxType.Caption, fontWeight = FontWeight.Medium, color = MaxSemanticColors.textSecondary) } } else null,
+        placeholder = { Text(placeholder, color = MaxSemanticColors.textMuted, style = MaxType.Body) },
         leadingIcon = leadingIcon,
         trailingIcon = trailingIcon,
         isError = isError,
-        supportingText = if (isError && errorMessage != null) { { Text(errorMessage, color = MaxDestructiveApple, fontSize = 12.sp) } } else null,
+        supportingText = if (isError && errorMessage != null) { { Text(errorMessage, color = MaxSemanticColors.destructive, style = MaxType.Caption) } } else null,
         singleLine = singleLine,
         maxLines = maxLines,
         visualTransformation = visualTransformation,
@@ -59,15 +56,15 @@ fun MaxTextField(
         keyboardActions = keyboardActions,
         shape = RoundedCornerShape(MaxDimensions.radiusLg),
         colors = OutlinedTextFieldDefaults.colors(
-            focusedTextColor = MaxTextPrimary,
-            unfocusedTextColor = MaxTextPrimary,
-            focusedContainerColor = MaxSurfaceElevated,
-            unfocusedContainerColor = MaxSurfaceCard,
-            disabledContainerColor = MaxBaseDark,
-            focusedBorderColor = MaxPrimaryRoyal,
-            unfocusedBorderColor = MaxBorderHairline,
-            cursorColor = MaxAccentCyan,
-            errorBorderColor = MaxDestructiveApple
+            focusedTextColor = MaxSemanticColors.textPrimary,
+            unfocusedTextColor = MaxSemanticColors.textPrimary,
+            focusedContainerColor = MaxSemanticColors.surfaceElevated,
+            unfocusedContainerColor = MaxSemanticColors.surface,
+            disabledContainerColor = MaxSemanticColors.background,
+            focusedBorderColor = MaxSemanticColors.primaryRoyal,
+            unfocusedBorderColor = MaxSemanticColors.border,
+            cursorColor = MaxSemanticColors.accentCyan,
+            errorBorderColor = MaxSemanticColors.destructive
         )
     )
 }

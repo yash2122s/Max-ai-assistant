@@ -95,7 +95,9 @@ class AssistantUseCase(private val context: Context) {
         val offlineResult = OfflineCommandEngine.executeIfMatched(appContext, text)
         if (offlineResult != null) {
             val app = appContext as? com.example.MyApplication
-            app?.entitlementGate?.checkAndConsumeQuota()
+            // Local execution already returned truth. Cloud usage sync cannot
+            // hold its terminal response indefinitely (e.g. offline Firestore).
+            kotlinx.coroutines.withTimeoutOrNull(5000L) { app?.entitlementGate?.checkAndConsumeQuota() }
             return offlineResult
         }
 
@@ -164,28 +166,8 @@ class AssistantUseCase(private val context: Context) {
                     message = planResult.errorMessage ?: "Awaiting your input."
                 )
             }
-            val planError = planResult.errorMessage ?: ""
-            val plannerDeclinedOrModelFailover =
-                planError.contains("Ambiguous request") ||
-                planError.contains("Generated plan is empty") ||
-                planError.contains("Invalid generated plan") ||
-                planError.contains("Plan generation failed") ||
-                planError.contains("Planning exception") ||
-                planError.contains("HTTP ") ||
-                planError.contains("Empty user goal")
-            if (plannerDeclinedOrModelFailover) {
-                // Planner declined (conversational/ambiguous) or model/network hiccup:
-                // safe failover to the Live conversational brain.
-            } else {
-                // Invalid/unsupported plan or execution failure: report to the user.
-                // Re-sending the same goal to Live would re-enter a per-action AI
-                // loop — explicitly forbidden.
-                return ToolResult(
-                    success = false,
-                    toolName = "planner",
-                    message = planError.ifEmpty { "Action failed." }
-                )
-            }
+            // GoalPlanner was unverified/failed for typed input: safe failover to Gemini Live conversation
+            android.util.Log.i("AssistantUseCase", "GoalPlanner returned unverified result for '$text'. Failing over to Gemini Live conversation.")
         }
 
         val ragContext = try {

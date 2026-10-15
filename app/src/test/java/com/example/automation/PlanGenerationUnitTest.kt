@@ -67,7 +67,7 @@ class PlanGenerationUnitTest {
 
     @Test
     fun testTooManyStepsValidationFails() {
-        val steps = (1..9).map { i ->
+        val steps = (1..19).map { i ->
             ActionStep(stepId = "step_$i", actionType = "GET_BATTERY_STATUS")
         }
         val result = GoalPlanner.validatePlan(steps)

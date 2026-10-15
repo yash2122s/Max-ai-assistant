@@ -23,6 +23,16 @@ class UnlockTool : Tool {
     override fun validate(request: ExecutionRequest): Boolean = true
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
+        // If device is already unlocked, return success immediately
+        if (!com.example.security.UnlockVerifier.isKeyguardLocked(context)) {
+            Log.i("UnlockTool", "Device is already unlocked.")
+            return ToolResult(
+                success = true,
+                toolName = name,
+                message = "Device is already unlocked."
+            )
+        }
+
         val securitySettings = SecuritySettings(context)
         
         if (!securitySettings.autoUnlockEnabled) {
@@ -58,13 +68,14 @@ class UnlockTool : Tool {
             )
         }
 
-        Log.d("UnlockTool", "Executing unlock with stored PIN...")
-        val triggered = service.unlockWithPin(pin)
+        Log.d("UnlockTool", "Executing verified unlock sequence with stored encrypted PIN...")
+        val unlocked = service.unlockWithPinVerified(pin)
 
         return ToolResult(
-            success = triggered,
+            success = unlocked,
             toolName = name,
-            message = if (triggered) "Unlock sequence initiated successfully." else "Failed to initiate unlock sequence."
+            errorCode = if (!unlocked) "UNLOCK_VERIFICATION_FAILED" else null,
+            message = if (unlocked) "Device successfully unlocked and verified." else "Device unlock attempted but keyguard remains locked."
         )
     }
 }

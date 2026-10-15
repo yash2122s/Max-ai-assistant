@@ -37,7 +37,9 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             app.maxLicenseManager.currentUser.collect { user ->
                 _uiState.update { current ->
-                    current.copy(userAccount = user)
+                    if (user == null && !current.isAuthenticating) current.copy(userAccount = null,
+                        currentStep = OnboardingStep.AUTH, stage = SettingsManager.OnboardingStage.AUTH_REQUIRED)
+                    else current.copy(userAccount = user)
                 }
             }
         }
@@ -135,6 +137,10 @@ class OnboardingViewModel(application: Application) : AndroidViewModel(applicati
             settingsManager.onboardingStage = SettingsManager.OnboardingStage.AUTHENTICATING
 
             val result = app.maxLicenseManager.signInWithGoogle(activity)
+            if (result.exceptionOrNull() is AuthException.SessionChanged) {
+                _uiState.update { it.copy(isAuthenticating = false, userAccount = app.maxLicenseManager.currentUser.value) }
+                return@launch
+            }
             if (result.isSuccess) {
                 val user = result.getOrNull()
                 settingsManager.onboardingStage = SettingsManager.OnboardingStage.AUTHENTICATED

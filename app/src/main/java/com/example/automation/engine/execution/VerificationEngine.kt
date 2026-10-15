@@ -13,7 +13,10 @@ class VerificationEngine(private val context: Context) {
     private val TAG = "VerificationEngine"
 
     suspend fun verify(outcome: ExpectedOutcome?): Boolean {
-        if (outcome == null) return true // Fast-path steps without explicit post-assertions
+        if (outcome == null) {
+            Log.w(TAG, "Rejected verification without an explicit expected outcome")
+            return false
+        }
 
         return when (outcome) {
             is ExpectedOutcome.PackageForeground -> verifyForeground(outcome)
@@ -74,7 +77,10 @@ class VerificationEngine(private val context: Context) {
                 val isSilent = am?.ringerMode == AudioManager.RINGER_MODE_SILENT || am?.ringerMode == AudioManager.RINGER_MODE_VIBRATE
                 isSilent == (outcome.expectedValue as? Boolean ?: true)
             }
-            else -> true
+            else -> {
+                Log.w(TAG, "No local verifier exists for system setting '${outcome.settingKey}'")
+                false
+            }
         }
     }
 

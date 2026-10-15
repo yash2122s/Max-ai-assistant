@@ -69,9 +69,6 @@ class GeminiPlanningProvider(
                 durationMs = (System.currentTimeMillis() - startTime).coerceAtLeast(0L)
             )
         }
-
-        val targetModel = request.modelName?.takeIf { it.isNotBlank() } ?: defaultModel
-
         try {
             val systemInstructionText = PromptBuilder.buildPlanningSystemInstruction()
             val userContentText = PromptBuilder.buildPlanningUserContent(request.goal, request.screenContext)
@@ -112,6 +109,23 @@ class GeminiPlanningProvider(
                                 add("targetText", JsonObject().apply { addProperty("type", "STRING") })
                                 add("resourceId", JsonObject().apply { addProperty("type", "STRING") })
                                 add("contentDescription", JsonObject().apply { addProperty("type", "STRING") })
+                                add("fallbackX", JsonObject().apply { addProperty("type", "NUMBER") })
+                                add("fallbackY", JsonObject().apply { addProperty("type", "NUMBER") })
+                                val paramsObj = JsonObject().apply {
+                                    addProperty("type", "OBJECT")
+                                    val paramProperties = JsonObject().apply {
+                                        add("text", JsonObject().apply { addProperty("type", "STRING") })
+                                        add("query", JsonObject().apply { addProperty("type", "STRING") })
+                                        add("duration", JsonObject().apply { addProperty("type", "STRING") })
+                                        add("action", JsonObject().apply { addProperty("type", "STRING") })
+                                        add("replace", JsonObject().apply { addProperty("type", "STRING") })
+                                        add("timeout", JsonObject().apply { addProperty("type", "STRING") })
+                                    }
+                                    add("properties", paramProperties)
+                                }
+                                add("params", paramsObj)
+                                add("outputKey", JsonObject().apply { addProperty("type", "STRING") })
+                                add("fallbackAction", JsonObject().apply { addProperty("type", "STRING") })
                             }
                             add("properties", properties)
                             val required = JsonArray().apply {
@@ -125,6 +139,14 @@ class GeminiPlanningProvider(
                     add("responseSchema", responseSchema)
                 }
                 add("generationConfig", generationConfig)
+            }
+
+            val targetModel = request.modelName?.takeIf { it.isNotBlank() } ?: run {
+                try {
+                    com.example.network.model.GeminiModelResolver.resolveBestUiModel(apiKey, defaultModel)
+                } catch (e: Exception) {
+                    defaultModel
+                }
             }
 
             val url = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent"
@@ -142,11 +164,11 @@ class GeminiPlanningProvider(
             val durationMs = (System.currentTimeMillis() - startTime).coerceAtLeast(0L)
 
             if (!response.isSuccessful) {
-                val errBody = response.body?.string() ?: ""
-                Log.e(TAG, "HTTP planning error ${response.code}: $errBody")
+                val errorBody = try { response.body?.string() } catch (e: Exception) { "" } ?: ""
+                Log.e(TAG, "HTTP planning error ${response.code}: $errorBody")
                 return@withContext PlanningResponse(
                     success = false,
-                    errorMessage = "HTTP ${response.code} error from Gemini API.",
+                    errorMessage = if (errorBody.isNotBlank()) "Gemini API error (${response.code}): $errorBody" else "HTTP ${response.code} error from Gemini API.",
                     durationMs = durationMs
                 )
             }
@@ -206,20 +228,24 @@ class GeminiPlanningProvider(
                 )
             }
 
-            Log.d(TAG, "Raw planning JSON response: $textContent")
+            Log.d(TAG, "Planning response parsed (${stepsJsonSize(textContent)} JSON characters); raw content omitted")
 
             val stepsJsonArray = JsonParser.parseString(textContent).asJsonArray
             val stepsList = mutableListOf<ActionStep>()
 
             for (i in 0 until stepsJsonArray.size()) {
                 val itemObj = stepsJsonArray.get(i).asJsonObject
-                val stepId = itemObj.get("stepId")?.asString ?: "step_${i + 1}"
+                val stepId = itemObj.get("stepId")?.takeIf { !it.isJsonNull }?.asString ?: ""
                 val actionType = itemObj.get("actionType")?.asString ?: continue
                 val targetText = itemObj.get("targetText")?.takeIf { !it.isJsonNull }?.asString
                 val resourceId = itemObj.get("resourceId")?.takeIf { !it.isJsonNull }?.asString
                 val contentDescription = itemObj.get("contentDescription")?.takeIf { !it.isJsonNull }?.asString
                 val fallbackX = itemObj.get("fallbackX")?.takeIf { !it.isJsonNull }?.asFloat
                 val fallbackY = itemObj.get("fallbackY")?.takeIf { !it.isJsonNull }?.asFloat
+                val dependsOn = itemObj.getAsJsonArray("dependsOn")?.mapNotNull { it.takeIf { !it.isJsonNull }?.asString } ?: emptyList()
+                val params = itemObj.getAsJsonObject("params")?.entrySet()?.associate { it.key to it.value.asString } ?: emptyMap()
+                val outputKey = itemObj.get("outputKey")?.takeIf { !it.isJsonNull }?.asString
+                val fallbackAction = itemObj.get("fallbackAction")?.takeIf { !it.isJsonNull }?.asString
 
                 stepsList.add(
                     ActionStep(
@@ -229,11 +255,17 @@ class GeminiPlanningProvider(
                         resourceId = resourceId,
                         contentDescription = contentDescription,
                         fallbackX = fallbackX,
-                        fallbackY = fallbackY
+                        fallbackY = fallbackY,
+                        dependsOn = dependsOn,
+                        params = params,
+                        outputKey = outputKey,
+                        fallbackAction = fallbackAction
                     )
                 )
             }
 
+            val validationError = com.example.automation.engine.planning.ActionPlanPolicy.validate(stepsList)
+            if (validationError != null) return@withContext PlanningResponse(false, errorMessage = validationError, rawResponse = textContent, tokenUsage = tokenUsage, durationMs = durationMs)
             PlanningResponse(
                 success = true,
                 plan = stepsList,
@@ -255,4 +287,6 @@ class GeminiPlanningProvider(
     companion object {
         private const val TAG = "GeminiPlanningProvider"
     }
+
+    private fun stepsJsonSize(value: String): Int = value.length.coerceAtMost(4096)
 }

@@ -25,7 +25,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-class FirestoreLicenseRepository(
+open class FirestoreLicenseRepository(
     private val firestore: FirebaseFirestore? = try {
         FirebaseFirestore.getInstance().apply {
             try {
@@ -56,7 +56,7 @@ class FirestoreLicenseRepository(
      * Sync user record in Firestore.
      * Records lastLoginAt as server timestamp and links current device.
      */
-    suspend fun syncUserProfile(
+    open suspend fun syncUserProfile(
         account: FirebaseUserAccount,
         currentDeviceId: String
     ): Result<Unit> = withContext(Dispatchers.IO) {
@@ -93,7 +93,7 @@ class FirestoreLicenseRepository(
      * Server timestamps are used so local clock tampering cannot forge trial duration.
      * Returning users receive their existing license and will NOT get a new trial.
      */
-    suspend fun getOrCreateLicense(userId: String): Result<CloudLicense> = withContext(Dispatchers.IO) {
+    open suspend fun getOrCreateLicense(userId: String): Result<CloudLicense> = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not initialized"))
         try {
             Log.d(TAG, "[License] entitlement_load_start user=${userId.take(6)}...")
@@ -145,7 +145,7 @@ class FirestoreLicenseRepository(
      * - Binds key permanently to current userId
      * - Upgrades user's entitlement to LIFETIME ACTIVE
      */
-    suspend fun claimLicenseKey(
+    open suspend fun claimLicenseKey(
         userId: String,
         rawKey: String
     ): Result<CloudLicense> = withContext(Dispatchers.IO) {
@@ -222,7 +222,7 @@ class FirestoreLicenseRepository(
     /**
      * Reads today's message count for the user.
      */
-    suspend fun getDailyUsage(
+    open suspend fun getDailyUsage(
         userId: String,
         period: String = getTodayPeriodKey()
     ): Long = withContext(Dispatchers.IO) {
@@ -248,10 +248,10 @@ class FirestoreLicenseRepository(
      * - Pair(currentCount, false) if daily limit (10) reached
      * - Throws Exception if trial expired or network/permission error
      */
-    suspend fun consumeDailyMessage(
+    open suspend fun consumeDailyMessage(
         userId: String,
         period: String = getTodayPeriodKey(),
-        maxDailyLimit: Long = 10L
+        maxDailyLimit: Long = 20L
     ): Result<Pair<Long, Boolean>> = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not initialized"))
         try {
@@ -372,7 +372,7 @@ class FirestoreLicenseRepository(
     /**
      * Real-time flow of license changes from Cloud Firestore.
      */
-    fun listenToLicense(userId: String): Flow<CloudLicense> = callbackFlow {
+    open fun listenToLicense(userId: String): Flow<CloudLicense> = callbackFlow {
         val db = firestore
         if (db == null) {
             trySend(CloudLicense.createFree(userId))
@@ -398,7 +398,7 @@ class FirestoreLicenseRepository(
     /**
      * Real-time flow of daily usage count.
      */
-    fun listenToDailyUsage(userId: String, period: String = getTodayPeriodKey()): Flow<Long> = callbackFlow {
+    open fun listenToDailyUsage(userId: String, period: String = getTodayPeriodKey()): Flow<Long> = callbackFlow {
         val db = firestore
         if (db == null) {
             trySend(0L)
@@ -424,7 +424,7 @@ class FirestoreLicenseRepository(
     /**
      * Register or update the app installation device.
      */
-    suspend fun registerDevice(
+    open suspend fun registerDevice(
         userId: String,
         deviceId: String,
         appVersion: String = "1.0"

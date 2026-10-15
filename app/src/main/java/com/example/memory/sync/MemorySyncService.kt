@@ -2,6 +2,8 @@ package com.example.memory.sync
 
 import android.content.Context
 import com.example.data.local.AppDatabase
+import com.example.memory.account.MemoryAccountScope
+import com.example.memory.account.MemorySession
 import com.example.memory.data.MemorySource
 import com.example.memory.data.MemoryType
 import com.example.memory.data.PermanentMemory
@@ -51,8 +53,11 @@ class MemorySyncService(private val context: Context) {
     private val syncStateDao = db.memorySyncStateDao()
 
     val maxDataBaseDir: File
-        get() {
-            val base = File(context.getExternalFilesDir(null) ?: context.filesDir, "MAX_DATA")
+        get() = dataDir(MemoryAccountScope.capture())
+
+    fun dataDir(session: MemorySession): File {
+            MemoryAccountScope.requireCurrent(session)
+            val base = File(File(context.getExternalFilesDir(null) ?: context.filesDir, "MAX_DATA"), MemoryAccountScope.directoryName(session))
             if (!base.exists()) base.mkdirs()
             File(base, "memory").mkdirs()
             File(base, "people").mkdirs()
@@ -62,8 +67,12 @@ class MemorySyncService(private val context: Context) {
     val maxMemoryFile: File
         get() = File(maxDataBaseDir, "MAX_MEMORY.md")
 
+    fun memoryFile(session: MemorySession): File = File(dataDir(session), "MAX_MEMORY.md")
+
     val maxMemoryBackupFile: File
         get() = File(maxDataBaseDir, "MAX_MEMORY.md.bak")
+
+    private fun backupFile(session: MemorySession) = File(dataDir(session), "MAX_MEMORY.md.bak")
 
     companion object {
         @Volatile
@@ -115,11 +124,13 @@ class MemorySyncService(private val context: Context) {
      * Projects current Room DB state into MAX_MEMORY.md atomically.
      * Writes to .tmp -> backup .bak -> rename .tmp -> update SHA-256 sync state.
      */
-    suspend fun exportToMarkdown(): String = withContext(Dispatchers.IO) {
-        val memories = memoryDao.getEnabled().map { decryptMemory(it) }
+    suspend fun exportToMarkdown(session: MemorySession = MemoryAccountScope.capture()): String = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
+        val memories = memoryDao.getEnabled(session.ownerKey).map { decryptMemory(it) }
+        MemoryAccountScope.requireCurrent(session)
         val markdownContent = generateProjectionMarkdown(memories)
 
-        val baseDir = maxDataBaseDir
+        val baseDir = dataDir(session)
         if (!baseDir.exists()) {
             baseDir.mkdirs()
         }
@@ -138,24 +149,27 @@ class MemorySyncService(private val context: Context) {
             }
 
             // 2. Backup existing valid file
-            if (maxMemoryFile.exists()) {
+            MemoryAccountScope.requireCurrent(session)
+            if (memoryFile(session).exists()) {
                 try {
-                    maxMemoryFile.copyTo(maxMemoryBackupFile, overwrite = true)
+                    memoryFile(session).copyTo(backupFile(session), overwrite = true)
                 } catch (e: Exception) {
                     // non-fatal
                 }
             }
 
             // 3. Atomically overwrite MAX_MEMORY.md
-            tempFile.copyTo(maxMemoryFile, overwrite = true)
+            MemoryAccountScope.requireCurrent(session)
+            tempFile.copyTo(memoryFile(session), overwrite = true)
             tempFile.delete()
 
             // 4. Calculate SHA-256 and update Room sync state
-            val fileHash = calculateFileSha256(maxMemoryFile)
+            val fileHash = calculateFileSha256(memoryFile(session))
             val now = System.currentTimeMillis()
 
             syncStateDao.insertOrUpdate(
                 MemorySyncState(
+                    ownerKey = session.ownerKey,
                     id = 1,
                     lastWrittenFileHash = fileHash,
                     lastSyncTimestamp = now,
@@ -167,23 +181,26 @@ class MemorySyncService(private val context: Context) {
 
             markdownContent
         } catch (e: Exception) {
-            syncStateDao.updateStatus("ERROR")
+            if (MemoryAccountScope.isCurrent(session)) syncStateDao.updateStatus("ERROR", session.ownerKey)
             if (tempFile.exists()) tempFile.delete()
             throw e
         }
     }
 
-    suspend fun getSyncState(): MemorySyncState? = withContext(Dispatchers.IO) {
-        syncStateDao.getSyncState()
+    suspend fun getSyncState(session: MemorySession = MemoryAccountScope.capture()): MemorySyncState? = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
+        syncStateDao.getSyncState(session.ownerKey)
     }
 
     /**
      * Checks if MAX_MEMORY.md has been modified outside MAX.
      * Compares disk SHA-256 against Room recorded lastWrittenFileHash.
      */
-    suspend fun detectExternalChanges(): ExternalChangeResult = withContext(Dispatchers.IO) {
-        val state = syncStateDao.getSyncState()
-        if (!maxMemoryFile.exists()) {
+    suspend fun detectExternalChanges(session: MemorySession = MemoryAccountScope.capture()): ExternalChangeResult = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
+        val state = syncStateDao.getSyncState(session.ownerKey)
+        val file = memoryFile(session)
+        if (!file.exists()) {
             return@withContext ExternalChangeResult(
                 hasChanges = false,
                 diskHash = null,
@@ -192,7 +209,7 @@ class MemorySyncService(private val context: Context) {
             )
         }
 
-        val diskHash = calculateFileSha256(maxMemoryFile)
+        val diskHash = calculateFileSha256(file)
         val dbHash = state?.lastWrittenFileHash
 
         if (dbHash == null) {
@@ -207,7 +224,8 @@ class MemorySyncService(private val context: Context) {
 
         val hasChanges = (diskHash != dbHash)
         if (hasChanges) {
-            syncStateDao.updateStatus("EXTERNAL_CHANGE")
+            MemoryAccountScope.requireCurrent(session)
+            syncStateDao.updateStatus("EXTERNAL_CHANGE", session.ownerKey)
         }
 
         ExternalChangeResult(
@@ -222,8 +240,10 @@ class MemorySyncService(private val context: Context) {
      * Generates a structural diff comparing external Markdown entries with current Room records.
      * GUARANTEE: Never modifies Room.
      */
-    suspend fun parseMarkdownDiff(): MarkdownDiffResult = withContext(Dispatchers.IO) {
-        if (!maxMemoryFile.exists()) {
+    suspend fun parseMarkdownDiff(session: MemorySession = MemoryAccountScope.capture()): MarkdownDiffResult = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
+        val file = memoryFile(session)
+        if (!file.exists()) {
             return@withContext MarkdownDiffResult(
                 hasDifferences = false,
                 added = emptyList(),
@@ -234,7 +254,7 @@ class MemorySyncService(private val context: Context) {
         }
 
         val fileContent = try {
-            maxMemoryFile.readText(Charsets.UTF_8)
+            file.readText(Charsets.UTF_8)
         } catch (e: Exception) {
             return@withContext MarkdownDiffResult(
                 hasDifferences = false,
@@ -247,7 +267,8 @@ class MemorySyncService(private val context: Context) {
         val errors = mutableListOf<String>()
         val parsedCandidates = ImportParsers.parseMarkdown(fileContent, errors)
 
-        val roomMemories = memoryDao.getAll().map { decryptMemory(it) }
+        MemoryAccountScope.requireCurrent(session)
+        val roomMemories = memoryDao.getAll(session.ownerKey).map { decryptMemory(it) }
         val roomMapByTitle = roomMemories.associateBy { it.title.trim().lowercase() }
         val roomMapByHash = roomMemories.associateBy { it.contentHash ?: it.effectiveContentHash() }
 
@@ -287,9 +308,11 @@ class MemorySyncService(private val context: Context) {
                 put("removedCount", removed.size)
                 put("timestamp", System.currentTimeMillis())
             }
-            syncStateDao.updatePendingChanges(pendingJsonObj.toString())
+            MemoryAccountScope.requireCurrent(session)
+            syncStateDao.updatePendingChanges(pendingJsonObj.toString(), session.ownerKey)
         } else {
-            syncStateDao.updatePendingChanges(null)
+            MemoryAccountScope.requireCurrent(session)
+            syncStateDao.updatePendingChanges(null, session.ownerKey)
         }
 
         MarkdownDiffResult(
@@ -308,19 +331,22 @@ class MemorySyncService(private val context: Context) {
     suspend fun applyExternalChanges(
         confirmedAdded: List<ImportCandidate>,
         confirmedModified: List<ImportCandidate>,
-        confirmedRemoveIds: List<String>
+        confirmedRemoveIds: List<String>,
+        session: MemorySession = MemoryAccountScope.capture()
     ): SyncCommitResult = withContext(Dispatchers.IO) {
         try {
+            MemoryAccountScope.requireCurrent(session)
             val now = System.currentTimeMillis()
 
             // 1. Delete removed
             for (id in confirmedRemoveIds) {
-                memoryDao.deleteById(id)
+                memoryDao.deleteById(id, session.ownerKey)
             }
 
             // 2. Insert added
             val toInsert = confirmedAdded.map { candidate ->
                 PermanentMemory(
+                    ownerKey = session.ownerKey,
                     memoryId = UUID.randomUUID().toString(),
                     title = candidate.title,
                     content = candidate.content,
@@ -350,7 +376,7 @@ class MemorySyncService(private val context: Context) {
             for (candidate in confirmedModified) {
                 val existingId = candidate.sourceRecordId
                 if (existingId != null) {
-                    val existing = memoryDao.getById(existingId)?.let { decryptMemory(it) }
+                    val existing = memoryDao.getById(existingId, session.ownerKey)?.let { decryptMemory(it) }
                     if (existing != null) {
                         val updated = existing.copy(
                             title = candidate.title,
@@ -368,9 +394,10 @@ class MemorySyncService(private val context: Context) {
             }
 
             // 4. Regenerate Markdown from resulting Room state and clear pending
-            exportToMarkdown()
-            syncStateDao.updatePendingChanges(null)
-            syncStateDao.updateStatus("IDLE")
+            exportToMarkdown(session)
+            MemoryAccountScope.requireCurrent(session)
+            syncStateDao.updatePendingChanges(null, session.ownerKey)
+            syncStateDao.updateStatus("IDLE", session.ownerKey)
 
             SyncCommitResult(
                 success = true,
@@ -393,12 +420,13 @@ class MemorySyncService(private val context: Context) {
     /**
      * Rejects external changes, keeping Room untouched and restoring MAX_MEMORY.md from Room.
      */
-    suspend fun rejectExternalChanges(): SyncCommitResult = withContext(Dispatchers.IO) {
+    suspend fun rejectExternalChanges(session: MemorySession = MemoryAccountScope.capture()): SyncCommitResult = withContext(Dispatchers.IO) {
         try {
             // Re-project Room to overwrite disk with authoritative Room state
-            exportToMarkdown()
-            syncStateDao.updatePendingChanges(null)
-            syncStateDao.updateStatus("IDLE")
+            exportToMarkdown(session)
+            MemoryAccountScope.requireCurrent(session)
+            syncStateDao.updatePendingChanges(null, session.ownerKey)
+            syncStateDao.updateStatus("IDLE", session.ownerKey)
             SyncCommitResult(
                 success = true,
                 addedCount = 0,

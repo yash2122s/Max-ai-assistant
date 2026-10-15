@@ -1,6 +1,7 @@
 package com.example.memory.universal
 
 import com.example.memory.data.MemoryType
+import com.example.memory.account.MemorySession
 import java.util.UUID
 
 enum class ImportProviderType {
@@ -50,7 +51,8 @@ data class ImportPreviewResult(
     val supersedeCount: Int,
     val duplicateCount: Int,
     val items: List<ImportPreviewItem>,
-    val parseErrors: List<String> = emptyList()
+    val parseErrors: List<String> = emptyList(),
+    val session: MemorySession? = null
 )
 
 data class ImportCommitResult(

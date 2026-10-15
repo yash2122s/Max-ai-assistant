@@ -14,7 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.*
@@ -27,19 +26,16 @@ fun CapabilitiesScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    Scaffold(
-        topBar = {
-            MaxTopBar(
-                title = "Capabilities Index",
-                onBackClick = onNavigateBack
-            )
-        },
-        containerColor = MaxBgDark
-    ) { padding ->
+    MaxScreen(
+        title = "Capabilities Index",
+        eyebrow = "REGISTRY",
+        auroraMode = AuroraMode.SUBTLE,
+        scrollable = false,
+        onBack = onNavigateBack
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .padding(horizontal = MaxDimensions.spaceMd)
         ) {
             Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
@@ -50,7 +46,7 @@ fun CapabilitiesScreen(
                 onValueChange = { viewModel.onSearchQueryChanged(it) },
                 label = "Search Tools & Actions",
                 placeholder = "e.g. bluetooth, FLASHLIGHT, youtube",
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaxTextMuted) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaxSemanticColors.textMuted) },
                 modifier = Modifier.fillMaxWidth()
             )
 
@@ -68,20 +64,20 @@ fun CapabilitiesScreen(
                     Column {
                         Text(
                             text = "Tool & Action Registry",
-                            fontSize = 15.sp,
+                            style = MaxType.Headline,
                             fontWeight = FontWeight.Bold,
-                            color = MaxTextPrimary
+                            color = MaxSemanticColors.textPrimary
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "${uiState.totalToolsCount} Tools • ${uiState.totalActionsCount} Execution Actions",
-                            fontSize = 12.sp,
-                            color = MaxTextMuted
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textSecondary
                         )
                     }
                     MaxStatusBadge(
                         label = "FROZEN",
-                        color = MaxPrimary
+                        color = MaxSemanticColors.accentCyan
                     )
                 }
             }
@@ -118,9 +114,9 @@ private fun CapabilityToolCard(
             ) {
                 Text(
                     text = tool.name,
-                    fontSize = 15.sp,
+                    style = MaxType.Headline,
                     fontWeight = FontWeight.Bold,
-                    color = MaxPrimary
+                    color = MaxSemanticColors.accentCyan
                 )
 
                 FlowRow(
@@ -128,13 +124,13 @@ private fun CapabilityToolCard(
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (tool.supportsPlanner) {
-                        BadgeTag(text = "PLANNER", color = MaxSecondary)
+                        BadgeTag(text = "PLANNER", color = MaxSemanticColors.primaryRoyal)
                     }
                     if (tool.requiresAccessibility) {
-                        BadgeTag(text = "ACCESSIBILITY", color = MaxPrimary)
+                        BadgeTag(text = "ACCESSIBILITY", color = MaxSemanticColors.accentCyan)
                     }
                     if (tool.requiresNetwork) {
-                        BadgeTag(text = "NETWORK", color = MaxTextMuted)
+                        BadgeTag(text = "NETWORK", color = MaxSemanticColors.textMuted)
                     }
                 }
             }
@@ -143,9 +139,8 @@ private fun CapabilityToolCard(
                 Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
                 Text(
                     text = "Supported Actions:",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaxTextMuted
+                    style = MaxType.Eyebrow,
+                    color = MaxSemanticColors.textMuted
                 )
                 Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
 
@@ -157,15 +152,15 @@ private fun CapabilityToolCard(
                     tool.supportedActions.forEach { action ->
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(MaxSurfaceVariant)
+                                .clip(RoundedCornerShape(MaxRadius.xs))
+                                .background(MaxSemanticColors.surfaceVariant)
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = action,
-                                fontSize = 10.sp,
+                                style = MaxType.Caption,
                                 fontWeight = FontWeight.Bold,
-                                color = MaxTextSecondary
+                                color = MaxSemanticColors.textSecondary
                             )
                         }
                     }
@@ -179,14 +174,13 @@ private fun CapabilityToolCard(
 private fun BadgeTag(text: String, color: androidx.compose.ui.graphics.Color) {
     Box(
         modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
+            .clip(RoundedCornerShape(MaxRadius.xs))
             .background(color.copy(alpha = 0.15f))
             .padding(horizontal = 5.dp, vertical = 2.dp)
     ) {
         Text(
             text = text,
-            fontSize = 9.sp,
-            fontWeight = FontWeight.Bold,
+            style = MaxType.Eyebrow,
             color = color
         )
     }

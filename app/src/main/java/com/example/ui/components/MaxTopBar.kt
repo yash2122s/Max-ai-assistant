@@ -1,7 +1,5 @@
 package com.example.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBackIos
@@ -10,14 +8,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
 
 /**
- * iOS-Style Translucent Navigation Top Bar with SF Pro Typography and Hairline Border.
+ * Modernized Navigation Top Bar with MaxType Typography and Semantic Colors.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -32,7 +28,7 @@ fun MaxTopBar(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = MaxBaseDark
+        color = MaxSemanticColors.background
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             TopAppBar(
@@ -43,18 +39,15 @@ fun MaxTopBar(
                     ) {
                         Text(
                             text = title,
+                            style = MaxType.Headline,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp,
-                            color = MaxTextPrimary,
-                            letterSpacing = (-0.3).sp
+                            color = MaxSemanticColors.textPrimary
                         )
                         if (subtitle != null) {
                             Text(
                                 text = subtitle,
-                                fontWeight = FontWeight.Normal,
-                                fontSize = 12.sp,
-                                color = MaxTextTertiary,
-                                letterSpacing = (-0.1).sp
+                                style = MaxType.Caption,
+                                color = MaxSemanticColors.textSecondary
                             )
                         }
                     }
@@ -65,24 +58,24 @@ fun MaxTopBar(
                     } else if (onBackClick != null) {
                         IconButton(
                             onClick = onBackClick,
-                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f, onClick = onBackClick)
+                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f)
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBackIos,
                                 contentDescription = "Back",
-                                tint = MaxPrimaryRoyal,
+                                tint = MaxSemanticColors.accentCyan,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
                     } else if (onMenuClick != null) {
                         IconButton(
                             onClick = onMenuClick,
-                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f, onClick = onMenuClick)
+                            modifier = Modifier.iosPressEffect(scalePressed = 0.90f, alphaPressed = 0.70f)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Menu,
                                 contentDescription = "Menu",
-                                tint = MaxTextPrimary,
+                                tint = MaxSemanticColors.textPrimary,
                                 modifier = Modifier.size(22.dp)
                             )
                         }
@@ -90,13 +83,13 @@ fun MaxTopBar(
                 },
                 actions = actions,
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaxBaseDark,
-                    titleContentColor = MaxTextPrimary,
-                    actionIconContentColor = MaxPrimaryRoyal
+                    containerColor = MaxSemanticColors.background,
+                    titleContentColor = MaxSemanticColors.textPrimary,
+                    actionIconContentColor = MaxSemanticColors.accentCyan
                 )
             )
             HorizontalDivider(
-                color = MaxBorderHairline.copy(alpha = 0.6f),
+                color = MaxSemanticColors.border,
                 thickness = MaxDimensions.borderHairline
             )
         }

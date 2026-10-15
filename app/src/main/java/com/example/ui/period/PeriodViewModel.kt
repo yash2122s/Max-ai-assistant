@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
 import com.example.data.local.PeriodLog
+import com.example.memory.account.MemoryAccountScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
@@ -27,7 +28,12 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
     val events: Flow<PeriodUiEvent> = _events.receiveAsFlow()
 
     val uiState: StateFlow<PeriodUiState> = combine(
-        dao.getAllPeriodsFlow(),
+        MemoryAccountScope.sessions.flatMapLatest { session ->
+            if (session.ownerKey == MemoryAccountScope.UNAVAILABLE) flowOf(emptyList())
+            else dao.getAllPeriodsFlow(session.ownerKey).map { logs ->
+                if (MemoryAccountScope.isCurrent(session)) logs else emptyList()
+            }.onStart { emit(emptyList()) }
+        },
         _isCreatingNew,
         _selectedLogForEdit
     ) { logs, isCreating, editLog ->
@@ -131,11 +137,13 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun startNewPeriod(notes: String = "") {
+        val session = MemoryAccountScope.capture()
         viewModelScope.launch(Dispatchers.IO) {
+            MemoryAccountScope.requireCurrent(session)
             val now = System.currentTimeMillis()
             val log = PeriodLog(
                 startDate = now,
-                notes = notes.ifBlank { null }
+                notes = notes.ifBlank { null }, ownerKey = session.ownerKey
             )
             dao.insertPeriod(log)
             _events.send(PeriodUiEvent.ShowToast("Period start logged"))
@@ -143,8 +151,10 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun endCurrentPeriod() {
+        val session = MemoryAccountScope.capture()
         viewModelScope.launch(Dispatchers.IO) {
-            val latest = dao.getLatestPeriod()
+            MemoryAccountScope.requireCurrent(session)
+            val latest = dao.getLatestPeriod(session.ownerKey)
             if (latest == null || latest.endDate != null) {
                 _events.send(PeriodUiEvent.ShowToast("No active ongoing period found"))
                 return@launch
@@ -153,7 +163,8 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
             val startLocal = epochToLocalDate(latest.startDate)
             val endLocal = epochToLocalDate(now)
             val duration = (ChronoUnit.DAYS.between(startLocal, endLocal).toInt() + 1).coerceAtLeast(1)
-            dao.updatePeriodEndDate(latest.id, now, duration)
+            MemoryAccountScope.requireCurrent(session)
+            dao.updatePeriodEndDate(latest.id, now, duration, session.ownerKey)
             _events.send(PeriodUiEvent.ShowToast("Period end logged ($duration days)"))
         }
     }
@@ -163,20 +174,23 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
         endDate: Long?,
         notes: String
     ) {
+        val session = MemoryAccountScope.capture()
+        val currentEdit = _selectedLogForEdit.value
         viewModelScope.launch(Dispatchers.IO) {
+            MemoryAccountScope.requireCurrent(session)
             val duration = if (endDate != null) {
                 val startLocal = epochToLocalDate(startDate)
                 val endLocal = epochToLocalDate(endDate)
                 (ChronoUnit.DAYS.between(startLocal, endLocal).toInt() + 1).coerceAtLeast(1)
             } else 0
 
-            val currentEdit = _selectedLogForEdit.value
             if (currentEdit != null) {
+                if (currentEdit.ownerKey != session.ownerKey) return@launch
                 val updated = currentEdit.copy(
                     startDate = startDate,
                     endDate = endDate,
                     durationDays = duration,
-                    notes = notes.ifBlank { null }
+                    notes = notes.ifBlank { null }, ownerKey = session.ownerKey
                 )
                 dao.insertPeriod(updated)
             } else {
@@ -184,7 +198,7 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
                     startDate = startDate,
                     endDate = endDate,
                     durationDays = duration,
-                    notes = notes.ifBlank { null }
+                    notes = notes.ifBlank { null }, ownerKey = session.ownerKey
                 )
                 dao.insertPeriod(newLog)
             }
@@ -194,8 +208,10 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deletePeriod(id: Int) {
+        val session = MemoryAccountScope.capture()
         viewModelScope.launch(Dispatchers.IO) {
-            dao.deletePeriod(id)
+            MemoryAccountScope.requireCurrent(session)
+            dao.deletePeriod(id, session.ownerKey)
             _events.send(PeriodUiEvent.ShowToast("Period log deleted"))
         }
     }
@@ -206,6 +222,8 @@ class PeriodViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun startEdit(log: PeriodLog) {
+        if (!MemoryAccountScope.isCurrent(MemoryAccountScope.capture()) ||
+            log.ownerKey != MemoryAccountScope.capture().ownerKey) return
         _selectedLogForEdit.value = log
         _isCreatingNew.value = false
     }

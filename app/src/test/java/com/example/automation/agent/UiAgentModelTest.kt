@@ -6,6 +6,8 @@ import com.example.data.preferences.SettingsManager
 import com.example.network.model.GeminiLiveModels
 import com.example.network.model.UiAgentModels
 import kotlinx.coroutines.runBlocking
+import java.net.HttpURLConnection
+import java.net.URL
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -125,5 +127,21 @@ class UiAgentModelTest {
         val settings = SettingsManager(context)
         settings.uiAgentModel = "gemini-2.0-flash"
         assertEquals(SettingsManager.DEFAULT_UI_AGENT_MODEL, settings.uiAgentModel)
+    }
+
+    @Test
+    fun testGeminiApiKeyUsesHeaderAndNeverAppearsInEndpoint() {
+        val secret = "test-secret-key"
+        val url = GeminiUiAgentProvider.buildGenerateContentUrl("gemini-2.5-flash")
+        assertFalse(url.contains(secret))
+        assertFalse(url.contains("?key="))
+
+        val connection = URL("http://localhost").openConnection() as HttpURLConnection
+        try {
+            GeminiUiAgentProvider.configureGeminiRequest(connection, secret)
+            assertEquals(secret, connection.getRequestProperty("x-goog-api-key"))
+        } finally {
+            connection.disconnect()
+        }
     }
 }

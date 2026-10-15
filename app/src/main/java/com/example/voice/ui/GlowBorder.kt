@@ -7,7 +7,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import com.example.ui.theme.GradientBorderColors
 
@@ -34,5 +36,9 @@ fun Modifier.glowBorder(
         tileMode = TileMode.Repeated
     )
 
-    return this.border(2.dp, brush, shape)
+    return this
+        .graphicsLayer {
+            compositingStrategy = CompositingStrategy.Offscreen
+        }
+        .border(2.dp, brush, shape)
 }

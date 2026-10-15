@@ -3,7 +3,6 @@ package com.example.firebase
 import android.content.Context
 import android.util.Log
 import com.google.firebase.FirebaseApp
-import com.google.firebase.FirebaseOptions
 
 object FirebaseInitHelper {
     private const val TAG = "FirebaseInitHelper"
@@ -18,13 +17,10 @@ object FirebaseInitHelper {
                 if (initialized != null) {
                     initialized
                 } else {
-                    // Safe fallback for Robolectric or test environments without google-services.json resource inflation
-                    val options = FirebaseOptions.Builder()
-                        .setApplicationId("com.maxaiagent.yash")
-                        .setProjectId("max-ai-assistant")
-                        .setApiKey("AIzaSyMockDevelopmentKeyForMaxAssistant")
-                        .build()
-                    FirebaseApp.initializeApp(context, options, "[DEFAULT]")
+                    // Missing resources are a configuration failure, not permission
+                    // to initialize a different project. Tests inject their SDK boundary.
+                    Log.w(TAG, "Firebase resources missing; initialization unavailable")
+                    null
                 }
             }
         } catch (e: Exception) {

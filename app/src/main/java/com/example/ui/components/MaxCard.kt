@@ -19,8 +19,8 @@ import com.example.ui.theme.*
 fun MaxCard(
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null,
-    backgroundColor: Color = MaxSurfaceCard,
-    borderColor: Color = MaxBorderHairline,
+    backgroundColor: Color = Color.Unspecified,
+    borderColor: Color = Color.Unspecified,
     borderWidth: Dp = MaxDimensions.borderHairline,
     shape: Shape? = null,
     cornerRadius: Dp = MaxDimensions.radiusXl,
@@ -28,12 +28,16 @@ fun MaxCard(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val isDark = LocalIsDarkMode.current
+    val actualBg = if (backgroundColor != Color.Unspecified) backgroundColor else if (isDark) MaxSurfaceCard else LuminousWhite
+    val actualBorder = if (borderColor != Color.Unspecified) borderColor else if (isDark) MaxBorderHairline else SoftRoseBorder
+    val actualSpecular = if (isDark) MaxBorderSpecular else SoftRoseBorderStrong
     val cardShape = shape ?: RoundedCornerShape(cornerRadius)
 
     val borderModifier = if (specularHighlight) {
-        Modifier.specularBorder(cardShape, borderWidth, MaxBorderSpecular, borderColor)
+        Modifier.specularBorder(cardShape, borderWidth, actualSpecular, actualBorder)
     } else {
-        Modifier.specularBorder(cardShape, borderWidth, borderColor, borderColor)
+        Modifier.specularBorder(cardShape, borderWidth, actualBorder, actualBorder)
     }
 
     Box(
@@ -41,7 +45,7 @@ fun MaxCard(
             .fillMaxWidth()
             .clip(cardShape)
             .then(borderModifier)
-            .background(backgroundColor)
+            .background(actualBg)
             .then(
                 if (onClick != null) {
                     Modifier.iosPressEffect(

@@ -7,7 +7,7 @@ import android.media.session.MediaSessionManager
 import android.util.Log
 import com.example.automation.engine.ExecutionRequest
 import com.example.automation.verification.RetryPolicy
-import com.example.service.WhatsAppNotificationService
+import com.example.features.whatsapp.WhatsAppNotificationService
 import org.json.JSONObject
 
 class MediaTool : Tool {

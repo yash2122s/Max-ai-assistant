@@ -10,7 +10,10 @@ data class ActionRecord(
     val actionName: String,
     val targetDescription: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val success: Boolean = true
+    val success: Boolean = true,
+    val verified: Boolean = success,
+    val taskId: String? = null,
+    val stepId: String? = null
 )
 
 data class ActionStep(
@@ -112,7 +115,8 @@ data class WorldState(
     val previousAction: ActionRecord? = null,
     val currentGoal: String? = null,
     val remainingSteps: List<ActionStep> = emptyList(),
-    val lastUpdatedTimestamp: Long = System.currentTimeMillis()
+    val lastUpdatedTimestamp: Long = System.currentTimeMillis(),
+    val currentTaskId: String? = null
 )
 
 object WorldStateManager {
@@ -154,18 +158,70 @@ object WorldStateManager {
         }
     }
 
-    fun setCurrentGoal(goal: String?, steps: List<ActionStep> = emptyList()) {
-        updateState { it.copy(currentGoal = goal, remainingSteps = steps) }
+    fun setCurrentGoal(goal: String?, steps: List<ActionStep> = emptyList(), taskId: String? = null) {
+        updateState { it.copy(currentGoal = goal, remainingSteps = steps, currentTaskId = taskId) }
     }
 
-    fun recordActionExecuted(actionName: String, targetDescription: String, success: Boolean = true) {
+    /**
+     * Records an action, but advances the plan only for the currently pending
+     * step after both execution and verification succeeded.
+     *
+     * The optional identity fields keep legacy callers source-compatible while
+     * allowing durable orchestrators to bind advancement to one task/step.
+     * The return value indicates whether a pending step was actually consumed.
+     */
+    fun recordActionExecuted(
+        actionName: String,
+        targetDescription: String,
+        success: Boolean = true,
+        verifiedSuccess: Boolean = false,
+        taskId: String? = null,
+        stepId: String? = null,
+        verified: Boolean? = null
+    ): Boolean {
+        var advanced = false
         updateState { state ->
-            val updatedRemaining = if (state.remainingSteps.isNotEmpty()) state.remainingSteps.drop(1) else emptyList()
+            val currentStep = state.remainingSteps.firstOrNull()
+            val taskMatches = taskId.isNullOrBlank() || taskId == state.currentTaskId
+            val stepMatches = stepId.isNullOrBlank() || stepId == currentStep?.stepId
+            val actionMatches = currentStep != null && normalizedAction(currentStep.actionType) == normalizedAction(actionName)
+            val targetMatches = currentStep != null && targetsMatch(currentStep, targetDescription)
+            val isVerified = verified ?: verifiedSuccess
+            val hasStepIdentity = !taskId.isNullOrBlank() && !stepId.isNullOrBlank()
+            val canAdvance = success && isVerified && hasStepIdentity && taskMatches && stepMatches && actionMatches && targetMatches
+            if (canAdvance) advanced = true
             state.copy(
-                previousAction = ActionRecord(actionName, targetDescription, success = success),
-                remainingSteps = updatedRemaining
+                previousAction = ActionRecord(
+                    actionName = actionName,
+                    targetDescription = targetDescription,
+                    success = success,
+                    verified = isVerified,
+                    taskId = taskId,
+                    stepId = stepId
+                ),
+                remainingSteps = if (canAdvance) state.remainingSteps.drop(1) else state.remainingSteps
             )
         }
+        return advanced
+    }
+
+    private fun normalizedAction(action: String): String = when (action.uppercase().trim()) {
+        "LAUNCH_APP", "OPEN_SETTINGS", "SETTINGS" -> "OPEN_APP"
+        else -> action.uppercase().trim()
+    }
+
+    private fun targetsMatch(step: ActionStep, executedTarget: String): Boolean {
+        val expected = listOfNotNull(
+            step.targetText,
+            step.resourceId,
+            step.contentDescription,
+            step.params["target"],
+            step.params["text"],
+            step.params["query"],
+            step.params["app"],
+            step.params["app_name"]
+        ).firstOrNull { it.isNotBlank() } ?: return true
+        return expected.trim().equals(executedTarget.trim(), ignoreCase = true)
     }
 
     fun reset() {

@@ -19,8 +19,8 @@ class MyApplication : Application() {
         val openAppTool = OpenAppTool(openAppAction)
 
         val flashlightTool = com.example.automation.tools.FlashlightTool()
-        val whatsAppTool = com.example.automation.tools.WhatsAppTool()
-        val whatsAppVerifier = com.example.automation.verification.WhatsAppVerifier()
+        val whatsAppTool = com.example.features.whatsapp.WhatsAppTool()
+        val whatsAppVerifier = com.example.features.whatsapp.WhatsAppVerifier()
 
         val scheduleTaskTool = com.example.automation.scheduler.ScheduleTaskTool()
         val cancelTaskTool = com.example.automation.scheduler.CancelTaskTool()
@@ -38,16 +38,16 @@ class MyApplication : Application() {
         val ringerTool = com.example.automation.tools.RingerTool(ringerAction)
         val ringerVerifier = com.example.automation.verification.RingerVerifier()
 
-        val callPhoneAction = com.example.automation.actions.CallPhoneAction()
-        val callTool = com.example.automation.tools.CallTool(callPhoneAction)
-        val callVerifier = com.example.automation.verification.CallVerifier()
+        val callPhoneAction = com.example.features.calls.actions.CallPhoneAction()
+        val callTool = com.example.features.calls.CallTool(callPhoneAction)
+        val callVerifier = com.example.features.calls.CallVerifier()
 
         val systemAction = com.example.automation.actions.SystemAction()
         val systemTool = com.example.automation.tools.SystemTool(systemAction)
         val systemVerifier = com.example.automation.verification.SystemVerifier()
 
-        val youtubeTool = com.example.automation.tools.YoutubeTool()
-        val youtubeVerifier = com.example.automation.verification.YoutubeVerifier()
+        val youtubeTool = com.example.features.youtube.YoutubeTool()
+        val youtubeVerifier = com.example.features.youtube.YoutubeVerifier()
 
         val wifiSettingsAction = com.example.automation.actions.WifiSettingsAction()
         val wifiTool = com.example.automation.tools.WifiTool(wifiSettingsAction)
@@ -104,11 +104,11 @@ class MyApplication : Application() {
         val searchContactTool = com.example.automation.tools.SearchContactTool(searchContactAction)
         val searchContactVerifier = com.example.automation.verification.SearchContactVerifier()
 
-        val answerCallAction = com.example.automation.actions.AnswerCallAction()
-        val answerCallTool = com.example.automation.tools.AnswerCallTool(answerCallAction)
+        val answerCallAction = com.example.features.calls.actions.AnswerCallAction()
+        val answerCallTool = com.example.features.calls.AnswerCallTool(answerCallAction)
         
-        val rejectCallAction = com.example.automation.actions.RejectCallAction()
-        val rejectCallTool = com.example.automation.tools.RejectCallTool(rejectCallAction)
+        val rejectCallAction = com.example.features.calls.actions.RejectCallAction()
+        val rejectCallTool = com.example.features.calls.RejectCallTool(rejectCallAction)
         
         val sendSmsAction = com.example.automation.actions.SendSmsAction()
         val smsTool = com.example.automation.tools.SmsTool(sendSmsAction)
@@ -136,9 +136,11 @@ class MyApplication : Application() {
         VerificationRegistry.register(com.example.automation.verification.PressEnterVerifier())
         VerificationRegistry.register(com.example.automation.verification.KeyboardActionVerifier())
         VerificationRegistry.register(com.example.automation.verification.WaitForUiVerifier())
+        VerificationRegistry.register(com.example.automation.verification.AlarmVerifier())
 
         ToolRegistry.register(openAppTool)
         ToolRegistry.register(com.example.automation.tools.WaitForUiTool())
+        ToolRegistry.register(com.example.automation.tools.WaitTool())
         ToolRegistry.register(flashlightTool)
         ToolRegistry.register(whatsAppTool)
         ToolRegistry.register(scheduleTaskTool)
@@ -188,6 +190,9 @@ class MyApplication : Application() {
         ToolRegistry.register(com.example.automation.tools.ComputerUseTool())
         ToolRegistry.register(com.example.automation.tools.KeyboardActionTool())
         ToolRegistry.register(com.example.automation.tools.ClearTextTool())
+        ToolRegistry.register(com.example.automation.tools.InspectScreenTool())
+        ToolRegistry.register(com.example.automation.tools.SpotifySearchTool())
+        ToolRegistry.register(com.example.automation.tools.InstagramBulkUnlikeTool())
 
         VerificationRegistry.freeze()
         ToolRegistry.freeze()
@@ -241,8 +246,24 @@ class MyApplication : Application() {
         })
 
         // Initialize Firebase Licensing and Entitlement System
-        val database = com.example.data.local.AppDatabase.getDatabase(this)
+         val database = com.example.data.local.AppDatabase.getDatabase(this)
         maxLicenseManager = com.example.firebase.manager.MaxLicenseManager(this)
+         com.example.memory.account.MemoryAccountScope.bind(maxLicenseManager.authManager)
+         com.example.memory.sync.MemorySyncQueueCoordinator.configure(
+             com.example.memory.sync.MemorySyncOperationQueue(
+                 database.memorySyncOperationDao(),
+                  com.example.memory.sync.FirestoreMemoryRemote(
+                      com.example.firebase.firestore.FirestoreMemoryRepository(this, maxLicenseManager.authManager)
+                  ),
+                  conflictDao = database.memoryConflictDao()
+             ),
+             consent = { com.example.data.preferences.SettingsManager(this).isCloudMemorySyncEnabled }
+         )
+        maxLicenseManager.authManager.addSessionInvalidationListener(this) {
+            com.example.memory.data.MemoryRepository.invalidateCachedContextIfInitialized()
+            com.example.rag.engine.RagEngine.invalidateCachedContextIfInitialized()
+            com.example.voice.assistant.AssistantLifecycleManager.getEngine()?.resetAccountContext()
+        }
         maxLicenseManager.initialize()
         entitlementGate = com.example.firebase.manager.EntitlementGate(this, maxLicenseManager)
 
@@ -261,8 +282,8 @@ class MyApplication : Application() {
         featureGate = com.example.license.entitlement.FeatureGate(entitlementManager)
         
         // Eagerly compute entitlement on startup and observe updates
-        entitlementManager.refresh()
-        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main).launch {
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            entitlementManager.refresh()
             maxLicenseManager.currentLicense.collect {
                 entitlementManager.refresh()
             }

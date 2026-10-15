@@ -21,6 +21,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
+import com.example.memory.account.MemoryAccountScope
 
 class MemoryViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -120,7 +121,9 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
         tags: String = "",
         isPrivate: Boolean = false
     ) {
+        val session = MemoryAccountScope.capture()
         viewModelScope.launch {
+            if (!MemoryAccountScope.isCurrent(session)) return@launch
             _isLoading.value = true
             _error.value = null
 
@@ -135,11 +138,12 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
             )
 
             when (val result = repository.addMemory(memory)) {
+                // Repository writes are session-bound; do not publish UI state after a switch.
                 is MemoryValidationResult.Success -> {
-                    _showAddDialog.value = false
+                    if (MemoryAccountScope.isCurrent(session)) _showAddDialog.value = false
                 }
                 is MemoryValidationResult.Error -> {
-                    _error.value = result.message
+                    if (MemoryAccountScope.isCurrent(session)) _error.value = result.message
                 }
             }
             _isLoading.value = false
@@ -147,17 +151,21 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun updateMemory(memory: PermanentMemory) {
+        val session = MemoryAccountScope.capture()
         viewModelScope.launch {
+            if (!MemoryAccountScope.isCurrent(session)) return@launch
             _isLoading.value = true
             _error.value = null
 
             when (val result = repository.updateMemory(memory)) {
                 is MemoryValidationResult.Success -> {
-                    _showEditDialog.value = false
-                    _editingMemory.value = null
+                    if (MemoryAccountScope.isCurrent(session)) {
+                        _showEditDialog.value = false
+                        _editingMemory.value = null
+                    }
                 }
                 is MemoryValidationResult.Error -> {
-                    _error.value = result.message
+                    if (MemoryAccountScope.isCurrent(session)) _error.value = result.message
                 }
             }
             _isLoading.value = false
@@ -165,10 +173,14 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun deleteMemory(memoryId: String) {
+        val session = MemoryAccountScope.capture()
         viewModelScope.launch {
+            if (!MemoryAccountScope.isCurrent(session)) return@launch
             repository.deleteById(memoryId)
-            _showDeleteConfirm.value = false
-            _deletingMemoryId.value = null
+            if (MemoryAccountScope.isCurrent(session)) {
+                _showDeleteConfirm.value = false
+                _deletingMemoryId.value = null
+            }
         }
     }
 
@@ -196,7 +208,9 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun replaceAllFromNotepad(rawText: String, isPrivate: Boolean) {
+        val session = MemoryAccountScope.capture()
         viewModelScope.launch {
+            if (!MemoryAccountScope.isCurrent(session)) return@launch
             val lines = rawText.lines()
             val newMemories = mutableListOf<PermanentMemory>()
             var currentCategory = if (isPrivate) "Private" else "General"
@@ -238,6 +252,7 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
             }
             
             if (newMemories.isNotEmpty()) {
+                if (!MemoryAccountScope.isCurrent(session)) return@launch
                 repository.replaceAllForSpace(newMemories, isPrivate)
             }
         }

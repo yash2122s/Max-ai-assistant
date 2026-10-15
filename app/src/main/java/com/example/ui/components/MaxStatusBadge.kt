@@ -20,7 +20,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.network.ConnectionState
 import com.example.ui.theme.*
 
@@ -31,10 +30,10 @@ fun MaxStatusBadge(
     modifier: Modifier = Modifier
 ) {
     val (bgColor, dotColor, text, isLive) = when {
-        !isMaxEnabled -> Quadruple(Color(0x2BFF453A), MaxDestructiveApple, "MAX OFF", false)
-        connectionState == ConnectionState.CONNECTED -> Quadruple(Color(0x2B30D158), MaxSuccessApple, "AUTONOMOUS LIVE", true)
-        connectionState == ConnectionState.CONNECTING -> Quadruple(Color(0x2BFF9F0A), MaxWarningApple, "CONNECTING...", true)
-        else -> Quadruple(Color(0x2B64748B), MaxTextTertiary, "STANDALONE", false)
+        !isMaxEnabled -> Quadruple(MaxSemanticColors.destructiveSurface, MaxSemanticColors.destructive, "MAX OFF", false)
+        connectionState == ConnectionState.CONNECTED -> Quadruple(MaxSemanticColors.successSurface, MaxSemanticColors.success, "AUTONOMOUS LIVE", true)
+        connectionState == ConnectionState.CONNECTING -> Quadruple(MaxSemanticColors.warningSurface, MaxSemanticColors.warning, "CONNECTING...", true)
+        else -> Quadruple(MaxSemanticColors.surfaceVariant, MaxSemanticColors.textMuted, "STANDALONE", false)
     }
 
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -70,10 +69,9 @@ fun MaxStatusBadge(
         )
         Text(
             text = text,
-            fontSize = 11.sp,
+            style = MaxType.Caption,
             fontWeight = FontWeight.Bold,
-            color = dotColor,
-            letterSpacing = 0.6.sp
+            color = dotColor
         )
     }
 }
@@ -81,7 +79,7 @@ fun MaxStatusBadge(
 @Composable
 fun MaxStatusBadge(
     label: String,
-    color: Color = MaxPrimaryRoyal,
+    color: Color = MaxSemanticColors.accentCyan,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -101,10 +99,9 @@ fun MaxStatusBadge(
         )
         Text(
             text = label,
-            fontSize = 11.sp,
+            style = MaxType.Caption,
             fontWeight = FontWeight.Bold,
-            color = color,
-            letterSpacing = 0.6.sp
+            color = color
         )
     }
 }

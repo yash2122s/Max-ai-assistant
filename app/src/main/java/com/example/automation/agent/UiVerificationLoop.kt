@@ -8,6 +8,10 @@ import com.example.voice.vision.ScreenCaptureProvider
 import com.example.voice.vision.ScreenContextProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
 
 /**
@@ -19,7 +23,13 @@ import kotlinx.coroutines.withContext
  */
 class UiVerificationLoop(
     private val context: Context,
-    private val router: UiAgentRouter = UiAgentRouter(context)
+    private val router: UiAgentRouter = UiAgentRouter(context),
+    private val decisionProvider: (suspend (UiTask, UiObservation, List<UiStepRecord>) -> Triple<UiAgentReasoningResult, String, String>)? = null,
+    private val actionExecutor: suspend (Context, UiAction) -> Boolean = { actionContext, action ->
+        UiActionExecutor.executeAction(actionContext, action)
+    },
+    private val observationProvider: (suspend () -> UiObservation)? = null,
+    private val adaptiveWait: (suspend (UiAction) -> Unit)? = null
 ) {
     companion object {
         private const val TAG = "UiVerificationLoop"
@@ -28,7 +38,10 @@ class UiVerificationLoop(
         private const val APP_LAUNCH_POLL_INTERVAL_MS = 150L
     }
 
-    suspend fun executeTask(task: UiTask): UiTaskResult = withContext(Dispatchers.Default) {
+    suspend fun executeTask(
+        task: UiTask,
+        cancellationToken: com.example.automation.engine.CancellationToken? = null
+    ): UiTaskResult = withContext(Dispatchers.Default) {
         val stepHistory = mutableListOf<UiStepRecord>()
         val actionsTaken = mutableListOf<UiAction>()
 
@@ -47,8 +60,7 @@ class UiVerificationLoop(
 
         Log.d(TAG, "Starting UI Automation Loop: '${task.goal}' (maxSteps=${task.maxSteps})")
 
-        var consecutiveNoOpCount = 0
-        var lastActionSignature: String? = null
+        val recoveryState = RecoveryState()
 
         val geminiProvider = GeminiUiAgentProvider()
         val openRouterProvider = OpenRouterUiAgentProvider()
@@ -56,6 +68,20 @@ class UiVerificationLoop(
 
         for (stepIndex in 1..task.maxSteps) {
             // Check cancellation & runtime status
+            if (cancellationToken?.isCancelled == true) {
+                Log.w(TAG, "UI Task cancelled by token at step $stepIndex.")
+                return@withContext UiTaskResult(
+                    taskId = task.id,
+                    success = false,
+                    message = "Task cancelled by caller.",
+                    stepsExecuted = stepIndex - 1,
+                    providerUsed = "none",
+                    modelUsed = "none",
+                    actionsTaken = actionsTaken,
+                    error = "CANCELLED"
+                )
+            }
+
             if (!MaxRuntimeManager.isMaxEnabled(context)) {
                 Log.w(TAG, "UI Task aborted at step $stepIndex: MAX turned OFF.")
                 return@withContext UiTaskResult(
@@ -71,97 +97,35 @@ class UiVerificationLoop(
             }
 
             Log.d(TAG, "── Step $stepIndex / ${task.maxSteps} ──")
-
-            // 1. OBSERVE: Current screen state & pruned accessibility hierarchy
-            val observationBefore = captureCurrentObservation()
-
-            // 2. DECIDE: Query primary provider with fallback to secondary provider
-            val (reasoningResult, providerUsed, modelUsed) = decideNextAction(
-                task = task,
-                observation = observationBefore,
-                stepHistory = stepHistory,
-                openRouterProvider = openRouterProvider,
-                geminiProvider = geminiProvider,
-                settings = settings
-            )
-
-            when (reasoningResult) {
-                is UiAgentReasoningResult.FinishTask -> {
-                    Log.d(TAG, "UI Agent completed goal: success=${reasoningResult.success}, message='${reasoningResult.message}'")
-                    return@withContext UiTaskResult(
-                        taskId = task.id,
-                        success = reasoningResult.success,
-                        message = reasoningResult.message,
-                        stepsExecuted = stepIndex,
-                        providerUsed = providerUsed,
-                        modelUsed = modelUsed,
-                        actionsTaken = actionsTaken
-                    )
-                }
-
-                is UiAgentReasoningResult.Error -> {
-                    Log.w(TAG, "Reasoning error at step $stepIndex [provider=$providerUsed, model=$modelUsed]: ${reasoningResult.message}")
-                    val cleanMessage = reasoningResult.message.ifBlank { "UI Agent is temporarily unavailable. Reconnecting..." }
-                    return@withContext UiTaskResult(
-                        taskId = task.id,
-                        success = false,
-                        message = cleanMessage,
-                        stepsExecuted = stepIndex,
-                        providerUsed = providerUsed,
-                        modelUsed = modelUsed,
+            val stepResult = try {
+                withTimeout(task.stepTimeoutMs.coerceAtLeast(1L)) {
+                    executeStep(
+                        task = task,
+                        stepIndex = stepIndex,
+                        stepHistory = stepHistory,
                         actionsTaken = actionsTaken,
-                        error = reasoningResult.errorCode ?: "REASONING_ERROR"
+                        cancellationToken = cancellationToken,
+                        openRouterProvider = openRouterProvider,
+                        geminiProvider = geminiProvider,
+                        settings = settings,
+                        recoveryState = recoveryState
                     )
                 }
-
-                is UiAgentReasoningResult.ActionDecision -> {
-                    val action = reasoningResult.action
-                    Log.d(TAG, "Action decision: ${action.type} (${action.reason})")
-                    actionsTaken.add(action)
-
-                    // 3. ACT: Execute the requested action on Android OS
-                    val executionSuccess = UiActionExecutor.executeAction(context, action)
-
-                    // 4. ADAPTIVE WAIT: Dynamic settle delays based on action type
-                    performAdaptiveWait(action)
-
-                    // 5. RE-OBSERVE: Capture updated screen state
-                    val observationAfter = captureCurrentObservation()
-
-                    // 6. VERIFY: Compare screen before vs after
-                    val (isVerified, note) = verifyActionOutcome(action, observationBefore, observationAfter)
-                    Log.d(TAG, "Step $stepIndex verification: verified=$isVerified ($note)")
-
-                    // 7. RECOVER: Detect stuck loops / repeated actions without state change
-                    val currentSignature = "${action.type}:${action.x}:${action.y}:${action.text}:${action.packageName}"
-                    val screenChanged = observationBefore.visibleText != observationAfter.visibleText ||
-                        observationBefore.foregroundPackage != observationAfter.foregroundPackage
-
-                    if (currentSignature == lastActionSignature && !screenChanged) {
-                        consecutiveNoOpCount++
-                        if (consecutiveNoOpCount >= 2) {
-                            Log.w(TAG, "Self-healing recovery triggered: repeated action with zero UI change. Dismissing keyboard/navigating back.")
-                            UiActionExecutor.executeAction(context, UiAction(type = UiAction.Type.KEY_BACK, reason = "Self-healing: dismiss blocking overlay/IME"))
-                            delay(400L)
-                            consecutiveNoOpCount = 0
-                        }
-                    } else {
-                        consecutiveNoOpCount = 0
-                    }
-                    lastActionSignature = currentSignature
-
-                    stepHistory.add(
-                        UiStepRecord(
-                            stepIndex = stepIndex,
-                            action = action.copy(isSuccess = executionSuccess),
-                            observationBefore = observationBefore,
-                            observationAfter = observationAfter,
-                            verified = isVerified,
-                            verificationNote = note
-                        )
-                    )
-                }
+            } catch (_: TimeoutCancellationException) {
+                Log.w(TAG, "UI step $stepIndex exceeded ${task.stepTimeoutMs}ms")
+                return@withContext UiTaskResult(
+                    taskId = task.id,
+                    success = false,
+                    message = "UI step $stepIndex timed out after ${task.stepTimeoutMs}ms.",
+                    stepsExecuted = stepIndex - 1,
+                    providerUsed = "provider-pipeline",
+                    modelUsed = "dynamic",
+                    actionsTaken = actionsTaken,
+                    error = "ACTION_TIMEOUT"
+                )
             }
+
+            if (stepResult != null) return@withContext stepResult
         }
 
         // Bounded loop completed without explicit finish
@@ -177,6 +141,227 @@ class UiVerificationLoop(
             error = "STEP_LIMIT_EXCEEDED"
         )
     }
+
+    private suspend fun executeStep(
+        task: UiTask,
+        stepIndex: Int,
+        stepHistory: MutableList<UiStepRecord>,
+        actionsTaken: MutableList<UiAction>,
+        cancellationToken: com.example.automation.engine.CancellationToken?,
+        openRouterProvider: OpenRouterUiAgentProvider,
+        geminiProvider: GeminiUiAgentProvider,
+        settings: SettingsManager,
+        recoveryState: RecoveryState
+    ): UiTaskResult? {
+        suspend fun cancellationResult(): UiTaskResult = UiTaskResult(
+            taskId = task.id,
+            success = false,
+            message = "Task cancelled by caller.",
+            stepsExecuted = stepIndex - 1,
+            providerUsed = "none",
+            modelUsed = "none",
+            actionsTaken = actionsTaken,
+            error = "CANCELLED"
+        )
+
+        fun isCancelled(): Boolean = cancellationToken?.isCancelled == true
+
+        if (isCancelled()) return cancellationResult()
+        currentCoroutineContext().ensureActive()
+
+        // 1. OBSERVE
+        val observationBefore = captureCurrentObservation()
+        if (isCancelled()) return cancellationResult()
+        currentCoroutineContext().ensureActive()
+
+        // 2. DECIDE
+        val (reasoningResult, providerUsed, modelUsed) = decisionProvider?.invoke(
+            task,
+            observationBefore,
+            stepHistory
+        ) ?: decideNextAction(
+            task = task,
+            observation = observationBefore,
+            stepHistory = stepHistory,
+            openRouterProvider = openRouterProvider,
+            geminiProvider = geminiProvider,
+            settings = settings
+        )
+        if (isCancelled()) return cancellationResult()
+        currentCoroutineContext().ensureActive()
+
+        when (reasoningResult) {
+            is UiAgentReasoningResult.FinishTask -> {
+                if (!reasoningResult.success) {
+                    return UiTaskResult(
+                        taskId = task.id,
+                        success = false,
+                        message = reasoningResult.message,
+                        stepsExecuted = stepIndex,
+                        providerUsed = providerUsed,
+                        modelUsed = modelUsed,
+                        actionsTaken = actionsTaken,
+                        error = "MODEL_REPORTED_FAILURE"
+                    )
+                }
+
+                // P0 completion gate: a model claim is never completion evidence.
+                val finalObservation = captureCurrentObservation()
+                val completion = UiTaskCompletionVerifier.verify(task, finalObservation, stepHistory)
+                if (!completion.verified) {
+                    Log.w(TAG, completion.message)
+                    return UiTaskResult(
+                        taskId = task.id,
+                        success = false,
+                        message = completion.message,
+                        stepsExecuted = stepIndex,
+                        providerUsed = providerUsed,
+                        modelUsed = modelUsed,
+                        actionsTaken = actionsTaken,
+                        error = completion.errorCode
+                    )
+                }
+
+                return UiTaskResult(
+                    taskId = task.id,
+                    success = true,
+                    message = reasoningResult.message.ifBlank { completion.message },
+                    stepsExecuted = stepIndex,
+                    providerUsed = providerUsed,
+                    modelUsed = modelUsed,
+                    actionsTaken = actionsTaken,
+                    completionVerified = true
+                )
+            }
+
+            is UiAgentReasoningResult.Error -> {
+                val cleanMessage = reasoningResult.message.ifBlank { "UI Agent is temporarily unavailable. Reconnecting..." }
+                return UiTaskResult(
+                    taskId = task.id,
+                    success = false,
+                    message = cleanMessage,
+                    stepsExecuted = stepIndex,
+                    providerUsed = providerUsed,
+                    modelUsed = modelUsed,
+                    actionsTaken = actionsTaken,
+                    error = reasoningResult.errorCode ?: "REASONING_ERROR"
+                )
+            }
+
+            is UiAgentReasoningResult.ActionDecision -> {
+                val action = reasoningResult.action
+                val targetPackage = task.targetPackage?.takeIf { it.isNotBlank() }
+                val displayMetrics = context.resources.displayMetrics
+                val actionIsValid = action.validate(
+                    displayWidth = displayMetrics.widthPixels,
+                    displayHeight = displayMetrics.heightPixels,
+                    observation = observationBefore
+                )
+                if (!actionIsValid) {
+                    return failedActionResult(task, stepIndex, providerUsed, modelUsed, actionsTaken, "ACTION_INVALID", "UI action ${action.type} has missing or unsafe parameters.")
+                }
+
+                if (targetPackage != null && action.type == UiAction.Type.LAUNCH_APP &&
+                    !action.packageName.equals(targetPackage, ignoreCase = true)
+                ) {
+                    return failedActionResult(task, stepIndex, providerUsed, modelUsed, actionsTaken, "PACKAGE_NOT_AUTHORIZED", "Launch package ${action.packageName} is not authorized for target package $targetPackage.")
+                }
+                if (targetPackage != null && action.type != UiAction.Type.LAUNCH_APP &&
+                    !observationBefore.foregroundPackage.equals(targetPackage, ignoreCase = true)
+                ) {
+                    return failedActionResult(task, stepIndex, providerUsed, modelUsed, actionsTaken, "WRONG_FOREGROUND_PACKAGE", "Foreground package is ${observationBefore.foregroundPackage}, expected $targetPackage.")
+                }
+
+                Log.d(TAG, "Action decision: ${action.type} (${action.reason})")
+                actionsTaken.add(action)
+
+                // 3. ACT. Check cancellation immediately before dispatch so a cancelled
+                // decision cannot launch an OS action.
+                if (isCancelled()) return cancellationResult()
+                currentCoroutineContext().ensureActive()
+                val executionSuccess = actionExecutor(context, action)
+                currentCoroutineContext().ensureActive()
+                if (isCancelled()) return cancellationResult()
+
+                // 4. WAIT
+                adaptiveWait?.invoke(action) ?: performAdaptiveWait(action)
+                currentCoroutineContext().ensureActive()
+                if (isCancelled()) return cancellationResult()
+
+                // 5. RE-OBSERVE (including after launch)
+                val observationAfter = captureCurrentObservation()
+                currentCoroutineContext().ensureActive()
+                if (isCancelled()) return cancellationResult()
+
+                // 6. VERIFY
+                val (isVerified, note) = verifyActionOutcome(action, observationBefore, observationAfter, targetPackage)
+                Log.d(TAG, "Step $stepIndex verification: verified=$isVerified ($note)")
+
+                // 7. RECOVER, bounded by the same step timeout.
+                val currentSignature = "${action.type}:${action.x}:${action.y}:${action.text}:${action.packageName}"
+                val screenChanged = observationBefore.visibleText != observationAfter.visibleText ||
+                    observationBefore.foregroundPackage != observationAfter.foregroundPackage
+                if (currentSignature == recoveryState.lastActionSignature && !screenChanged) {
+                    recoveryState.consecutiveNoOpCount++
+                    if (recoveryState.consecutiveNoOpCount >= 2) {
+                        UiActionExecutor.executeAction(context, UiAction(type = UiAction.Type.KEY_BACK, reason = "Self-healing: dismiss blocking overlay/IME"))
+                        delay(400L)
+                        recoveryState.consecutiveNoOpCount = 0
+                    }
+                } else {
+                    recoveryState.consecutiveNoOpCount = 0
+                }
+                recoveryState.lastActionSignature = currentSignature
+
+                stepHistory.add(
+                    UiStepRecord(
+                        stepIndex = stepIndex,
+                        action = action.copy(isSuccess = executionSuccess),
+                        observationBefore = observationBefore,
+                        observationAfter = observationAfter,
+                        verified = isVerified,
+                        verificationNote = note
+                    )
+                )
+
+                if (!executionSuccess || !isVerified) {
+                    val failureCode = if (!executionSuccess) "ACTION_EXECUTION_FAILED" else "ACTION_UNVERIFIED"
+                    val failureMessage = if (!executionSuccess) {
+                        "UI action ${action.type} failed to execute; task stopped before completion."
+                    } else {
+                        "UI action ${action.type} executed but was not locally verified; task stopped before completion."
+                    }
+                    return failedActionResult(task, stepIndex, providerUsed, modelUsed, actionsTaken, failureCode, failureMessage)
+                }
+            }
+        }
+
+        return null
+    }
+
+    private fun failedActionResult(
+        task: UiTask,
+        stepIndex: Int,
+        providerUsed: String,
+        modelUsed: String,
+        actionsTaken: List<UiAction>,
+        error: String,
+        message: String
+    ): UiTaskResult = UiTaskResult(
+        taskId = task.id,
+        success = false,
+        message = message,
+        stepsExecuted = stepIndex,
+        providerUsed = providerUsed,
+        modelUsed = modelUsed,
+        actionsTaken = actionsTaken,
+        error = error
+    )
+
+    private data class RecoveryState(
+        var consecutiveNoOpCount: Int = 0,
+        var lastActionSignature: String? = null
+    )
 
     private suspend fun decideNextAction(
         task: UiTask,
@@ -292,6 +477,8 @@ class UiVerificationLoop(
     }
 
     private suspend fun captureCurrentObservation(): UiObservation {
+        observationProvider?.let { return it.invoke() }
+
         val screenshot = ScreenCaptureProvider.captureCompressedJpeg()
         val screenContext = ScreenContextProvider.captureScreenContext(context)
 
@@ -307,8 +494,13 @@ class UiVerificationLoop(
     private fun verifyActionOutcome(
         action: UiAction,
         before: UiObservation,
-        after: UiObservation
+        after: UiObservation,
+        targetPackage: String?
     ): Pair<Boolean, String> {
+        if (targetPackage != null && !after.foregroundPackage.equals(targetPackage, ignoreCase = true)) {
+            return Pair(false, "Foreground package is ${after.foregroundPackage}, expected $targetPackage")
+        }
+
         return when (action.type) {
             UiAction.Type.LAUNCH_APP -> {
                 val target = action.packageName
@@ -320,18 +512,27 @@ class UiVerificationLoop(
             }
             UiAction.Type.TYPE -> {
                 val typed = action.text ?: ""
-                if (after.visibleText.contains(typed, ignoreCase = true)) {
+                if (typed.isNotBlank() && after.visibleText.contains(typed, ignoreCase = true)) {
                     Pair(true, "Typed text appears on screen")
                 } else {
-                    Pair(true, "Text input dispatched")
+                    Pair(false, "Typed text '$typed' not detected on screen after input")
                 }
             }
             UiAction.Type.KEY_BACK, UiAction.Type.KEY_HOME, UiAction.Type.KEY_ENTER -> {
-                Pair(true, "Navigation/action key dispatched")
+                val changed = before.visibleText != after.visibleText || before.foregroundPackage != after.foregroundPackage
+                if (changed) {
+                    Pair(true, "Navigation/action key triggered state transition")
+                } else {
+                    Pair(false, "Key event produced no detectable UI state transition")
+                }
             }
             UiAction.Type.TAP, UiAction.Type.LONG_PRESS, UiAction.Type.SWIPE, UiAction.Type.SCROLL -> {
                 val changed = before.visibleText != after.visibleText || before.foregroundPackage != after.foregroundPackage
-                Pair(true, if (changed) "Screen state changed" else "Action dispatched")
+                if (changed) {
+                    Pair(true, "Screen state changed")
+                } else {
+                    Pair(false, "Action produced no detectable UI change")
+                }
             }
             UiAction.Type.SCREENSHOT, UiAction.Type.FINISH -> Pair(true, "Verified")
         }

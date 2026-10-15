@@ -10,7 +10,12 @@ object NotificationAppAccessManager {
     fun isAppEnabled(context: Context, packageName: String): Boolean {
         if (packageName.isBlank()) return false
         val settings = SettingsManager(context)
-        val enabled = settings.isNotificationAppEnabled(packageName)
+        val isWhatsApp = packageName.contains("whatsapp", ignoreCase = true)
+        val enabled = if (isWhatsApp) {
+            settings.isWhatsAppAutoReplyEnabled || settings.isNotificationAppEnabled(packageName)
+        } else {
+            settings.isNotificationAppEnabled(packageName)
+        }
         if (!enabled) {
             Log.d(TAG, "PRIVACY GATE: Notification event from '$packageName' IGNORED IMMEDIATELY (MAX app access disabled).")
         } else {

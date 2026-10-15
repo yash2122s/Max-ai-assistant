@@ -3,9 +3,6 @@ package com.example.ui.permissions
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -17,7 +14,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -32,8 +28,7 @@ fun PermissionsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
-    val scrollState = rememberScrollState()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -77,30 +72,23 @@ fun PermissionsScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            MaxTopBar(
-                title = "Permissions & System",
-                onBackClick = onNavigateBack,
-                actions = {
-                    IconButton(onClick = { viewModel.refreshPermissions() }) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh",
-                            tint = MaxPrimary
-                        )
-                    }
-                }
-            )
-        },
-        containerColor = MaxBgDark
-    ) { padding ->
+    MaxScreen(
+        title = "Permissions & System",
+        eyebrow = "DIAGNOSTICS",
+        auroraMode = AuroraMode.NONE,
+        onBack = onNavigateBack,
+        topBarActions = {
+            IconButton(onClick = { viewModel.refreshPermissions() }) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Refresh",
+                    tint = MaxSemanticColors.accentCyan
+                )
+            }
+        }
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(scrollState)
-                .padding(horizontal = MaxDimensions.spaceMd, vertical = MaxDimensions.spaceSm),
+            modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceMd)
         ) {
             // Overview card
@@ -117,20 +105,20 @@ fun PermissionsScreen(
                     Column {
                         Text(
                             text = "System Readiness",
-                            fontSize = 16.sp,
+                            style = MaxType.Headline,
                             fontWeight = FontWeight.Bold,
-                            color = MaxTextPrimary
+                            color = MaxSemanticColors.textPrimary
                         )
                         Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
                         Text(
                             text = "$totalGranted of $totalItems permissions active",
-                            fontSize = 13.sp,
-                            color = MaxTextMuted
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textMuted
                         )
                     }
                     MaxStatusBadge(
                         label = if (totalGranted == totalItems) "OPTIMAL" else "PARTIAL",
-                        color = if (totalGranted == totalItems) MaxSuccess else AccentAmber
+                        color = if (totalGranted == totalItems) MaxSemanticColors.success else MaxSemanticColors.warning
                     )
                 }
             }
@@ -186,22 +174,22 @@ private fun PermissionCategorySection(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = MaxPrimary,
+                    tint = MaxSemanticColors.primaryRoyal,
                     modifier = Modifier.size(20.dp)
                 )
                 Text(
                     text = categoryTitle,
-                    fontSize = 14.sp,
+                    style = MaxType.Body,
                     fontWeight = FontWeight.Bold,
-                    color = MaxTextPrimary
+                    color = MaxSemanticColors.textPrimary
                 )
             }
             Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
             items.forEachIndexed { index, item ->
                 if (index > 0) {
                     HorizontalDivider(
-                        color = MaxBorder,
-                        thickness = 0.5.dp,
+                        color = MaxSemanticColors.border,
+                        thickness = MaxDimensions.borderHairline,
                         modifier = Modifier.padding(vertical = MaxDimensions.spaceSm)
                     )
                 }
@@ -232,25 +220,24 @@ private fun PermissionRow(
             ) {
                 Text(
                     text = item.title,
-                    fontSize = 14.sp,
+                    style = MaxType.Body,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaxTextPrimary
+                    color = MaxSemanticColors.textPrimary
                 )
                 if (item.isRequired) {
                     Text(
                         text = "REQUIRED",
-                        fontSize = 9.sp,
+                        style = MaxType.Eyebrow,
                         fontWeight = FontWeight.Bold,
-                        color = MaxPrimary
+                        color = MaxSemanticColors.accentCyan
                     )
                 }
             }
             Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
             Text(
                 text = item.description,
-                fontSize = 12.sp,
-                color = MaxTextMuted,
-                lineHeight = 16.sp
+                style = MaxType.Caption,
+                color = MaxSemanticColors.textMuted
             )
         }
         Spacer(modifier = Modifier.width(MaxDimensions.spaceSm))
@@ -258,8 +245,8 @@ private fun PermissionRow(
             Icon(
                 imageVector = Icons.Default.CheckCircle,
                 contentDescription = "Granted",
-                tint = MaxSuccess,
-                modifier = Modifier.size(24.dp)
+                tint = MaxSemanticColors.success,
+                modifier = Modifier.size(MaxIconTokens.Large)
             )
         } else {
             MaxButton(

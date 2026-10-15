@@ -26,6 +26,7 @@ object RagChunker {
                 RagChunk(
                     chunkId = chunkId,
                     memoryId = memory.memoryId,
+                    ownerKey = memory.ownerKey,
                     chunkIndex = 0,
                     content = fullContent,
                     contentHash = contentHash,
@@ -95,6 +96,7 @@ object RagChunker {
             RagChunk(
                 chunkId = chunkId,
                 memoryId = memory.memoryId,
+                ownerKey = memory.ownerKey,
                 chunkIndex = index,
                 content = text,
                 contentHash = contentHash,

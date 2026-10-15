@@ -10,7 +10,9 @@ data class TaskStep(
     val action: UiStep,
     val expectedOutcome: ExpectedOutcome?,
     var retryCount: Int = 0,
-    val maxRetries: Int = 2
+    val maxRetries: Int = 2,
+    var status: String = "READY",
+    var failureReason: String? = null
 ) {
     fun requiresRecovery(): Boolean = retryCount < maxRetries
 }

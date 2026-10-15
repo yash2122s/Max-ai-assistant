@@ -33,7 +33,7 @@ class SettingsManager(private val context: Context) {
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 )
             } catch (e: Exception) {
-                android.util.Log.e("SettingsManager", "Failed to initialize EncryptedSharedPreferences. Attempting recovery...", e)
+                android.util.Log.e("SettingsManager", "Encrypted preferences initialization failed; attempting encrypted recovery")
                 try {
                     // Try to delete corrupted shared prefs file and recreate
                     if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
@@ -50,8 +50,8 @@ class SettingsManager(private val context: Context) {
                         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                     )
                 } catch (recreateException: Exception) {
-                    android.util.Log.e("SettingsManager", "Recovery failed. Falling back to standard SharedPreferences to prevent crash", recreateException)
-                    prefs
+                    android.util.Log.e("SettingsManager", "Encrypted preferences recovery failed")
+                    throw IllegalStateException("Unable to initialize encrypted preferences", recreateException)
                 }
             }
         }
@@ -64,7 +64,7 @@ class SettingsManager(private val context: Context) {
             migrateSensitiveKey("cloud_app_secret")
             migrateSensitiveKey("ui_agent_api_key")
         } catch (e: Exception) {
-            android.util.Log.e("SettingsManager", "Error during sensitive key migration", e)
+            android.util.Log.e("SettingsManager", "Sensitive key migration failed")
         }
     }
 
@@ -88,7 +88,7 @@ class SettingsManager(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.w("SettingsManager", "Could not migrate sensitive key '$key': ${e.message}")
+            android.util.Log.w("SettingsManager", "Sensitive key migration failed")
         }
     }
 
@@ -102,6 +102,7 @@ class SettingsManager(private val context: Context) {
         private const val KEY_UI_AGENT_PROVIDER = "ui_agent_provider"
         private const val KEY_UI_AGENT_API_KEY = "ui_agent_api_key"
         private const val KEY_UI_AGENT_MODEL = "ui_agent_model"
+        private const val KEY_CLOUD_MEMORY_SYNC = "cloud_memory_sync_enabled"
 
         private const val DEFAULT_BACKEND_URL = "https://your-jarvis-backend.onrender.com"
         const val DEFAULT_UI_AGENT_PROVIDER = "openrouter"
@@ -155,6 +156,10 @@ class SettingsManager(private val context: Context) {
         get() = prefs.getString("cloud_ai_model", "groq") ?: "groq"
         set(value) = prefs.edit().putString("cloud_ai_model", value).apply()
 
+    var isDarkMode: Boolean
+        get() = prefs.getBoolean("is_dark_mode", false)
+        set(value) = prefs.edit().putBoolean("is_dark_mode", value).apply()
+
     var languagePreference: String
         get() = prefs.getString("language_preference", "Tinglish") ?: "Tinglish"
         set(value) = prefs.edit().putString("language_preference", value).apply()
@@ -175,6 +180,11 @@ class SettingsManager(private val context: Context) {
         AI_CONFIG_IN_PROGRESS,
         COMPLETED
     }
+
+    /** Explicit opt-in; absence is deliberately false. */
+    var isCloudMemorySyncEnabled: Boolean
+        get() = securePrefs.getBoolean(KEY_CLOUD_MEMORY_SYNC, false)
+        set(value) { securePrefs.edit().putBoolean(KEY_CLOUD_MEMORY_SYNC, value).apply() }
 
     var onboardingStage: OnboardingStage
         get() {
@@ -218,7 +228,7 @@ class SettingsManager(private val context: Context) {
     // --- Agentic Loop Settings ---
 
     var isAgenticModeEnabled: Boolean
-        get() = prefs.getBoolean("agentic_mode_enabled", false)
+        get() = prefs.getBoolean("agentic_mode_enabled", true)
         set(value) = prefs.edit().putBoolean("agentic_mode_enabled", value).apply()
 
     var agenticMaxIterations: Int
@@ -292,6 +302,11 @@ class SettingsManager(private val context: Context) {
         get() = prefs.getString("approval_allowlist", "") ?: ""
         set(value) = prefs.edit().putString("approval_allowlist", value).apply()
 
+    /** Whether Dynamic HUD overlay only shows during active voice/assistant sessions (default true). */
+    var overlayOnlyInVoiceMode: Boolean
+        get() = prefs.getBoolean("overlay_only_in_voice_mode", true)
+        set(value) = prefs.edit().putBoolean("overlay_only_in_voice_mode", value).apply()
+
     // --- Native RAG Subsystem Settings ---
 
     var isRagEnabled: Boolean
@@ -347,7 +362,7 @@ class SettingsManager(private val context: Context) {
 
     /** The Gemini model to use for Live audio sessions. */
     var liveVoiceModelName: String
-        get() = prefs.getString("live_voice_model_name", "gemini-3.8-live") ?: "gemini-3.8-live"
+        get() = prefs.getString("live_voice_model_name", com.example.network.model.GeminiLiveModels.FAST) ?: com.example.network.model.GeminiLiveModels.FAST
         set(value) = prefs.edit().putString("live_voice_model_name", value).apply()
 
     /** Model routing mode: AUTO, FAST, DEEP. Default: AUTO */
@@ -355,10 +370,19 @@ class SettingsManager(private val context: Context) {
         get() = prefs.getString("model_routing_mode", "AUTO") ?: "AUTO"
         set(value) = prefs.edit().putString("model_routing_mode", value).apply()
 
-    /** Voice persona for Gemini Live audio output. Options: Aoede, Kore, Fenrir, Puck, etc. */
+    var liveThinkingLevel: com.example.network.model.LiveThinkingLevel
+        get() = runCatching {
+            com.example.network.model.LiveThinkingLevel.valueOf(prefs.getString("live_thinking_level", "HIGH") ?: "HIGH")
+        }.getOrDefault(com.example.network.model.LiveThinkingLevel.HIGH)
+        set(value) = prefs.edit().putString("live_thinking_level", value.name).apply()
+
+    /** Voice persona for Gemini Live audio output. Options: Sulafat, Aoede, Kore, Fenrir, Puck, Algieba, etc. */
     var liveVoiceName: String
-        get() = prefs.getString("live_voice_name", "Aoede") ?: "Aoede"
+        get() = prefs.getString("live_voice_name", com.example.network.PromptBuilder.DEFAULT_VOICE_NAME) ?: com.example.network.PromptBuilder.DEFAULT_VOICE_NAME
         set(value) = prefs.edit().putString("live_voice_name", value).apply()
+
+    val isMaleVoice: Boolean
+        get() = com.example.network.PromptBuilder.isMaleVoice(liveVoiceName)
 
     /** When true, Gemini Extended Thinking thought summaries are streamed and visible in UI. */
     var isThinkingObservabilityEnabled: Boolean
@@ -376,7 +400,19 @@ class SettingsManager(private val context: Context) {
 
     var isWhatsAppAutoReplyEnabled: Boolean
         get() = prefs.getBoolean("whatsapp_auto_reply_enabled", false)
-        set(value) = prefs.edit().putBoolean("whatsapp_auto_reply_enabled", value).apply()
+        set(value) {
+            prefs.edit().putBoolean("whatsapp_auto_reply_enabled", value).apply()
+            setNotificationAppEnabled("com.whatsapp", value)
+            setNotificationAppEnabled("com.whatsapp.w4b", value)
+        }
+
+    var whatsappAutoReplyScope: String
+        get() = prefs.getString("whatsapp_auto_reply_scope", "ALL") ?: "ALL"
+        set(value) = prefs.edit().putString("whatsapp_auto_reply_scope", value).apply()
+
+    var whatsappSelectedContacts: Set<String>
+        get() = prefs.getStringSet("whatsapp_selected_contacts", emptySet()) ?: emptySet()
+        set(value) = prefs.edit().putStringSet("whatsapp_selected_contacts", value).apply()
 
     // --- UI Automation Agent Settings (OpenRouter Primary / Ox Alpha / Gemini Fallback) ---
 
@@ -421,4 +457,3 @@ class SettingsManager(private val context: Context) {
         get() = prefs.getBoolean(KEY_MAX_ENABLED, true)
         set(value) { prefs.edit().putBoolean(KEY_MAX_ENABLED, value).commit() }
 }
-

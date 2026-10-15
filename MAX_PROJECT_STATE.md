@@ -16,6 +16,10 @@
 
 ## Feature Status
 
+### IN PROGRESS — Live extended-thinking agent verification (2026-10-04)
+
+AUTO now selects the extended-thinking Live model. Protocol lifecycle, thought suppression, tool cancellation/deduplication, verified planner advancement, persisted replans, and semantic observation guards are implemented and covered by focused regressions (139 passed). App and test APK builds pass. Final full suite: 860 tests, 3 REST UI-agent model-expectation failures. Device install blocked: ADB could not find `3bc00016`. Full autonomous/device acceptance is **not complete**. See `docs/plans/live-extended-thinking/REPORT.md`.
+
 ### COMPLETED ✅
 
 | Feature | Status Notes |
@@ -42,7 +46,7 @@
 | **AssistantEngine** | Full session lifecycle, barge-in, audio stutter fix, WS keep-alive |
 | **Tool Calling (45 tools)** | All tools registered in MyApplication; ToolDispatcher wired to GeminiWebSocketClient |
 | **ActionDispatcher / ExecutionEngine** | Verified retry+verification loop, 25s timeout |
-| **WhatsApp Send** | Deep-link (phone#) + search-based accessibility automation both working |
+| **WhatsApp Send & Full UI Interaction Upgrade** | Complete overhaul of WhatsApp automation: 6-step verified accessibility state machine (active chat check, search typing, row selection, message insertion, send button click with Telugu labels, post-send verification), screen/tab navigation (`chats`, `updates`/`status`, `calls`, `communities`, `settings`, `new_chat`, `linked_devices`, `starred_messages`), contact chat opening, zero-latency direct routing, offline voice command engine pattern matching in Telugu/Tinglish/English, and strict action authorization. |
 | **WhatsApp Auto-Reply** | AutoReplyController with AI fallback; notification listener working |
 | **Telegram Bot** | Long-polling foreground service; 5-command whitelist (FLASHLIGHT_ON/OFF, GET_LOCATION, TAKE_SCREENSHOT, HELP) |
 | **Incoming Call Assistant (Complete Flow)** | Full end-to-end incoming call detection, state tracking (`IncomingCallFlowState`), layered caller resolution (`PhoneLookup`, `CommonDataKinds.Phone`, `JarvisAccessibilityService` 6-retry scraping window, `CallLog.Calls`, and "Unknown caller" fallback), natural voice announcement, automatic microphone listening (`startListening()`), Gemini Live tool declarations & routing for `answer_call` / `reject_call`, dual-path call control (`TelecomManager` API + `JarvisAccessibilityService` gestures), busy message follow-up prompts with SMS (`SmsTool` / `SendSmsAction`) and WhatsApp (`WhatsAppController`), clean state reset on IDLE, and targeted logging. Verified on Redmi K20 Pro (`3bc00016`). |

@@ -54,6 +54,9 @@ class RagEndToEndFunctionalVerificationTest {
         settingsManager.ragTopK = 5
         settingsManager.ragMinRelevance = 0.20f
         settingsManager.ragMaxContextCharacters = 6000
+        runBlocking {
+            db.ragChunkDao().deleteAll()
+        }
     }
 
     @Test
@@ -301,6 +304,7 @@ class RagEndToEndFunctionalVerificationTest {
 
     @Test
     fun test08_RagFailureTest() = runBlocking {
+        ragEngine.clearIndex()
         val assistantUseCase = AssistantUseCase(context)
 
         // When RAG throws or is empty, getRagContext must safely return empty string

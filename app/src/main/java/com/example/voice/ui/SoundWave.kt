@@ -52,6 +52,9 @@ fun SoundWave(
         modifier = modifier
             .height(36.dp)
             .width(64.dp)
+            .graphicsLayer {
+                compositingStrategy = CompositingStrategy.Offscreen
+            }
     ) {
         val width = size.width
         val height = size.height

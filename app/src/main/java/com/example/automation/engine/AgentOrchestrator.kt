@@ -14,6 +14,7 @@ import com.example.voice.vision.ScreenCaptureProvider
 import com.example.voice.vision.VisionReasoner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 class AgentOrchestrator(
     private val context: Context,
@@ -32,10 +33,154 @@ class AgentOrchestrator(
         if (classification.routeType == IntentRouteType.DIRECT_FAST_PATH) {
             val toolName = classification.targetToolName ?: "unknown"
             Log.d(TAG, "Executing fast-path direct tool: '$toolName'")
-            // Record execution in WorldState
-            WorldStateManager.recordActionExecuted(toolName, "Fast-path execution for '$prompt'")
+            val action = when (toolName) {
+                "open_app" -> "OPEN_APP"
+                "flashlight" -> if (classification.extractedArgs["enabled"] == false) "FLASHLIGHT_OFF" else "FLASHLIGHT_ON"
+                "set_dnd" -> "SET_DND"
+                "get_battery_status" -> "GET_BATTERY_STATUS"
+                else -> null
+            }
+            if (action == null) {
+                return@withContext "Fast-path rejected: unsupported direct tool '$toolName'."
+            }
+
+            // Task-scoped execution truth contract
+            val taskId = "task_fast_" + java.util.UUID.randomUUID().toString().take(8)
+            val stepId = "step_1"
+            val execId = java.util.UUID.randomUUID().toString()
+            val store = runCatching { com.example.automation.engine.state.AgentTaskStore(context.applicationContext) }.getOrNull()
+
+            store?.createTask(taskId = taskId, goal = prompt, totalSteps = 1, source = "FAST_PATH")
+            store?.updateStep(
+                taskId = taskId,
+                step = com.example.automation.state.ActionStep(stepId = stepId, actionType = action),
+                stepIndex = 0,
+                status = "READY",
+                executionId = execId
+            )
+
+            // Authorize action
+            val target = classification.extractedArgs["app"]?.toString()
+                ?: classification.extractedArgs["target"]?.toString()
+                ?: action
+            val auth = com.example.automation.engine.ActionAuthorizer.authorizeAction(prompt, action, target)
+            if (!auth.authorized) {
+                store?.transitionStep(
+                    taskId = taskId,
+                    stepId = stepId,
+                    executionId = execId,
+                    targetStatus = com.example.automation.engine.truth.TaskTransitionAuthority.STATUS_FAILED,
+                    actor = "ExecutionEngine",
+                    failureReason = auth.reason
+                )
+                com.example.automation.engine.truth.ExecutionTruthCoordinator.recordExecution(
+                    taskId = taskId,
+                    stepId = stepId,
+                    executionId = execId,
+                    actionName = action,
+                    executorSuccess = false,
+                    verifiedSuccess = false,
+                    failureReason = auth.reason,
+                    message = "Action blocked by authorizer"
+                )
+                return@withContext "Fast-path blocked: ${auth.reason}"
+            }
+
+            val args = JSONObject().apply {
+                put("action", action)
+                classification.extractedArgs.forEach { (key, value) -> put(key, value) }
+                put("last_input_transcription", prompt)
+                put("taskId", taskId)
+                put("stepId", stepId)
+                put("executionId", execId)
+            }
+
+            store?.transitionStep(
+                taskId = taskId,
+                stepId = stepId,
+                executionId = execId,
+                targetStatus = com.example.automation.engine.truth.TaskTransitionAuthority.STATUS_DISPATCHING,
+                actor = "CanonicalRequestAdapter"
+            )
+            store?.transitionStep(
+                taskId = taskId,
+                stepId = stepId,
+                executionId = execId,
+                targetStatus = com.example.automation.engine.truth.TaskTransitionAuthority.STATUS_RUNNING,
+                actor = "ExecutionEngine"
+            )
+
+            val result = com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, args)
+            val resultJson = runCatching { JSONObject(result) }.getOrNull()
+            val succeeded = resultJson?.optBoolean("success", false) == true &&
+                resultJson.optString("executionState") == "COMPLETED" &&
+                resultJson.optString("verificationStatus") == "VERIFIED"
+            val errorMsg = resultJson?.optString("message")?.ifEmpty { resultJson.optString("reason") }
+
+            store?.transitionStep(
+                taskId = taskId,
+                stepId = stepId,
+                executionId = execId,
+                targetStatus = com.example.automation.engine.truth.TaskTransitionAuthority.STATUS_VERIFYING,
+                actor = "ExecutionEngine",
+                executorResultJson = result
+            )
+
+            if (succeeded) {
+                store?.transitionStep(
+                    taskId = taskId,
+                    stepId = stepId,
+                    executionId = execId,
+                    targetStatus = com.example.automation.engine.truth.TaskTransitionAuthority.STATUS_SUCCEEDED,
+                    actor = "VERIFIER",
+                    verificationEvidence = "Fast-path execution verified",
+                    executorResultJson = result
+                )
+                WorldStateManager.recordActionExecuted(
+                    actionName = action,
+                    targetDescription = target,
+                    success = true,
+                    verifiedSuccess = true,
+                    taskId = taskId,
+                    stepId = stepId
+                )
+            } else {
+                store?.transitionStep(
+                    taskId = taskId,
+                    stepId = stepId,
+                    executionId = execId,
+                    targetStatus = com.example.automation.engine.truth.TaskTransitionAuthority.STATUS_FAILED,
+                    actor = "VERIFIER",
+                    failureReason = errorMsg ?: "Fast-path execution failed",
+                    executorResultJson = result
+                )
+                WorldStateManager.recordActionExecuted(
+                    actionName = action,
+                    targetDescription = target,
+                    success = false,
+                    verifiedSuccess = false,
+                    taskId = taskId,
+                    stepId = stepId
+                )
+            }
+
+            com.example.automation.engine.truth.ExecutionTruthCoordinator.recordExecution(
+                taskId = taskId,
+                stepId = stepId,
+                executionId = execId,
+                actionName = action,
+                executorSuccess = succeeded,
+                verifiedSuccess = succeeded,
+                failureReason = if (!succeeded) errorMsg else null,
+                message = if (succeeded) "Fast-path verified" else errorMsg
+            )
+
             val totalLatency = System.currentTimeMillis() - totalStartTime
-            return@withContext "Fast-path executed tool '$toolName' in ${totalLatency}ms."
+            return@withContext if (succeeded) {
+                "Fast-path verified tool '$toolName' in ${totalLatency}ms."
+            } else {
+                "Fast-path failed for '$toolName': ${errorMsg.orEmpty()}"
+            }
         }
 
         // 2. Complex Vision Path - Perception & World State Update

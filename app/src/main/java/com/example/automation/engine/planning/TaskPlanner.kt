@@ -26,14 +26,27 @@ class TaskPlanner(
             else -> routeTier3LongHorizon(taskIntent, originalUtterance)
         }
 
+        val missingInput = if (steps.isEmpty()) missingInputQuestion(originalUtterance) else null
+        if (missingInput != null) taskContext.variables["needs_input"] = missingInput
+
         return AgentTask(
             id = UUID.randomUUID().toString(),
             originalIntent = originalUtterance,
             goal = taskIntent.goal,
             steps = steps,
-            status = TaskStatus.PLANNING,
+            status = if (missingInput != null) TaskStatus.WAITING_FOR_INPUT else TaskStatus.PLANNING,
             context = taskContext
         )
+    }
+
+    private fun missingInputQuestion(utterance: String): String? {
+        val text = utterance.lowercase()
+        return when {
+            text.contains("whatsapp") -> "Who should receive the WhatsApp message, and what exact message should MAX send?"
+            text.contains("maps") || text.contains("navigate") || text.contains("direction") -> "What exact destination should MAX use?"
+            text.contains("chrome") -> "What exact search query or URL should MAX open in Chrome?"
+            else -> null
+        }
     }
 
     // =========================================================================
@@ -123,8 +136,7 @@ class TaskPlanner(
                 }
             }
 
-            if (contact.isBlank()) contact = "Yash"
-            if (message.isBlank()) message = "I am in a meeting right now and will call back later."
+            if (contact.isBlank() || message.isBlank()) return emptyList()
             
             return listOf(
                 TaskStep("wa_1", UiStep.OpenApp(targetApp), ExpectedOutcome.PackageForeground(targetApp)),
@@ -142,8 +154,9 @@ class TaskPlanner(
             var destination = intent.parameters["destination"] ?: intent.parameters["query"] ?: intent.parameters["location"] ?: ""
             if (destination.isBlank()) {
                 val toMatch = Regex("""(?i)(?:search|to|towards|navigate to|directions to)\s+([^,]+)""").find(originalUtterance)
-                destination = toMatch?.groupValues?.get(1)?.trim() ?: "Palakollu to Bhimavaram"
+                destination = toMatch?.groupValues?.get(1)?.trim() ?: ""
             }
+            if (destination.isBlank()) return emptyList()
 
             return listOf(
                 TaskStep("maps_1", UiStep.OpenApp(appName = "Google Maps", packageName = targetApp), ExpectedOutcome.PackageForeground(targetApp)),
@@ -160,8 +173,10 @@ class TaskPlanner(
             var query = intent.parameters["query"] ?: intent.parameters["search"] ?: ""
             if (query.isBlank()) {
                 val qMatch = Regex("""(?i)(?:search|open|find)\s+([a-zA-Z0-9\s]+?)(?:,\s*open|\s+and\s+open|\s+then|\s+and|$)""").find(originalUtterance)
-                query = qMatch?.groupValues?.get(1)?.replace(Regex("(?i)chrome"), "")?.trim() ?: "YouTube"
+                query = qMatch?.groupValues?.get(1)?.replace(Regex("(?i)chrome"), "")?.trim() ?: ""
+                if (query.lowercase() in setOf("in", "on", "with", "using", "for")) query = ""
             }
+            if (query.isBlank()) return emptyList()
 
             val steps = mutableListOf(
                 TaskStep("ch_1", UiStep.OpenApp(appName = "Chrome", packageName = targetApp), ExpectedOutcome.PackageForeground(targetApp)),
@@ -292,7 +307,11 @@ class TaskPlanner(
             )
             val result = provider.generatePlan(request)
             if (result.success && result.plan.isNotEmpty()) {
-                val validationError = com.example.automation.engine.GoalPlanner.validatePlan(result.plan, task.goal)
+                val validationError = com.example.automation.engine.GoalPlanner.validatePlan(
+                    result.plan,
+                    task.goal,
+                    ActionPlanPolicy.MAX_REPLAN_STEPS
+                )
                 if (validationError != null) {
                     android.util.Log.w("TaskPlanner", "Replanned steps failed validation: $validationError")
                     return false

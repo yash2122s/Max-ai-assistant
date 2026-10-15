@@ -63,7 +63,7 @@ object InputVerifier {
                 if (targetNode != null && targetNode.refresh()) {
                     val updatedText = targetNode.text?.toString() ?: ""
                     if (isTextMatch(updatedText, normExpected, replace, originalText)) {
-                        Log.d(TAG, "Text verified on targetNode: '$updatedText'")
+                        Log.d(TAG, "Text verified on targetNode: '${maskSensitive(updatedText)}'")
                         return true
                     }
                 }
@@ -92,7 +92,7 @@ object InputVerifier {
                 if (focused != null) {
                     val focusedText = focused.text?.toString() ?: ""
                     if (isTextMatch(focusedText, normExpected, replace, originalText)) {
-                        Log.d(TAG, "Text verified via fresh focused node: '$focusedText'")
+                        Log.d(TAG, "Text verified via fresh focused node: '${maskSensitive(focusedText)}'")
                         return true
                     }
                 }
@@ -112,19 +112,12 @@ object InputVerifier {
                         }
                     }
                 }
-
-                // Any visible text containing expected substring
-                val allTexts = collectAllVisibleTexts(freshRoot)
-                if (allTexts.any { normalizeText(it).contains(normExpected) }) {
-                    Log.d(TAG, "Text verified across visible window texts")
-                    return true
-                }
             }
 
             delay(80L)
         }
 
-        Log.w(TAG, "Text verification timed out for expected='$expectedText'")
+        Log.w(TAG, "Text verification timed out for expected='${maskSensitive(expectedText)}'")
         return false
     }
 
@@ -174,39 +167,33 @@ object InputVerifier {
             }
             delay(100L)
         }
-        // Action was still dispatched; return true if no crash occurred
-        return true
+        // Timeout without observed signature change: truthfully report failure
+        Log.w(TAG, "Keyboard action transition timed out without observable signature change")
+        return false
     }
 
-    private fun isTextMatch(actual: String, expectedNormalized: String, replace: Boolean, originalText: String): Boolean {
+    internal fun isTextMatch(actual: String, expectedNormalized: String, replace: Boolean, originalText: String): Boolean {
         val normActual = normalizeText(actual)
         if (normActual.isEmpty() && expectedNormalized.isEmpty()) return true
         if (normActual.isEmpty()) return false
 
-        if (replace) {
-            return normActual == expectedNormalized || normActual.contains(expectedNormalized)
+        return if (replace) {
+            // Strict field-bound matching: field must equal expected text (modulo whitespace/case normalization)
+            normActual == expectedNormalized
         } else {
+            // Append mode: field must match original + expected
             val normOriginal = normalizeText(originalText)
             val combined = "$normOriginal$expectedNormalized"
-            return normActual == combined || normActual.contains(expectedNormalized)
+            normActual == combined || (normActual.startsWith(normOriginal) && normActual.endsWith(expectedNormalized))
         }
     }
 
-    private fun normalizeText(text: String): String {
+    internal fun normalizeText(text: String): String {
         return text.trim().lowercase(Locale.ROOT).replace("\\s+".toRegex(), " ")
     }
 
-    private fun collectAllVisibleTexts(node: AccessibilityNodeInfo, depth: Int = 0): List<String> {
-        if (depth > 25) return emptyList()
-        val list = mutableListOf<String>()
-        val t = try { node.text?.toString() } catch (_: Exception) { null }
-        if (!t.isNullOrBlank()) list.add(t)
-        val d = try { node.contentDescription?.toString() } catch (_: Exception) { null }
-        if (!d.isNullOrBlank()) list.add(d)
-        for (i in 0 until node.childCount) {
-            val child = try { node.getChild(i) } catch (_: Exception) { null } ?: continue
-            list.addAll(collectAllVisibleTexts(child, depth + 1))
-        }
-        return list
+    internal fun maskSensitive(text: String): String {
+        if (text.length <= 4) return "***"
+        return "${text.first()}***${text.last()}"
     }
 }

@@ -151,6 +151,8 @@ class OpenRouterUiAgentProvider : UiAgentProvider {
                     errorCode = "HTTP_$responseCode"
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "OpenRouter testConnection network exception", e)
             UiAgentTestResult(
@@ -239,6 +241,8 @@ class OpenRouterUiAgentProvider : UiAgentProvider {
                     return@withContext remoteModels.sortedByDescending { if (it.isPreferred) 1 else 0 }
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.w(TAG, "Dynamic model discovery failed; falling back to curated list: ${e.message}")
         }
@@ -290,6 +294,8 @@ class OpenRouterUiAgentProvider : UiAgentProvider {
                 }
                 UiAgentReasoningResult.Error(friendlyMessage, errorCode = "HTTP_$responseCode", retryable = (responseCode != 401 && responseCode != 403))
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "OpenRouter reasoning network error", e)
             UiAgentReasoningResult.Error("UI Agent network connection issue. Retrying...", errorCode = "NETWORK_ERROR", retryable = true)
@@ -541,31 +547,31 @@ class OpenRouterUiAgentProvider : UiAgentProvider {
             "tap" -> UiAgentReasoningResult.ActionDecision(
                 action = UiAction(
                     type = UiAction.Type.TAP,
-                    x = args.optInt("x", 500),
-                    y = args.optInt("y", 1000),
+                    x = optionalCoordinate(args, "x"),
+                    y = optionalCoordinate(args, "y"),
                     reason = args.optString("reason", "Tap coordinates")
                 ),
-                reasoning = args.optString("reason", "Tap at (${args.optInt("x")}, ${args.optInt("y")})")
+                reasoning = args.optString("reason", "Tap at (${optionalCoordinate(args, "x")}, ${optionalCoordinate(args, "y")})")
             )
             "long_press" -> UiAgentReasoningResult.ActionDecision(
                 action = UiAction(
                     type = UiAction.Type.LONG_PRESS,
-                    x = args.optInt("x", 500),
-                    y = args.optInt("y", 1000),
+                    x = optionalCoordinate(args, "x"),
+                    y = optionalCoordinate(args, "y"),
                     durationMs = args.optLong("duration_ms", 800L)
                 ),
-                reasoning = "Long press at (${args.optInt("x")}, ${args.optInt("y")})"
+                reasoning = "Long press at (${optionalCoordinate(args, "x")}, ${optionalCoordinate(args, "y")})"
             )
             "swipe" -> UiAgentReasoningResult.ActionDecision(
                 action = UiAction(
                     type = UiAction.Type.SWIPE,
-                    x = args.optInt("start_x", 500),
-                    y = args.optInt("start_y", 1200),
-                    endX = args.optInt("end_x", 500),
-                    endY = args.optInt("end_y", 400),
+                    x = optionalCoordinate(args, "start_x"),
+                    y = optionalCoordinate(args, "start_y"),
+                    endX = optionalCoordinate(args, "end_x"),
+                    endY = optionalCoordinate(args, "end_y"),
                     durationMs = args.optLong("duration_ms", 400L)
                 ),
-                reasoning = "Swipe from (${args.optInt("start_x")}, ${args.optInt("start_y")}) to (${args.optInt("end_x")}, ${args.optInt("end_y")})"
+                reasoning = "Swipe from (${optionalCoordinate(args, "start_x")}, ${optionalCoordinate(args, "start_y")}) to (${optionalCoordinate(args, "end_x")}, ${optionalCoordinate(args, "end_y")})"
             )
             "scroll" -> UiAgentReasoningResult.ActionDecision(
                 action = UiAction(
@@ -603,5 +609,14 @@ class OpenRouterUiAgentProvider : UiAgentProvider {
             )
             else -> UiAgentReasoningResult.Error("Unknown tool called: $name")
         }
+    }
+
+    private fun optionalCoordinate(args: JSONObject, key: String): Int? {
+        val value = args.opt(key)
+        if (value !is Number) return null
+        val doubleValue = value.toDouble()
+        if (!doubleValue.isFinite() || doubleValue % 1.0 != 0.0) return null
+        if (doubleValue < Int.MIN_VALUE || doubleValue > Int.MAX_VALUE) return null
+        return doubleValue.toInt()
     }
 }

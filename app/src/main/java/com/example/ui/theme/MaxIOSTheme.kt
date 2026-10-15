@@ -4,55 +4,73 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
+val LocalIsDarkMode = staticCompositionLocalOf { false }
+
 /**
  * Centralized MAX iOS-Inspired Design System Tokens.
- * Embodies an Apple-style, calm, human-centered luxury design language.
+ * Dynamically resolves Day Mode (Light) and Night Mode (Dark).
  */
 object MaxIOSColors {
-    // Dark Theme Surfaces (Deep Obsidian & Translucent Glass)
-    val DarkBase = Color(0xFF07090E)              // Deepest Obsidian Black
-    val DarkSurfaceGrouped = Color(0xFF121722)     // Inset Grouped Section Background
-    val DarkSurfaceElevated = Color(0xFF1A2232)    // Elevated Card & Dock Background
-    val DarkSurfaceGlass = Color(0xD9121722)       // 85% Translucent Obsidian Glass
-    val DarkSurfaceGlassHover = Color(0xF01E2738)  // Highlighted Glass State
-    
-    // Light Theme Surfaces (Soft Off-White & Translucent Milk Glass)
-    val LightBase = Color(0xFFF2F2F7)             // iOS System Grouped Background
-    val LightSurfaceGrouped = Color(0xFFFFFFFF)    // Inset Grouped Section Background
-    val LightSurfaceElevated = Color(0xFFFFFFFF)   // Elevated Card Background
-    val LightSurfaceGlass = Color(0xE6FFFFFF)      // 90% Translucent White Glass
-    val LightSurfaceGlassHover = Color(0xF2F2F2F7) // Highlighted Light State
+    // Dark Theme Surfaces
+    val DarkBase = MaxBaseDark
+    val DarkSurfaceGrouped = MaxSurfaceCard
+    val DarkSurfaceElevated = MaxSurfaceElevated
+    val DarkSurfaceGlass = MaxSurfaceGlass
+    val DarkSurfaceGlassHover = MaxSurfaceElevated
 
-    // High-Contrast Apple Typography Palette
-    val TextPrimaryDark = Color(0xFFFFFFFF)        // 100% Crisp White
-    val TextSecondaryDark = Color(0xFF94A3B8)      // Slate 400 (Body & Subtitles)
-    val TextTertiaryDark = Color(0xFF64748B)       // Slate 500 (Footnotes & Captions)
-    val TextQuaternaryDark = Color(0xFF475569)     // Slate 600 (Placeholders)
+    // Light Theme Surfaces (Soft Off-White & Pure White Cards)
+    val LightBase = Color(0xFFFAFAFC)          // Pearlescent White Canvas (#FAFAFC)
+    val LightSurfaceGrouped = Color(0xFFFFFFFF) // Pure White Card Surface
+    val LightSurfaceElevated = Color(0xFFFFF1F2)// Soft Rose Elevated Surface
+    val LightSurfaceGlass = Color(0xF2FFFFFF)   // Frosted White Milk Glass
+    val LightSurfaceGlassHover = Color(0xFFFCE7F3)
 
-    val TextPrimaryLight = Color(0xFF0F172A)       // Deep Slate 900
-    val TextSecondaryLight = Color(0xFF475569)     // Slate 600
-    val TextTertiaryLight = Color(0xFF94A3B8)      // Slate 400
+    // Dynamic Context-Aware Surfaces
+    val Base @Composable get() = if (LocalIsDarkMode.current) DarkBase else LightBase
+    val SurfaceGrouped @Composable get() = if (LocalIsDarkMode.current) DarkSurfaceGrouped else LightSurfaceGrouped
+    val SurfaceElevated @Composable get() = if (LocalIsDarkMode.current) DarkSurfaceElevated else LightSurfaceElevated
+    val SurfaceGlass @Composable get() = if (LocalIsDarkMode.current) DarkSurfaceGlass else LightSurfaceGlass
+
+    // High-Contrast Typography Palette
+    val TextPrimaryDark = MaxTextPrimary
+    val TextSecondaryDark = MaxTextSecondary
+    val TextTertiaryDark = MaxTextTertiary
+    val TextQuaternaryDark = MaxTextTertiary
+
+    val TextPrimaryLight = Color(0xFF0F172A)    // Slate 900 High-Contrast Black/Dark Text
+    val TextSecondaryLight = Color(0xFF475569)  // Slate 600 Subheading Text
+    val TextTertiaryLight = Color(0xFF64748B)   // Slate 500 Caption Text
+
+    val TextPrimary @Composable get() = if (LocalIsDarkMode.current) TextPrimaryDark else TextPrimaryLight
+    val TextSecondary @Composable get() = if (LocalIsDarkMode.current) TextSecondaryDark else TextSecondaryLight
+    val TextTertiary @Composable get() = if (LocalIsDarkMode.current) TextTertiaryDark else TextTertiaryLight
 
     // Specular Highlights & Hairline Borders (0.5dp - 1dp)
-    val HairlineDark = Color(0xFF232D42)          // Crisp Section Divider / Hairline
-    val SpecularEdgeDark = Color(0xFF384968)      // Top Specular Highlight
-    val HairlineLight = Color(0xFFE2E8F0)         // Soft Light Divider
-    val SpecularEdgeLight = Color(0xFFCBD5E1)     // Soft Specular Light
+    val HairlineDark = MaxBorderHairline
+    val SpecularEdgeDark = MaxBorderSpecular
+    val HairlineLight = Color(0xFFFCE7F3)        // Soft Rose Hairline Border (#FCE7F3)
+    val SpecularEdgeLight = Color(0xFFFBCFE8)    // Focused Rose Edge Border (#FBCFE8)
 
-    // Apple-Style Vibrant Accent Hierarchy
-    val SystemBlue = Color(0xFF0A84FF)            // iOS Cyber Blue (Primary Actions)
-    val SystemBlueLight = Color(0xFF007AFF)       // Light Mode System Blue
-    val SystemIndigo = Color(0xFF5E5CE6)          // iOS Indigo / Purple (Thinking / AI)
-    val SystemTeal = Color(0xFF00D2FF)            // Titanium Cyan (Active Glow & Accents)
-    val SystemGreen = Color(0xFF30D158)           // iOS Emerald Green (Online / Verified / Success)
-    val SystemAmber = Color(0xFFFF9F0A)           // iOS Amber Gold (Warning / Deep Mode)
-    val SystemRed = Color(0xFFFF453A)             // iOS Coral Red (Destructive / Error)
-    val SystemPurple = Color(0xFFBF5AF2)          // Apple Intelligence Purple
+    val Hairline @Composable get() = if (LocalIsDarkMode.current) HairlineDark else HairlineLight
+    val SpecularEdge @Composable get() = if (LocalIsDarkMode.current) SpecularEdgeDark else SpecularEdgeLight
+
+    // Flagship Vibrant Accent Hierarchy (Luminous White & Pink)
+    val SystemBlue = NeonPink
+    val SystemBlueLight = NeonPink
+    val SystemIndigo = MagentaRose
+    val SystemTeal = BrightRose
+    val SystemGreen = MaxSuccessApple
+    val SystemAmber = MaxWarningApple
+    val SystemRed = MaxDestructiveApple
+    val SystemPurple = MagentaRose
 }
 
 object MaxIOSShapes {
@@ -102,6 +120,25 @@ private val IOSDarkColorScheme = darkColorScheme(
     onError = MaxIOSColors.TextPrimaryDark
 )
 
+private val IOSLightColorScheme = lightColorScheme(
+    primary = MaxIOSColors.SystemBlue,
+    onPrimary = Color.White,
+    secondary = MaxIOSColors.SystemTeal,
+    onSecondary = Color.White,
+    tertiary = MaxIOSColors.SystemIndigo,
+    onTertiary = Color.White,
+    background = MaxIOSColors.LightBase,
+    onBackground = MaxIOSColors.TextPrimaryLight,
+    surface = MaxIOSColors.LightSurfaceGrouped,
+    onSurface = MaxIOSColors.TextPrimaryLight,
+    surfaceVariant = MaxIOSColors.LightSurfaceElevated,
+    onSurfaceVariant = MaxIOSColors.TextSecondaryLight,
+    outline = MaxIOSColors.HairlineLight,
+    outlineVariant = MaxIOSColors.SpecularEdgeLight,
+    error = MaxIOSColors.SystemRed,
+    onError = Color.White
+)
+
 /**
  * Flagship MAX iOS-Native Theme Provider.
  */
@@ -110,9 +147,12 @@ fun MaxIOSTheme(
     darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    MaterialTheme(
-        colorScheme = IOSDarkColorScheme,
-        typography = Typography,
-        content = content
-    )
+    val colorScheme = if (darkTheme) IOSDarkColorScheme else IOSLightColorScheme
+    CompositionLocalProvider(LocalIsDarkMode provides darkTheme) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = Typography,
+            content = content
+        )
+    }
 }

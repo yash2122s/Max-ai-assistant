@@ -77,6 +77,15 @@ object KeyboardController {
         "KEY_ALT" to KeyEvent.KEYCODE_ALT_LEFT
     )
 
+    fun sanitizeTypeText(rawText: String): String {
+        var clean = rawText.trim()
+        clean = clean.replace(Regex("^(?:search bar|search icon|search button|సెర్చ్ బార్|సెర్చ్ ఐకాన్|సెర్చ్ బటన్|సెర్చ్|search)\\s*(?:lo|loki|meeda|పై|మీద|లో|లోకి|ని|ను|ni|nu)?\\s*(?:click|tap|open|క్లిక్|ట్యాప్|ఓపెన్)?\\s*(?:chesi|చేసి|cheyyi|చేయి|chey|చేయ్)?\\s*", RegexOption.IGNORE_CASE), "")
+        clean = clean.replace(Regex("^(?:in|on|into|inside|in the|on the|for|the|a|an|text|query)\\s+", RegexOption.IGNORE_CASE), "")
+        clean = clean.replace(Regex("\\s*(?:ane|ani|ni|nu|kosam|gurinchi|lo|అని|అనే|ని|ను|కోసం|గురించి|లో)$", RegexOption.IGNORE_CASE), "")
+        clean = clean.replace(Regex("\\s*(?:ane|ani|ni|nu|అని|అనే)?\\s*(?:type|write|రాయి|రాయండి|టైప్)(?:\\s*(?:chey|cheyi|cheyyi|cheyandi|cheyyandi|చేయి|చేయ్|చేయండి))?$", RegexOption.IGNORE_CASE), "")
+        return clean.trim().ifEmpty { rawText.trim() }
+    }
+
     suspend fun typeText(
         context: Context,
         text: String,
@@ -85,7 +94,8 @@ object KeyboardController {
         pressEnterAfter: Boolean = false,
         executionId: UUID = UUID.randomUUID()
     ): ToolResult {
-        if (text.isBlank()) {
+        val cleanText = sanitizeTypeText(text)
+        if (cleanText.isBlank()) {
             return ToolResult(
                 success = false,
                 toolName = "type_text",
@@ -98,10 +108,10 @@ object KeyboardController {
             ?: ServiceRegistry.get<JarvisAccessibilityService>(ServiceType.ACCESSIBILITY)
         val activeRoot = JarvisAccessibilityService.getActiveRoot()
 
-        Log.d(TAG, "typeText() called: text=\"$text\" targetField=\"$targetField\" replace=$replace pressEnterAfter=$pressEnterAfter")
+        Log.d(TAG, "typeText() called: text=\"$cleanText\" (raw=\"$text\") targetField=\"$targetField\" replace=$replace pressEnterAfter=$pressEnterAfter")
 
         if (service == null && activeRoot == null) {
-            if (ShizukuExecutor.isSafeCommand("input text $text") && ShizukuExecutor.sendText(text)) {
+            if (ShizukuExecutor.isSafeCommand("input text $cleanText") && ShizukuExecutor.sendText(cleanText)) {
                 if (pressEnterAfter) {
                     delay(100L)
                     return pressEnter(context, targetField)
@@ -110,7 +120,7 @@ object KeyboardController {
                     success = true,
                     toolName = "type_text",
                     verificationRequired = true,
-                    message = "Typed \"$text\" via shell input"
+                    message = "Typed \"$cleanText\" via shell input"
                 )
             }
             return ToolResult(
@@ -173,13 +183,20 @@ object KeyboardController {
                     AutomationEventBus.publish(
                         AutomationEvent.TypingStarted(
                             executionId = executionId,
-                            text = text,
+                            text = cleanText,
                             targetField = targetField ?: "editable_field"
                         )
                     )
 
                     originalText = try { targetNode.text?.toString() ?: "" } catch (_: Exception) { "" }
-                    val finalText = if (replace || originalText.isBlank()) text else "$originalText$text"
+                    val finalText = if (replace || originalText.isBlank()) {
+                        cleanText
+                    } else if (originalText.trim().equals(cleanText, ignoreCase = true) || originalText.endsWith(cleanText)) {
+                        // Prevent duplicate appending if the field already has this text
+                        originalText
+                    } else {
+                        "$originalText$cleanText"
+                    }
 
                     // 3. Tier 1: Accessibility ACTION_SET_TEXT
                     val bundle = Bundle().apply {
@@ -192,7 +209,7 @@ object KeyboardController {
                     if (actionSetSuccess) {
                         val verified = if (service != null) {
                             InputVerifier.verifyTextEntered(
-                                expectedText = text,
+                                expectedText = cleanText,
                                 targetNode = targetNode,
                                 service = service,
                                 replace = replace,
@@ -202,7 +219,7 @@ object KeyboardController {
                         } else true
 
                         if (verified) {
-                            Log.d(TAG, "Successfully typed \"$text\" via Accessibility ACTION_SET_TEXT")
+                            Log.d(TAG, "Successfully typed \"${com.example.automation.verification.InputVerifier.maskSensitive(cleanText)}\" via Accessibility ACTION_SET_TEXT")
                             if (pressEnterAfter) {
                                 delay(100L)
                                 return pressEnter(context, targetField)
@@ -211,7 +228,7 @@ object KeyboardController {
                                 success = true,
                                 toolName = "type_text",
                                 verificationRequired = true,
-                                message = "Typed \"$text\" into input field"
+                                message = "Typed into input field"
                             )
                         }
                     }
@@ -222,10 +239,10 @@ object KeyboardController {
 
         // 4. Tier 2: Generic Accessibility Discovery Fallback
         if (service != null) {
-            val genericSuccess = service.genericTypeText(text, targetField, replace)
+            val genericSuccess = service.genericTypeText(cleanText, targetField, replace)
             if (genericSuccess) {
-                val verified = InputVerifier.verifyTextEntered(
-                    expectedText = text,
+                val verified = com.example.automation.verification.InputVerifier.verifyTextEntered(
+                    expectedText = cleanText,
                     targetNode = lastResolvedNode,
                     service = service,
                     replace = replace,
@@ -233,7 +250,7 @@ object KeyboardController {
                     targetHint = targetField
                 )
                 if (verified) {
-                    Log.d(TAG, "Successfully typed \"$text\" via service genericTypeText")
+                    Log.d(TAG, "Successfully typed \"${com.example.automation.verification.InputVerifier.maskSensitive(cleanText)}\" via service genericTypeText")
                     if (pressEnterAfter) {
                         delay(100L)
                         return pressEnter(context, targetField)
@@ -242,17 +259,17 @@ object KeyboardController {
                         success = true,
                         toolName = "type_text",
                         verificationRequired = true,
-                        message = "Typed \"$text\" into active editable field"
+                        message = "Typed into active editable field"
                     )
                 }
             }
         }
 
         // 5. Tier 3: Shizuku / ADB Shell Input Fallback (for Canvas, Flutter, React Native, WebViews)
-        if (ShizukuExecutor.isSafeCommand("input text $text")) {
-            val shizukuSuccess = ShizukuExecutor.sendText(text)
+        if (ShizukuExecutor.isSafeCommand("input text $cleanText")) {
+            val shizukuSuccess = ShizukuExecutor.sendText(cleanText)
             if (shizukuSuccess) {
-                Log.d(TAG, "Dispatched text \"$text\" via Shizuku input text fallback")
+                Log.d(TAG, "Dispatched text \"${com.example.automation.verification.InputVerifier.maskSensitive(cleanText)}\" via Shizuku input text fallback")
                 if (pressEnterAfter) {
                     delay(100L)
                     return pressEnter(context, targetField)
@@ -261,7 +278,7 @@ object KeyboardController {
                     success = true,
                     toolName = "type_text",
                     verificationRequired = true,
-                    message = "Typed \"$text\" via shell input"
+                    message = "Typed via shell input"
                 )
             }
         }
@@ -393,10 +410,11 @@ object KeyboardController {
         }
 
         return ToolResult(
-            success = true,
+            success = false,
             toolName = "press_key",
+            errorCode = "KEY_DISPATCH_FAILED",
             verificationRequired = true,
-            message = "Dispatched key event $normKey"
+            message = "Failed to dispatch key $normKey (code=$keyCode)"
         )
     }
 
@@ -409,7 +427,7 @@ object KeyboardController {
 
         Log.d(TAG, "pressEnter() called for targetField=\"$targetField\"")
 
-        val rootNode = service?.rootInActiveWindow
+        val rootNode = service?.rootInActiveWindow ?: JarvisAccessibilityService.getActiveRoot()
         val initialSignature = if (service != null && rootNode != null) service.getScreenSignature(rootNode) else ""
 
         // Tier 1: Focused field IME action (ACTION_IME_ENTER)
@@ -510,10 +528,11 @@ object KeyboardController {
         }
 
         return ToolResult(
-            success = true,
+            success = false,
             toolName = "press_enter",
+            errorCode = "ENTER_DISPATCH_FAILED",
             verificationRequired = true,
-            message = "Dispatched enter action"
+            message = "Could not execute enter action on active field"
         )
     }
 

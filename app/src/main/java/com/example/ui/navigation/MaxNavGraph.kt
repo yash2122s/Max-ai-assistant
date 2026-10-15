@@ -3,7 +3,7 @@ package com.example.ui.navigation
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -14,7 +14,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -47,28 +46,34 @@ object MaxDestinations {
     const val LICENSE = "license"
 }
 
+enum class DrawerIconGroup {
+    DEFAULT,
+    TRUST, // Security / Lock / Verified -> primary
+    ALERT  // Alarm / Notifications -> tertiary
+}
+
 data class NavigationDrawerItem(
     val route: String,
     val title: String,
     val icon: ImageVector,
-    val accentColor: Color = Color(0xFF0066FF),
+    val group: DrawerIconGroup = DrawerIconGroup.DEFAULT,
     val badge: String? = null
 )
 
 val MainDrawerItems = listOf(
-    NavigationDrawerItem(MaxDestinations.HOME, "Home & Voice", Icons.Default.Home, Color(0xFF0066FF)),
-    NavigationDrawerItem(MaxDestinations.LICENSE, "License & Premium", Icons.Default.Verified, Color(0xFF10B981)),
-    NavigationDrawerItem(MaxDestinations.MEMORY, "Memory Wallet", Icons.Default.FolderShared, Color(0xFF8B5CF6)),
-    NavigationDrawerItem(MaxDestinations.PERIOD, "Period Tracker", Icons.Default.Favorite, Color(0xFFEC4899)),
-    NavigationDrawerItem(MaxDestinations.REMINDERS, "Reminders", Icons.Default.Alarm, Color(0xFFF59E0B)),
-    NavigationDrawerItem(MaxDestinations.SKILLS, "Automation Skills", Icons.Default.Extension, Color(0xFF6366F1)),
-    NavigationDrawerItem(MaxDestinations.ROUTINES, "Routines & Automation", Icons.Default.AutoAwesome, Color(0xFF8B5CF6)),
-    NavigationDrawerItem(MaxDestinations.NOTIFICATIONS, "Notifications & Auto-Reply", Icons.Default.Notifications, Color(0xFF06B6D4)),
-    NavigationDrawerItem(MaxDestinations.PERMISSIONS, "Permissions & Shizuku", Icons.Default.Security, Color(0xFF10B981)),
-    NavigationDrawerItem(MaxDestinations.CAPABILITIES, "Capabilities Index", Icons.Default.CheckCircle, Color(0xFF3B82F6)),
-    NavigationDrawerItem(MaxDestinations.SETTINGS, "Settings", Icons.Default.Settings, Color(0xFF64748B)),
-    NavigationDrawerItem(MaxDestinations.ABOUT, "About MAX", Icons.Default.Info, Color(0xFF0284C7)),
-    NavigationDrawerItem(MaxDestinations.PRIVACY, "Privacy Policy", Icons.Default.Lock, Color(0xFF14B8A6))
+    NavigationDrawerItem(MaxDestinations.HOME, "Home & Voice", Icons.Rounded.Home),
+    NavigationDrawerItem(MaxDestinations.LICENSE, "License & Premium", Icons.Rounded.Verified, DrawerIconGroup.TRUST),
+    NavigationDrawerItem(MaxDestinations.MEMORY, "Memory Wallet", Icons.Rounded.FolderShared),
+    NavigationDrawerItem(MaxDestinations.PERIOD, "Period Tracker", Icons.Rounded.Favorite),
+    NavigationDrawerItem(MaxDestinations.REMINDERS, "Reminders", Icons.Rounded.Alarm, DrawerIconGroup.ALERT),
+    NavigationDrawerItem(MaxDestinations.SKILLS, "Automation Skills", Icons.Rounded.Extension),
+    NavigationDrawerItem(MaxDestinations.ROUTINES, "Routines & Automation", Icons.Rounded.AutoAwesome),
+    NavigationDrawerItem(MaxDestinations.NOTIFICATIONS, "Notifications & Auto-Reply", Icons.Rounded.Notifications, DrawerIconGroup.ALERT),
+    NavigationDrawerItem(MaxDestinations.PERMISSIONS, "Permissions & Shizuku", Icons.Rounded.Security, DrawerIconGroup.TRUST),
+    NavigationDrawerItem(MaxDestinations.CAPABILITIES, "Capabilities Index", Icons.Rounded.CheckCircle),
+    NavigationDrawerItem(MaxDestinations.SETTINGS, "Settings", Icons.Rounded.Settings),
+    NavigationDrawerItem(MaxDestinations.ABOUT, "About MAX", Icons.Rounded.Info),
+    NavigationDrawerItem(MaxDestinations.PRIVACY, "Privacy Policy", Icons.Rounded.Lock, DrawerIconGroup.TRUST)
 )
 
 @Composable
@@ -125,8 +130,8 @@ fun MaxNavGraph(
             )
         }
 
-        val navigateBackToDrawer: () -> Unit = {
-            if (navController.popBackStack()) {
+        val navigateBackToPreviousOrDrawer: () -> Unit = {
+            if (!navController.popBackStack()) {
                 onOpenDrawer()
             }
         }
@@ -134,13 +139,13 @@ fun MaxNavGraph(
         // Controlled Screens in Drawer Navigation
         composable(MaxDestinations.LICENSE) {
             com.example.ui.license.LicenseActivationScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = navigateBackToPreviousOrDrawer
             )
         }
 
         composable(MaxDestinations.SETTINGS) {
             com.example.ui.settings.SettingsScreen(
-                onNavigateBack = navigateBackToDrawer,
+                onNavigateBack = navigateBackToPreviousOrDrawer,
                 onNavigateToSkills = { navController.navigate(MaxDestinations.SKILLS) },
                 onNavigateToLicense = { navController.navigate(MaxDestinations.LICENSE) }
             )
@@ -148,19 +153,19 @@ fun MaxNavGraph(
 
         composable(MaxDestinations.SKILLS) {
             com.example.ui.skills.SkillsScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = navigateBackToPreviousOrDrawer
             )
         }
 
         composable(MaxDestinations.PERMISSIONS) {
             com.example.ui.permissions.PermissionsScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = navigateBackToPreviousOrDrawer
             )
         }
 
         composable(MaxDestinations.MEMORY) {
             com.example.ui.memory.MemoryScreen(
-                onNavigateBack = navigateBackToDrawer,
+                onNavigateBack = navigateBackToPreviousOrDrawer,
                 onNavigateToImport = { navController.navigate(MaxDestinations.IMPORT_MEMORY) }
             )
         }
@@ -173,37 +178,37 @@ fun MaxNavGraph(
 
         composable(MaxDestinations.PERIOD) {
             com.example.ui.period.PeriodScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = navigateBackToPreviousOrDrawer
             )
         }
 
         composable(MaxDestinations.REMINDERS) {
             com.example.ui.reminders.RemindersScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = navigateBackToPreviousOrDrawer
             )
         }
 
         composable(MaxDestinations.ROUTINES) {
             com.example.ui.routines.RoutinesScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = navigateBackToPreviousOrDrawer
             )
         }
 
         composable(MaxDestinations.NOTIFICATIONS) {
             com.example.ui.notifications.NotificationsScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = navigateBackToPreviousOrDrawer
             )
         }
 
         composable(MaxDestinations.CAPABILITIES) {
             com.example.ui.capabilities.CapabilitiesScreen(
-                onNavigateBack = navigateBackToDrawer
+                onNavigateBack = navigateBackToPreviousOrDrawer
             )
         }
 
         composable(MaxDestinations.ABOUT) {
             com.example.ui.about.AboutScreen(
-                onNavigateBack = navigateBackToDrawer,
+                onNavigateBack = navigateBackToPreviousOrDrawer,
                 onNavigateToPrivacy = { navController.navigate(MaxDestinations.PRIVACY) }
             )
         }

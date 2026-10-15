@@ -2,19 +2,18 @@ package com.example.rag.data
 
 import androidx.room.Entity
 import androidx.room.Index
-import androidx.room.PrimaryKey
 import java.util.UUID
 
 @Entity(
     tableName = "rag_chunks",
+    primaryKeys = ["ownerKey", "chunkId"],
     indices = [
-        Index(value = ["memoryId"]),
-        Index(value = ["contentHash"]),
-        Index(value = ["memoryId", "chunkIndex"], unique = true)
+        Index(value = ["ownerKey", "memoryId"]),
+        Index(value = ["ownerKey", "contentHash"]),
+        Index(value = ["ownerKey", "memoryId", "chunkIndex"], unique = true)
     ]
 )
 data class RagChunkEntity(
-    @PrimaryKey
     val chunkId: String = UUID.randomUUID().toString(),
     val memoryId: String,
     val chunkIndex: Int,
@@ -28,7 +27,8 @@ data class RagChunkEntity(
     val provider: String? = null,
     val sourceRecordId: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val ownerKey: String = "legacy"
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -37,6 +37,7 @@ data class RagChunkEntity(
         other as RagChunkEntity
 
         if (chunkId != other.chunkId) return false
+        if (ownerKey != other.ownerKey) return false
         if (memoryId != other.memoryId) return false
         if (chunkIndex != other.chunkIndex) return false
         if (content != other.content) return false
@@ -60,6 +61,7 @@ data class RagChunkEntity(
 
     override fun hashCode(): Int {
         var result = chunkId.hashCode()
+        result = 31 * result + ownerKey.hashCode()
         result = 31 * result + memoryId.hashCode()
         result = 31 * result + chunkIndex
         result = 31 * result + content.hashCode()

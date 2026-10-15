@@ -17,8 +17,7 @@ val Typography = Typography(
         fontWeight = FontWeight.Bold,
         fontSize = 34.sp,
         lineHeight = 41.sp,
-        letterSpacing = 0.37.sp,
-        color = MaxTextPrimary
+        letterSpacing = 0.37.sp
     ),
     // Title 1 (28sp / 34sp / Bold / +0.36sp)
     headlineLarge = TextStyle(
@@ -26,8 +25,7 @@ val Typography = Typography(
         fontWeight = FontWeight.Bold,
         fontSize = 28.sp,
         lineHeight = 34.sp,
-        letterSpacing = 0.36.sp,
-        color = MaxTextPrimary
+        letterSpacing = 0.36.sp
     ),
     // Title 2 (22sp / 28sp / SemiBold / +0.35sp)
     headlineMedium = TextStyle(
@@ -35,8 +33,7 @@ val Typography = Typography(
         fontWeight = FontWeight.SemiBold,
         fontSize = 22.sp,
         lineHeight = 28.sp,
-        letterSpacing = 0.35.sp,
-        color = MaxTextPrimary
+        letterSpacing = 0.35.sp
     ),
     // Title 3 (20sp / 25sp / SemiBold / +0.38sp)
     headlineSmall = TextStyle(
@@ -44,8 +41,7 @@ val Typography = Typography(
         fontWeight = FontWeight.SemiBold,
         fontSize = 20.sp,
         lineHeight = 25.sp,
-        letterSpacing = 0.38.sp,
-        color = MaxTextPrimary
+        letterSpacing = 0.38.sp
     ),
     // Headline (17sp / 22sp / SemiBold / -0.41sp)
     titleLarge = TextStyle(
@@ -53,8 +49,7 @@ val Typography = Typography(
         fontWeight = FontWeight.SemiBold,
         fontSize = 17.sp,
         lineHeight = 22.sp,
-        letterSpacing = (-0.41).sp,
-        color = MaxTextPrimary
+        letterSpacing = (-0.41).sp
     ),
     // Subhead (15sp / 20sp / Medium / -0.24sp)
     titleMedium = TextStyle(
@@ -62,8 +57,7 @@ val Typography = Typography(
         fontWeight = FontWeight.Medium,
         fontSize = 15.sp,
         lineHeight = 20.sp,
-        letterSpacing = (-0.24).sp,
-        color = MaxTextPrimary
+        letterSpacing = (-0.24).sp
     ),
     // Body (17sp / 22sp / Regular / -0.41sp)
     bodyLarge = TextStyle(
@@ -71,8 +65,7 @@ val Typography = Typography(
         fontWeight = FontWeight.Normal,
         fontSize = 17.sp,
         lineHeight = 22.sp,
-        letterSpacing = (-0.41).sp,
-        color = MaxTextPrimary
+        letterSpacing = (-0.41).sp
     ),
     // Callout (16sp / 21sp / Regular / -0.32sp)
     bodyMedium = TextStyle(
@@ -80,8 +73,7 @@ val Typography = Typography(
         fontWeight = FontWeight.Normal,
         fontSize = 16.sp,
         lineHeight = 21.sp,
-        letterSpacing = (-0.32).sp,
-        color = MaxTextSecondary
+        letterSpacing = (-0.32).sp
     ),
     // Footnote (13sp / 18sp / Regular / -0.08sp)
     bodySmall = TextStyle(
@@ -89,8 +81,7 @@ val Typography = Typography(
         fontWeight = FontWeight.Normal,
         fontSize = 13.sp,
         lineHeight = 18.sp,
-        letterSpacing = (-0.08).sp,
-        color = MaxTextTertiary
+        letterSpacing = (-0.08).sp
     ),
     // Caption 1 (12sp / 16sp / Medium / 0sp)
     labelLarge = TextStyle(
@@ -98,26 +89,44 @@ val Typography = Typography(
         fontWeight = FontWeight.Medium,
         fontSize = 12.sp,
         lineHeight = 16.sp,
-        letterSpacing = 0.sp,
-        color = MaxTextSecondary
+        letterSpacing = 0.sp
     ),
     // Caption 2 (11sp / 13sp / Regular / +0.06sp)
     labelMedium = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Normal,
         fontSize = 11.sp,
-        lineHeight = 13.sp,
-        letterSpacing = 0.06.sp,
-        color = MaxTextTertiary
+        lineHeight = 15.sp,
+        letterSpacing = 0.06.sp
     ),
     // Caption 3 (10sp / 12sp / Medium / +0.06sp)
     labelSmall = TextStyle(
         fontFamily = FontFamily.Default,
         fontWeight = FontWeight.Medium,
         fontSize = 10.sp,
-        lineHeight = 12.sp,
-        letterSpacing = 0.06.sp,
-        color = MaxTextTertiary
+        lineHeight = 14.sp,
+        letterSpacing = 0.06.sp
     )
 )
 
+// ============================================================================
+// STITCH AETHER HUD TELEMETRY & DISPLAY TYPOGRAPHY
+// ============================================================================
+val HudTelemetryCaps = TextStyle(
+    fontFamily = FontFamily.Monospace,
+    fontWeight = FontWeight.SemiBold,
+    fontSize = 11.sp,
+    lineHeight = 15.sp,
+    letterSpacing = 0.08.sp,
+    color = MaxAccentCyan
+)
+
+val HudHeadline = TextStyle(
+    fontFamily = FontFamily.Default,
+    fontWeight = FontWeight.Bold,
+    fontSize = 24.sp,
+    lineHeight = 30.sp,
+    letterSpacing = (-0.3).sp
+)
+
+val MaxMono = FontFamily.Monospace

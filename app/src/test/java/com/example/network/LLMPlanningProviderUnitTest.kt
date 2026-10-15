@@ -278,7 +278,8 @@ class LLMPlanningProviderUnitTest {
             focusMode = "general"
         )
         val userContent = PromptBuilder.buildPlanningUserContent("Open WhatsApp, find Bhaskar and send Hello", payload)
-        assertTrue(userContent.contains("User Goal: \"Open WhatsApp, find Bhaskar and send Hello\""))
+        assertTrue(userContent.contains("<USER_GOAL>"))
+        assertTrue(userContent.contains("Open WhatsApp, find Bhaskar and send Hello"))
         assertTrue(userContent.contains("Foreground Package: com.whatsapp"))
         assertTrue(userContent.contains("Clickable Elements: [Bhaskar]"))
         // Confirms system role rules are not duplicated in user content

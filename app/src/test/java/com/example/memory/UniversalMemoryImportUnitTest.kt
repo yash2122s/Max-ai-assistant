@@ -7,11 +7,14 @@ import com.example.data.export.PeriodMarkdownExporter
 import com.example.data.local.AppDatabase
 import com.example.data.local.PeriodLog
 import com.example.data.preferences.SettingsManager
+import com.example.firebase.auth.FirebaseAuthManager
+import com.example.firebase.FakeGoogleGateway
 import com.example.memory.data.MemoryCategory
 import com.example.memory.data.MemoryRepository
 import com.example.memory.data.MemorySyncState
 import com.example.memory.data.MemoryType
 import com.example.memory.data.PermanentMemory
+import com.example.memory.account.MemoryAccountScope
 import com.example.memory.sync.MaxBackupService
 import com.example.memory.sync.MemorySyncService
 import com.example.memory.universal.ImportAction
@@ -20,12 +23,17 @@ import com.example.memory.universal.ImportProviderType
 import com.example.memory.universal.ProviderDetector
 import com.example.memory.universal.UniversalMemoryImporter
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -42,10 +50,21 @@ class UniversalMemoryImportUnitTest {
     private lateinit var syncService: MemorySyncService
     private lateinit var backupService: MaxBackupService
     private lateinit var periodExporter: PeriodMarkdownExporter
+    private lateinit var auth: FirebaseAuthManager
+    private lateinit var gateway: FakeGoogleGateway
+    private val ownerKey get() = MemoryAccountScope.capture().ownerKey
 
     @Before
     fun setup() {
+        Dispatchers.setMain(UnconfinedTestDispatcher())
         context = ApplicationProvider.getApplicationContext()
+        // These tests exercise account-scoped production paths.  Bind a deterministic
+        // active session instead of relying on the default UNAVAILABLE scope.
+        gateway = FakeGoogleGateway("universal-memory-test")
+        auth = FirebaseAuthManager(gateway) { "test-client" }
+        MemoryAccountScope.bind(auth)
+        repeat(3) { runBlocking { kotlinx.coroutines.yield() } }
+        gateway.changeAccount("universal-memory-test")
         db = AppDatabase.getDatabase(context)
         importer = UniversalMemoryImporter(context)
         syncService = MemorySyncService.getInstance(context)
@@ -57,12 +76,19 @@ class UniversalMemoryImportUnitTest {
         baseDir.mkdirs()
 
         runBlocking {
-            db.permanentMemoryDao().deleteAll()
-            db.periodLogDao().deleteAllPeriods()
+            db.permanentMemoryDao().deleteAll("legacy")
+            if (ownerKey != "legacy") db.permanentMemoryDao().deleteAll(ownerKey)
+            db.periodLogDao().deleteAllPeriods(ownerKey)
             db.memorySyncStateDao().insertOrUpdate(
-                MemorySyncState(id = 1, lastWrittenFileHash = null, lastSyncTimestamp = 0L, lastSyncedMemoryCount = 0, syncStatus = "IDLE")
+                MemorySyncState(id = 1, lastWrittenFileHash = null, lastSyncTimestamp = 0L, lastSyncedMemoryCount = 0, syncStatus = "IDLE", ownerKey = ownerKey)
             )
         }
+    }
+
+    @After
+    fun teardown() {
+        MemoryAccountScope.unbind()
+        Dispatchers.resetMain()
     }
 
     // -------------------------------------------------------------------------
@@ -166,7 +192,7 @@ class UniversalMemoryImportUnitTest {
             - Food: User prefers vegetarian Mediterranean food.
         """.trimIndent()
 
-        val initialCount = db.permanentMemoryDao().getCount()
+        val initialCount = db.permanentMemoryDao().getCount(ownerKey)
         assertEquals(0, initialCount)
 
         val preview = importer.preview(markdown, "preferences.md")
@@ -175,7 +201,7 @@ class UniversalMemoryImportUnitTest {
         assertEquals(0, preview.duplicateCount)
 
         // Verify Room is completely untouched
-        val postPreviewCount = db.permanentMemoryDao().getCount()
+        val postPreviewCount = db.permanentMemoryDao().getCount(ownerKey)
         assertEquals(0, postPreviewCount)
     }
 
@@ -202,7 +228,7 @@ class UniversalMemoryImportUnitTest {
         assertEquals(0, commitResult.skippedCount)
 
         // 3. Verify Room DB
-        val dbMemories = db.permanentMemoryDao().getAll()
+        val dbMemories = db.permanentMemoryDao().getAll(ownerKey)
         assertEquals(2, dbMemories.size)
 
         // 4. Re-Import exact same file -> Must be 100% idempotent
@@ -216,7 +242,7 @@ class UniversalMemoryImportUnitTest {
         val commitResult2 = importer.commit(preview2.items.map { it.candidate })
         assertEquals(0, commitResult2.insertedCount)
         assertEquals(2, commitResult2.skippedCount)
-        assertEquals(2, db.permanentMemoryDao().getCount())
+        assertEquals(2, db.permanentMemoryDao().getCount(ownerKey))
     }
 
     // -------------------------------------------------------------------------
@@ -232,7 +258,7 @@ class UniversalMemoryImportUnitTest {
 
         val preview1 = importer.preview(initialText)
         importer.commit(preview1.items.map { it.candidate })
-        assertEquals(1, db.permanentMemoryDao().getCount())
+        assertEquals(1, db.permanentMemoryDao().getCount(ownerKey))
 
         // Update content under same specific topic title and category
         val updatedText = """
@@ -247,7 +273,7 @@ class UniversalMemoryImportUnitTest {
         val commit2 = importer.commit(preview2.items.map { it.candidate })
         assertEquals(0, commit2.insertedCount)
         assertEquals(1, commit2.updatedCount)
-        assertEquals(1, db.permanentMemoryDao().getCount())
+        assertEquals(1, db.permanentMemoryDao().getCount(ownerKey))
     }
 
     // -------------------------------------------------------------------------
@@ -277,7 +303,7 @@ class UniversalMemoryImportUnitTest {
         assertTrue(file.length() > 0)
 
         // Check sync state in Room
-        val state = db.memorySyncStateDao().getSyncState()
+        val state = db.memorySyncStateDao().getSyncState(ownerKey)
         assertNotNull(state)
         assertNotNull(state?.lastWrittenFileHash)
         assertEquals(1, state?.lastSyncedMemoryCount)
@@ -312,7 +338,7 @@ class UniversalMemoryImportUnitTest {
         // 3. Detect external changes
         val check2 = syncService.detectExternalChanges()
         assertTrue(check2.hasChanges)
-        assertEquals("EXTERNAL_CHANGE", db.memorySyncStateDao().getSyncState()?.syncStatus)
+        assertEquals("EXTERNAL_CHANGE", db.memorySyncStateDao().getSyncState(ownerKey)?.syncStatus)
 
         // 4. Parse diff
         val diff = syncService.parseMarkdownDiff()
@@ -342,7 +368,8 @@ class UniversalMemoryImportUnitTest {
                 startDate = System.currentTimeMillis() - 2592000000L,
                 endDate = System.currentTimeMillis() - 2160000000L,
                 durationDays = 5,
-                notes = "Normal cycle"
+                notes = "Normal cycle",
+                ownerKey = ownerKey
             )
         )
 
@@ -436,7 +463,7 @@ class UniversalMemoryImportUnitTest {
         assertEquals("checksum_immutable_12345", updated.importChecksum)
 
         // DAO getByContentHash query test
-        val fetchedByHash = db.permanentMemoryDao().getByContentHash(newContentHash)
+        val fetchedByHash = db.permanentMemoryDao().getByContentHash(newContentHash, ownerKey)
         assertNotNull(fetchedByHash)
     }
 
@@ -451,7 +478,8 @@ class UniversalMemoryImportUnitTest {
                 title = "Original Fact",
                 content = "Original Content in Room",
                 category = "Personal",
-                type = MemoryType.FACT
+                type = MemoryType.FACT,
+                ownerKey = ownerKey
             )
         )
         syncService.exportToMarkdown()
@@ -469,7 +497,7 @@ class UniversalMemoryImportUnitTest {
         assertTrue(diff.hasDifferences)
 
         // Verify pendingChanges was saved in memory_sync_state
-        val stateWithPending = db.memorySyncStateDao().getSyncState()
+        val stateWithPending = db.memorySyncStateDao().getSyncState(ownerKey)
         assertNotNull(stateWithPending?.pendingChanges)
         assertTrue(stateWithPending?.pendingChanges!!.contains("addedCount"))
 
@@ -478,9 +506,9 @@ class UniversalMemoryImportUnitTest {
         assertTrue(rejectRes.success)
 
         // Verify Room remains unchanged (still only 1 original memory)
-        assertEquals(1, db.permanentMemoryDao().getCount())
+        assertEquals(1, db.permanentMemoryDao().getCount(ownerKey))
         // Verify MAX_MEMORY.md was restored and pendingChanges cleared
-        val stateAfterReject = db.memorySyncStateDao().getSyncState()
+        val stateAfterReject = db.memorySyncStateDao().getSyncState(ownerKey)
         assertEquals(null, stateAfterReject?.pendingChanges)
         assertEquals("IDLE", stateAfterReject?.syncStatus)
         val revertedDiskContent = file.readText()
@@ -494,9 +522,9 @@ class UniversalMemoryImportUnitTest {
 
         val acceptRes = syncService.applyExternalChanges(diff2.added, diff2.modified, diff2.removed.map { it.memoryId })
         assertTrue(acceptRes.success)
-        assertEquals(2, db.permanentMemoryDao().getCount())
+        assertEquals(2, db.permanentMemoryDao().getCount(ownerKey))
 
-        val stateAfterAccept = db.memorySyncStateDao().getSyncState()
+        val stateAfterAccept = db.memorySyncStateDao().getSyncState(ownerKey)
         assertEquals(null, stateAfterAccept?.pendingChanges)
         assertEquals("IDLE", stateAfterAccept?.syncStatus)
     }
@@ -523,10 +551,11 @@ class UniversalMemoryImportUnitTest {
                 title = "Item One",
                 content = "First item content.",
                 category = "Personal",
-                type = MemoryType.FACT
+                type = MemoryType.FACT,
+                ownerKey = ownerKey
             )
         )
-        assertEquals(1, db.permanentMemoryDao().getCount())
+        assertEquals(1, db.permanentMemoryDao().getCount(ownerKey))
 
         // 3. Commit candidates from preview
         val commitRes = importer.commit(preview.items.map { it.candidate })
@@ -535,7 +564,7 @@ class UniversalMemoryImportUnitTest {
         assertEquals(1, commitRes.skippedCount)
 
         // Total memories in Room must be 2, NOT 3 (zero duplicates)
-        assertEquals(2, db.permanentMemoryDao().getCount())
+        assertEquals(2, db.permanentMemoryDao().getCount(ownerKey))
     }
 
     // -------------------------------------------------------------------------
@@ -615,8 +644,8 @@ class UniversalMemoryImportUnitTest {
         assertFalse(backupJsonText.contains("token"))
 
         // Wipe DB to simulate clean restore
-        db.permanentMemoryDao().deleteAll()
-        assertEquals(0, db.permanentMemoryDao().getCount())
+        db.permanentMemoryDao().deleteAll(ownerKey)
+        assertEquals(0, db.permanentMemoryDao().getCount(ownerKey))
 
         // Import backup json
         val preview = importer.preview(backupJsonText, "memories.json")
@@ -624,6 +653,6 @@ class UniversalMemoryImportUnitTest {
         val commitRes = importer.commit(preview.items.map { it.candidate })
         assertTrue(commitRes.success)
         assertEquals(2, commitRes.insertedCount)
-        assertEquals(2, db.permanentMemoryDao().getCount())
+        assertEquals(2, db.permanentMemoryDao().getCount(ownerKey))
     }
 }

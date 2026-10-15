@@ -31,14 +31,53 @@ object InputTargetResolver {
         rootNode: AccessibilityNodeInfo,
         targetHint: String? = null
     ): ResolvedInput? {
-        // 1. Explicit target hint resolution
+        // 1. Explicit target hint resolution (with Dual-Anchor Grounding from Jarvis)
         if (!targetHint.isNullOrBlank()) {
             val res = UiTargetResolver.resolve(query = targetHint, rootNode = rootNode)
             if (res.success && res.target != null && res.matchedNode != null) {
                 val node = res.matchedNode
-                val isFocused = try { node.isFocused } catch (_: Exception) { false }
-                Log.d(TAG, "Resolved input by targetHint '$targetHint' (${res.method}, confidence=${res.confidence})")
-                return ResolvedInput(node, res.target, isFocused)
+                if (node.isEditable || isEditTextClass(node)) {
+                    val isFocused = try { node.isFocused } catch (_: Exception) { false }
+                    Log.d(TAG, "Resolved input by targetHint '$targetHint' (${res.method}, confidence=${res.confidence})")
+                    return ResolvedInput(node, res.target, isFocused)
+                }
+
+                // JARVIS DUAL-ANCHOR GROUNDING:
+                // If matchedNode is a static label/TextView, find the nearest editable field!
+                val allEditables = findAllEditableNodes(rootNode)
+                if (allEditables.isNotEmpty()) {
+                    val anchorBounds = android.graphics.Rect().also {
+                        try { node.getBoundsInScreen(it) } catch (_: Exception) {}
+                    }
+                    val nearestEditable = allEditables.minByOrNull { editNode ->
+                        val editBounds = android.graphics.Rect().also {
+                            try { editNode.getBoundsInScreen(it) } catch (_: Exception) {}
+                        }
+                        val dy = kotlin.math.abs(editBounds.centerY() - anchorBounds.centerY())
+                        val dx = kotlin.math.abs(editBounds.centerX() - anchorBounds.centerX())
+                        dy * 2 + dx
+                    }
+
+                    if (nearestEditable != null) {
+                        val editBounds = android.graphics.Rect().also {
+                            try { nearestEditable.getBoundsInScreen(it) } catch (_: Exception) {}
+                        }
+                        val dy = kotlin.math.abs(editBounds.centerY() - anchorBounds.centerY())
+                        if (dy <= 350) {
+                            val isFocused = try { nearestEditable.isFocused } catch (_: Exception) { false }
+                            val target = UiTarget(
+                                resourceId = try { nearestEditable.viewIdResourceName } catch (_: Exception) { null },
+                                text = try { nearestEditable.text?.toString() } catch (_: Exception) { null },
+                                contentDescription = try { nearestEditable.contentDescription?.toString() } catch (_: Exception) { null },
+                                role = "dual_anchor_editable_field",
+                                confidence = 0.94f,
+                                method = TargetResolutionMethod.EDITABLE
+                            )
+                            Log.d(TAG, "Dual-anchor grounded input next to label '$targetHint' (dy=$dy)")
+                            return ResolvedInput(nearestEditable, target, isFocused)
+                        }
+                    }
+                }
             }
         }
 

@@ -41,9 +41,12 @@ class AudioProcessor(
         val rawRms = sqrt(sum / size).toFloat()
         val normalizedRms = (rawRms / 32767f).coerceIn(0f, 1f)
 
+        // Compute actual chunk duration in ms based on sample count at 16kHz (e.g. 320 samples = 20ms, 640 samples = 40ms)
+        val durationMs = ((size * 1000L) / 16000L).coerceAtLeast(1L)
+
         if (normalizedRms >= speechThreshold) {
             silenceAccumulatorMs = 0L
-            speechAccumulatorMs += chunkDurationMs
+            speechAccumulatorMs += durationMs
             if (speechAccumulatorMs >= minSpeechDurationMs) {
                 isSpeaking = true
             }
@@ -53,7 +56,7 @@ class AudioProcessor(
         } else {
             // Silence
             if (isSpeaking) {
-                silenceAccumulatorMs += chunkDurationMs
+                silenceAccumulatorMs += durationMs
                 if (silenceAccumulatorMs >= silenceDurationMs) {
                     isSpeaking = false
                     silenceAccumulatorMs = 0L

@@ -3,6 +3,9 @@ package com.example.memory.skill
 import android.content.Context
 import android.util.Log
 import com.example.automation.state.ActionStep
+import com.example.memory.account.MemoryAccountScope
+import com.example.memory.account.MemorySession
+import com.example.memory.security.MemoryCryptography
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -18,7 +21,7 @@ import java.util.UUID
  *
  * Thread-safety: all I/O is dispatched to [Dispatchers.IO].
  */
-class SkillMemoryRepository(context: Context) {
+class SkillMemoryRepository(context: Context, private val boundSession: MemorySession? = null) {
 
     companion object {
         private const val TAG = "SkillMemoryRepository"
@@ -35,7 +38,10 @@ class SkillMemoryRepository(context: Context) {
         )
     }
 
-    private val skillsFile = File(context.applicationContext.filesDir, FILE_NAME)
+    private val filesDir = context.applicationContext.filesDir
+    private fun session() = boundSession ?: MemoryAccountScope.capture()
+    private fun skillsFile(session: MemorySession): File =
+        File(File(filesDir, "memory-accounts/${MemoryAccountScope.directoryName(session)}"), FILE_NAME)
 
     // ── Keyword normalisation & similarity ────────────────────────────────────
 
@@ -59,15 +65,17 @@ class SkillMemoryRepository(context: Context) {
 
     // ── IO helpers ────────────────────────────────────────────────────────────
 
-    private suspend fun loadAll(): MutableList<SavedSkill> = withContext(Dispatchers.IO) {
+    private suspend fun loadAll(session: MemorySession): MutableList<SavedSkill> = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         val list = mutableListOf<SavedSkill>()
+        val skillsFile = skillsFile(session)
         if (!skillsFile.exists()) return@withContext list
         try {
             skillsFile.forEachLine { line ->
                 val trimmed = line.trim()
                 if (trimmed.isNotEmpty()) {
                     try {
-                        list.add(SavedSkill.fromJson(JSONObject(trimmed)))
+                        list.add(SavedSkill.fromJson(JSONObject(MemoryCryptography.decrypt(trimmed))))
                     } catch (e: Exception) {
                         Log.w(TAG, "Skipping malformed skill line: ${e.message}")
                     }
@@ -76,12 +84,17 @@ class SkillMemoryRepository(context: Context) {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to read skills file: ${e.message}")
         }
+        MemoryAccountScope.requireCurrent(session)
         list
     }
 
-    private suspend fun saveAll(skills: List<SavedSkill>) = withContext(Dispatchers.IO) {
+    private suspend fun saveAll(skills: List<SavedSkill>, session: MemorySession) = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         try {
-            val content = skills.joinToString("\n") { it.toJson().toString() }
+            val skillsFile = skillsFile(session)
+            skillsFile.parentFile?.mkdirs()
+            val content = skills.joinToString("\n") { MemoryCryptography.encrypt(it.toJson().toString()) }
+            MemoryAccountScope.requireCurrent(session)
             skillsFile.writeText(if (content.isNotEmpty()) "$content\n" else "")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to write skills file: ${e.message}")
@@ -95,11 +108,12 @@ class SkillMemoryRepository(context: Context) {
      * above [MATCH_THRESHOLD].  Returns the best matching [SavedSkill], or null if none
      * qualifies.
      */
-    suspend fun findSkill(goal: String): SavedSkill? = withContext(Dispatchers.IO) {
+    suspend fun findSkill(goal: String, session: MemorySession = session()): SavedSkill? = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         val queryKeywords = extractKeywords(goal)
         if (queryKeywords.isEmpty()) return@withContext null
 
-        val skills = loadAll()
+        val skills = loadAll(session)
         var bestMatch: SavedSkill? = null
         var highestSim = 0.0
 
@@ -111,6 +125,7 @@ class SkillMemoryRepository(context: Context) {
             }
         }
 
+        MemoryAccountScope.requireCurrent(session)
         if (highestSim > MATCH_THRESHOLD) {
             Log.d(TAG, "Skill match found for '$goal': '${bestMatch?.task}' (sim=${"%.2f".format(highestSim)})")
             bestMatch
@@ -128,10 +143,11 @@ class SkillMemoryRepository(context: Context) {
      * - A failed execution must NOT be passed here; use [recordFailure] instead.
      * - Only successful executions should call this method.
      */
-    suspend fun saveSkill(goal: String, steps: List<ActionStep>) = withContext(Dispatchers.IO) {
+    suspend fun saveSkill(goal: String, steps: List<ActionStep>, session: MemorySession = session()) = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         if (steps.isEmpty()) return@withContext
         val queryKeywords = extractKeywords(goal)
-        val skills = loadAll()
+        val skills = loadAll(session)
         val now = System.currentTimeMillis()
 
         // Check for a near-duplicate existing skill
@@ -152,7 +168,7 @@ class SkillMemoryRepository(context: Context) {
         }
 
         if (updated) {
-            saveAll(updatedList)
+            saveAll(updatedList, session)
             Log.i(TAG, "Updated existing skill for: '$goal'")
         } else {
             val newSkill = SavedSkill(
@@ -166,11 +182,14 @@ class SkillMemoryRepository(context: Context) {
             )
             // Atomic append: avoid full rewrite when just adding
             try {
-                skillsFile.appendText("${newSkill.toJson()}\n")
+                val skillsFile = skillsFile(session)
+                skillsFile.parentFile?.mkdirs()
+                MemoryAccountScope.requireCurrent(session)
+                skillsFile.appendText("${MemoryCryptography.encrypt(newSkill.toJson().toString())}\n")
                 Log.i(TAG, "Saved new skill for: '$goal' (${steps.size} steps)")
             } catch (e: Exception) {
                 Log.e(TAG, "Append failed, falling back to full rewrite: ${e.message}")
-                saveAll(skills + newSkill)
+                saveAll(skills + newSkill, session)
             }
         }
     }
@@ -179,21 +198,23 @@ class SkillMemoryRepository(context: Context) {
      * Increments the failure counter for a skill with the given [skillId].
      * Does not remove or overwrite the skill; only updates its failure count.
      */
-    suspend fun recordFailure(skillId: String) = withContext(Dispatchers.IO) {
-        val skills = loadAll()
+    suspend fun recordFailure(skillId: String, session: MemorySession = session()) = withContext(Dispatchers.IO) {
+        val skills = loadAll(session)
         val updated = skills.map { skill ->
             if (skill.id == skillId) skill.copy(failCount = skill.failCount + 1) else skill
         }
-        saveAll(updated)
+        saveAll(updated, session)
         Log.d(TAG, "Recorded failure for skill: $skillId")
     }
 
     /** Returns all stored skills (for diagnostics / UI). */
-    suspend fun getAllSkills(): List<SavedSkill> = loadAll()
+    suspend fun getAllSkills(session: MemorySession = session()): List<SavedSkill> = loadAll(session)
 
     /** Removes all stored skills. */
-    suspend fun clearAllSkills() = withContext(Dispatchers.IO) {
+    suspend fun clearAllSkills(session: MemorySession = session()) = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         try {
+            val skillsFile = skillsFile(session)
             if (skillsFile.exists()) skillsFile.delete()
             Log.i(TAG, "Skill memory cleared.")
         } catch (e: Exception) {

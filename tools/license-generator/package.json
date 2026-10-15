@@ -9,7 +9,11 @@
   "scripts": {
     "start": "node generate.js",
     "generate": "node generate.js",
-    "create-key": "node generate.js --register"
+    "create-key": "node generate.js --register",
+    "register-key": "node generate.js --register-key",
+    "grant-user": "node generate.js --grant-user",
+    "list-keys": "node generate.js --list",
+    "status": "node generate.js --status"
   },
   "keywords": [
     "max",

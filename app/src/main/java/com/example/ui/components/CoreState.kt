@@ -29,23 +29,23 @@ enum class CoreState {
 
     val primaryColor: Color
         get() = when (this) {
-            IDLE -> JarvisGold
-            LISTENING -> AccentCyan
-            THINKING -> Color(0xFFF43F5E) // Neon Rose
-            SPEAKING -> Color(0xFFD946EF) // Electric Magenta
-            VISION -> Color(0xFF10B981) // Emerald Green
-            EXECUTING -> Color(0xFF3B82F6) // Blue Pulse
-            ERROR -> NeonPink
+            IDLE -> MaxSemanticColors.royalGold
+            LISTENING -> MaxSemanticColors.accentCyan
+            THINKING -> MaxSemanticColors.accentPink
+            SPEAKING -> MaxSemanticColors.primaryRoyal
+            VISION -> MaxSemanticColors.success
+            EXECUTING -> MaxSemanticColors.info
+            ERROR -> MaxSemanticColors.error
         }
 
     val secondaryColor: Color
         get() = when (this) {
-            IDLE -> Color(0xFF00E5FF)
-            LISTENING -> Blue600
-            THINKING -> JarvisAmber
-            SPEAKING -> AccentPurple
-            VISION -> Color(0xFF064E3B)
-            EXECUTING -> AccentCyan
-            ERROR -> Color(0xFF990033)
+            IDLE -> MaxSemanticColors.accentCyan
+            LISTENING -> MaxSemanticColors.primaryRoyal
+            THINKING -> MaxSemanticColors.warning
+            SPEAKING -> MaxSemanticColors.primaryRoyal
+            VISION -> MaxSemanticColors.successSurface
+            EXECUTING -> MaxSemanticColors.accentCyan
+            ERROR -> MaxSemanticColors.errorSurface
         }
 }

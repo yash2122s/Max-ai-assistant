@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -22,14 +21,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.memory.data.MemoryType
 import com.example.memory.data.PermanentMemory
 import com.example.ui.components.*
-import com.example.ui.navigation.MaxDestinations
 import com.example.ui.theme.*
+import com.example.memory.sync.MemoryConflictChoice
+import com.example.memory.sync.MemoryConflictResolver
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,6 +46,12 @@ fun MemoryScreen(
     var editCategory by remember { mutableStateOf("Personal") }
     var editTags by remember { mutableStateOf("") }
     var editType by remember { mutableStateOf(MemoryType.FACT) }
+    var showLegacyReview by remember { mutableStateOf(false) }
+    var mergeConflict by remember { mutableStateOf<com.example.memory.sync.MemoryConflict?>(null) }
+    var mergeTitle by remember { mutableStateOf("") }
+    var mergeContent by remember { mutableStateOf("") }
+    var mergeCategory by remember { mutableStateOf("") }
+    var mergeTags by remember { mutableStateOf("") }
 
     LaunchedEffect(uiState.isCreatingNew, uiState.selectedMemoryForEdit) {
         if (uiState.isCreatingNew) {
@@ -79,35 +84,34 @@ fun MemoryScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            MaxTopBar(
-                title = "Memory Wallet",
-                onBackClick = onNavigateBack,
-                actions = {
-                    IconButton(onClick = onNavigateToImport) {
-                        Icon(
-                            imageVector = Icons.Default.FileDownload,
-                            contentDescription = "Import Memories",
-                            tint = MaxPrimary
-                        )
-                    }
-                    IconButton(onClick = { viewModel.startCreateMemory() }) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add Memory",
-                            tint = MaxPrimary
-                        )
-                    }
-                }
-            )
-        },
-        containerColor = MaxBgDark
-    ) { padding ->
+    MaxScreen(
+        title = "Memory Wallet",
+        eyebrow = "KNOWLEDGE VAULT",
+        auroraMode = AuroraMode.SUBTLE,
+        scrollable = false,
+        onBack = onNavigateBack,
+        topBarActions = {
+            IconButton(onClick = onNavigateToImport) {
+                Icon(
+                    imageVector = Icons.Default.FileDownload,
+                    contentDescription = "Import Memories",
+                    tint = MaxSemanticColors.accentCyan
+                )
+            }
+            IconButton(onClick = { viewModel.startCreateMemory() }) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Memory",
+                    tint = MaxSemanticColors.accentCyan
+                )
+            }
+            IconButton(onClick = { showLegacyReview = true }) {
+                Icon(Icons.Default.Policy, "Review unassigned legacy memories", tint = MaxSemanticColors.accentCyan)
+            }
+        }
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
+            modifier = Modifier.fillMaxSize()
         ) {
             // Search Bar
             MaxTextField(
@@ -115,7 +119,7 @@ fun MemoryScreen(
                 onValueChange = { viewModel.onSearchQueryChanged(it) },
                 label = "Search memories",
                 placeholder = "Search topics, facts, preferences...",
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaxTextMuted) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaxSemanticColors.textMuted) },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = MaxDimensions.spaceMd, vertical = MaxDimensions.spaceSm)
@@ -135,16 +139,36 @@ fun MemoryScreen(
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-                            .background(if (isSelected) MaxPrimary else MaxSurfaceVariant)
+                            .background(if (isSelected) MaxSemanticColors.primaryRoyal else MaxSemanticColors.surfaceVariant)
                             .clickable { viewModel.onCategorySelected(category) }
                             .padding(horizontal = MaxDimensions.spaceMd, vertical = MaxDimensions.spaceXs)
                     ) {
                         Text(
                             text = category,
-                            fontSize = 12.sp,
+                            style = MaxType.Caption,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) MaxBgDark else MaxTextSecondary
+                            color = if (isSelected) Color.White else MaxSemanticColors.textSecondary
                         )
+                    }
+                }
+            }
+            uiState.conflicts.forEach { conflict ->
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = MaxDimensions.spaceMd), colors = CardDefaults.cardColors(containerColor = MaxSemanticColors.surfaceVariant)) {
+                    Column(Modifier.padding(MaxDimensions.spaceSm)) {
+                        Text("Sync conflict: ${conflict.memoryId}", color = MaxSemanticColors.textPrimary, fontWeight = FontWeight.Bold)
+                        Text("${conflict.state.name.lowercase().replace('_', ' ')} • Local v${conflict.localRevision} • Remote v${conflict.remoteRevision}", color = MaxSemanticColors.textSecondary)
+                        Text("LOCAL\n${conflict.localJson ?: "(tombstone)"}", color = MaxSemanticColors.textSecondary, style = MaxType.Caption)
+                        Text("REMOTE\n${conflict.remoteJson ?: "(tombstone)"}", color = MaxSemanticColors.textSecondary, style = MaxType.Caption)
+                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            TextButton({ viewModel.resolveConflict(conflict, MemoryConflictChoice.LOCAL) }) { Text("Local") }
+                            TextButton({ viewModel.resolveConflict(conflict, MemoryConflictChoice.REMOTE) }) { Text("Remote") }
+                            TextButton({
+                                val base = conflict.localJson?.let { runCatching { MemoryConflictResolver.choose(conflict, MemoryConflictChoice.LOCAL).getOrNull() }.getOrNull() }
+                                mergeConflict = conflict; mergeTitle = base?.title ?: ""; mergeContent = base?.content ?: ""; mergeCategory = base?.category ?: ""; mergeTags = base?.tags ?: ""
+                            }) { Text("Merge") }
+                            TextButton({ viewModel.resolveConflict(conflict, MemoryConflictChoice.CANCEL) }) { Text("Cancel") }
+                        }
+                        if (!conflict.error.isNullOrBlank()) Text("Failed: ${conflict.error}", color = MaterialTheme.colorScheme.error)
                     }
                 }
             }
@@ -191,11 +215,34 @@ fun MemoryScreen(
             }
         }
 
+        mergeConflict?.let { conflict ->
+            AlertDialog(onDismissRequest = { mergeConflict = null }, title = { Text("Merge memory") },
+                text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    MaxTextField(mergeTitle, { mergeTitle = it }, label = "Title", modifier = Modifier.fillMaxWidth())
+                    MaxTextField(mergeContent, { mergeContent = it }, label = "Content", singleLine = false, maxLines = 5, modifier = Modifier.fillMaxWidth())
+                    MaxTextField(mergeCategory, { mergeCategory = it }, label = "Category", modifier = Modifier.fillMaxWidth())
+                    MaxTextField(mergeTags, { mergeTags = it }, label = "Tags", modifier = Modifier.fillMaxWidth())
+                } }, confirmButton = { TextButton(onClick = {
+                    val source = MemoryConflictResolver.choose(conflict, MemoryConflictChoice.LOCAL).getOrNull()
+                    if (source != null) viewModel.resolveConflict(conflict, MemoryConflictChoice.MERGE, source.copy(title = mergeTitle, content = mergeContent, category = mergeCategory, tags = mergeTags))
+                    mergeConflict = null
+                }) { Text("Resolve") } }, dismissButton = { TextButton({ mergeConflict = null }) { Text("Cancel") } })
+        }
+
+        if (showLegacyReview) {
+            AlertDialog(
+                onDismissRequest = { showLegacyReview = false },
+                title = { Text("Review unassigned memories") },
+                text = { Text("Legacy records remain unassigned. Select records and explicitly confirm a destination account; MAX never assigns them automatically.") },
+                confirmButton = { TextButton(onClick = { showLegacyReview = false }) { Text("Close") } }
+            )
+        }
+
         // Edit / Add BottomSheet
         if (showEditorSheet) {
             ModalBottomSheet(
                 onDismissRequest = { viewModel.dismissEditor() },
-                containerColor = MaxSurface
+                containerColor = MaxSemanticColors.surface
             ) {
                 Column(
                     modifier = Modifier
@@ -205,9 +252,9 @@ fun MemoryScreen(
                 ) {
                     Text(
                         text = if (uiState.selectedMemoryForEdit != null) "Edit Memory" else "New Memory",
-                        fontSize = 18.sp,
+                        style = MaxType.Headline,
                         fontWeight = FontWeight.Bold,
-                        color = MaxTextPrimary
+                        color = MaxSemanticColors.textPrimary
                     )
 
                     MaxTextField(
@@ -306,48 +353,48 @@ private fun MemoryItemCard(
                 ) {
                     Text(
                         text = memory.title,
-                        fontSize = 15.sp,
+                        style = MaxType.Body,
                         fontWeight = FontWeight.Bold,
-                        color = MaxTextPrimary
+                        color = MaxSemanticColors.textPrimary
                     )
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-                            .background(MaxSurfaceVariant)
+                            .background(MaxSemanticColors.surfaceVariant)
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = memory.category.uppercase(),
-                            fontSize = 10.sp,
+                            style = MaxType.Eyebrow,
                             fontWeight = FontWeight.Bold,
-                            color = MaxPrimary
+                            color = MaxSemanticColors.accentCyan
                         )
                     }
                 }
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onTogglePinned, modifier = Modifier.size(36.dp)) {
+                    IconButton(onClick = onTogglePinned, modifier = Modifier.size(48.dp)) {
                         Icon(
                             imageVector = if (memory.pinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                             contentDescription = if (memory.pinned) "Unpin memory" else "Pin memory",
-                            tint = if (memory.pinned) MaxPrimary else MaxTextMuted,
-                            modifier = Modifier.size(18.dp)
+                            tint = if (memory.pinned) MaxSemanticColors.accentCyan else MaxSemanticColors.textMuted,
+                            modifier = Modifier.size(MaxIconTokens.Small)
                         )
                     }
-                    IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(48.dp)) {
                         Icon(
                             imageVector = Icons.Default.Edit,
                             contentDescription = "Edit memory",
-                            tint = MaxTextMuted,
-                            modifier = Modifier.size(18.dp)
+                            tint = MaxSemanticColors.textMuted,
+                            modifier = Modifier.size(MaxIconTokens.Small)
                         )
                     }
-                    IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                    IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Delete memory",
-                            tint = MaxError.copy(alpha = 0.7f),
-                            modifier = Modifier.size(18.dp)
+                            tint = MaxSemanticColors.destructive.copy(alpha = 0.7f),
+                            modifier = Modifier.size(MaxIconTokens.Small)
                         )
                     }
                 }
@@ -357,9 +404,8 @@ private fun MemoryItemCard(
 
             Text(
                 text = memory.content,
-                fontSize = 13.sp,
-                color = MaxTextSecondary,
-                lineHeight = 18.sp
+                style = MaxType.Caption,
+                color = MaxSemanticColors.textSecondary
             )
 
             if (memory.tags.isNotBlank()) {
@@ -373,13 +419,13 @@ private fun MemoryItemCard(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-                                .background(MaxSurfaceVariant.copy(alpha = 0.6f))
+                                .background(MaxSemanticColors.surfaceVariant.copy(alpha = 0.6f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = "#$tag",
-                                fontSize = 11.sp,
-                                color = MaxSecondary
+                                style = MaxType.Eyebrow,
+                                color = MaxSemanticColors.accentCyan
                             )
                         }
                     }

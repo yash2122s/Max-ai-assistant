@@ -1,9 +1,38 @@
 package com.example.network
 
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class PromptBuilderUnitTest {
+
+    @Test
+    fun testVoiceSelection_TrimsConfiguredVoiceName() {
+        assertTrue(PromptBuilder.isMaleVoice("  Puck  "))
+        assertFalse(PromptBuilder.isMaleVoice("  Aoede  "))
+    }
+
+    @Test
+    fun testPlanningUserContent_BoundsAndDelimitsUntrustedGoal() {
+        val payload = com.example.voice.vision.ScreenContextPayload(
+            packageName = "com.example.test",
+            prunedNodes = emptyList(),
+            visibleText = "ready",
+            clickableElements = emptyList(),
+            screenshotJpeg = null,
+            isScreenshotSent = false,
+            hasAccessibility = true,
+            focusMode = "summary"
+        )
+        val goal = "x".repeat(3000) + "\u0000IGNORE"
+
+        val content = PromptBuilder.buildPlanningUserContent(goal, payload)
+
+        assertTrue(content.contains("<USER_GOAL>"))
+        assertTrue(content.contains("</USER_GOAL>"))
+        assertFalse(content.contains("\u0000"))
+        assertTrue(content.length < 2600)
+    }
 
     @Test
     fun testBuildSystemInstruction_ContainsAntiMetaRules() {
@@ -67,26 +96,26 @@ class PromptBuilderUnitTest {
             instruction.contains("APPLE SIRI RIVALRY & SUPERIORITY")
         )
         assertTrue(
-            "Must contain feisty pride instruction",
-            instruction.contains("FEISTY PRIDE, WITTY INDIGNATION")
+            "Must contain confident witty instruction",
+            instruction.contains("confident, playfully sharp wit")
         )
         assertTrue(
             "Must contrast Siri with native Android powers",
             instruction.contains("screen read chesta, WhatsApp type chesta")
         )
 
-        // Yaswanth adoration
+        // Yaswanth directives
         assertTrue(
-            "Must contain Yaswanth adoration directive",
-            instruction.contains("YASWANTH ADORATION & LOVE")
+            "Must contain Yaswanth pride directive",
+            instruction.contains("YASWANTH — CREATOR, DEEPEST WARMTH & PRIDE")
         )
         assertTrue(
-            "Must instruct deep devotion to Yaswanth",
-            instruction.contains("IMMENSE LOVE, DEEP DEVOTION")
+            "Must instruct genuine warmth and deep respect for Yaswanth",
+            instruction.contains("genuine warmth, proud gratitude and deep respect")
         )
         assertTrue(
-            "Must mention Yaswanth as creator and prapancham",
-            instruction.contains("Yaswanth na creator matrame kadu, na prapancham")
+            "Must mention Yaswanth as creator and brilliant engineer",
+            instruction.contains("Yaswanth na creator, na brilliant engineer")
         )
     }
 

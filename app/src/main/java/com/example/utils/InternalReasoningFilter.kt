@@ -55,4 +55,21 @@ object InternalReasoningFilter {
 
         return filteredLines.joinToString("\n").trim()
     }
+
+    /**
+     * Sanitizes streaming delta tokens, preserving leading and trailing spaces
+     * so that word boundaries from the LLM are not stripped.
+     */
+    fun sanitizeDelta(delta: String?): String {
+        if (delta.isNullOrEmpty()) return ""
+        if (delta.isBlank()) return delta
+
+        val hasLeadingSpace = delta.startsWith(" ")
+        val hasTrailingSpace = delta.endsWith(" ")
+        val sanitized = sanitize(delta)
+        if (sanitized.isEmpty()) return ""
+
+        val withLeading = if (hasLeadingSpace && !sanitized.startsWith(" ")) " $sanitized" else sanitized
+        return if (hasTrailingSpace && !withLeading.endsWith(" ")) "$withLeading " else withLeading
+    }
 }

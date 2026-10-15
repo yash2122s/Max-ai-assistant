@@ -64,24 +64,48 @@ Incoming WhatsApp notification
 
 ## AutomationTask Steps (Accessibility)
 WhatsApp automation steps tracked in `AutomationTask.step`:
-- Step 0: Wait for WA to open
-- Step 1: Find and click search / contact
-- Step 2: Type message
-- Step 3: Find and click send button
-- Failsafe: 20s timeout → cancel
+- **Step 0 (Grounding & Active Chat Check)**:
+  - Verifies if target contact chat is already open via `WhatsAppContactResolver.isCorrectChatOpen(root, target)`.
+  - Checks if a different chat is open; unwinds back to the conversation list if needed.
+  - Matches visible chat row in conversation list; if not found, taps WhatsApp Search.
+- **Step 1 (Search Typing)**:
+  - Enters target contact into search input via `ACTION_SET_TEXT`.
+  - Enforces 300ms transition delay for search results to render.
+- **Step 2 (Contact Resolution & Selection)**:
+  - Resolves matching contact row in fresh tree via `resolveSearchRow(root, target)`.
+  - Clicks target row; advances to Step 3 with a 400ms transition delay.
+- **Step 3 (Chat Entry & Text Insertion)**:
+  - Verifies chat header.
+  - If message is blank (`open_whatsapp_chat` action), completes task successfully.
+  - If message is present, injects text via `ACTION_SET_TEXT` into message entry node.
+  - Enforces 200ms delay for WhatsApp to transition mic button to send button.
+- **Step 4 (Send Button Dispatch)**:
+  - Locates Send button in fresh tree (`findWhatsAppSendNode()` checking view IDs, content description, and English/Telugu labels: "Send", "పంపు", "పంపించు").
+  - Dispatches click and sets `SEND_ACTION_CONFIRMED`.
+- **Step 5 (Post-Send Verification)**:
+  - Verifies that input entry text was cleared or outgoing message bubble appeared.
+  - Completes task with verified outcome.
+- **Failsafe**: 20s watchdog timeout cleans up any abandoned automation safely.
 
-## Known Limitations
-- **Name search is heuristic** — depends on WA contact list order and accessibility node text
-- **WhatsApp UI changes** can break automation (accessibility node IDs change per WA version)
-- **No read-receipts** — cannot confirm if message was delivered
-- **Deep-link requires phone number** with country code (auto-adds +91 for 10-digit numbers)
-- **Scheduled messages** require accessibility service active at alarm time
-- **Group messages** not directly supported — requires manual group name navigation
+## Screen Navigation
+Supports navigating directly to WhatsApp tabs and screens:
+- `chats`: Main chat conversations list
+- `updates` / `status`: Status / Updates tab
+- `calls`: Audio & Video call history tab
+- `communities`: Communities tab
+- `settings`: In-app settings screen
+- `new_chat`: New message contact picker
+- `linked_devices`: Linked devices management
+- `starred_messages`: Bookmarked / starred messages
 
-## Current Status: IMPLEMENTED ✅
-Both deep-link (phone#) and search-based automation working. Auto-reply working.
+## Supported Tools & Intents
+- `send_whatsapp_message`: Sends message to contact or phone number.
+- `open_whatsapp_chat`: Opens conversation without sending text.
+- `navigate_whatsapp`: Navigates directly to any WhatsApp section/tab.
+- Direct Offline Voice Command Engine: English, Telugu, and Tinglish regex patterns parsed locally without network latency.
 
-## Extension Points
-- Add contacts cache to avoid re-searching
-- Add Shizuku-based send for faster/more reliable automation
-- Add message delivery confirmation via notification monitoring
+## Current Status: IMPLEMENTED & VERIFIED ✅
+- Native Accessibility Service automation is the first, authoritative, sub-second execution path.
+- Deep-link and in-app contact search automation both functional.
+- Zero ANR: removed blocking `runBlocking` calls from main dispatch path.
+- Telugu language and Tinglish phonetic variants fully recognized across all stages.

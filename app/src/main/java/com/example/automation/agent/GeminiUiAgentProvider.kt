@@ -26,6 +26,14 @@ class GeminiUiAgentProvider : UiAgentProvider {
         const val FALLBACK_MODEL = UiAgentModels.GEMINI_UI_AGENT_FALLBACK
         private const val TAG = "GeminiUiAgentProvider"
         private const val TIMEOUT_MS = 25_000
+
+        internal fun buildGenerateContentUrl(model: String): String =
+            "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent"
+
+        internal fun configureGeminiRequest(connection: HttpURLConnection, apiKey: String) {
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty("x-goog-api-key", apiKey)
+        }
     }
 
     override val id: String = PROVIDER_ID
@@ -50,15 +58,15 @@ class GeminiUiAgentProvider : UiAgentProvider {
 
         val targetModel = UiAgentModels.sanitizeModelName(model)
         val startTime = System.currentTimeMillis()
+        var connection: HttpURLConnection? = null
 
         try {
-            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$effectiveKey"
-            val url = URL(endpoint)
-            val connection = (url.openConnection() as HttpURLConnection).apply {
+            val url = URL(buildGenerateContentUrl(targetModel))
+            connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS
-                setRequestProperty("Content-Type", "application/json")
+                configureGeminiRequest(this, effectiveKey)
                 doOutput = true
             }
 
@@ -78,6 +86,7 @@ class GeminiUiAgentProvider : UiAgentProvider {
             val latency = System.currentTimeMillis() - startTime
 
             if (responseCode in 200..299) {
+                connection.inputStream.use { }
                 UiAgentTestResult(
                     success = true,
                     message = "Connected to Gemini ($targetModel) in ${latency}ms",
@@ -86,8 +95,8 @@ class GeminiUiAgentProvider : UiAgentProvider {
                     latencyMs = latency
                 )
             } else {
-                val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-                Log.w(TAG, "Gemini test connection failed with HTTP $responseCode ($targetModel): $errorBody")
+                connection.errorStream?.bufferedReader()?.use { it.readText() }
+                Log.w(TAG, "Gemini test connection failed with HTTP $responseCode ($targetModel)")
                 val friendlyMessage = when (responseCode) {
                     404 -> "Model '$targetModel' is unavailable on Gemini API."
                     429 -> "Gemini API rate limit reached."
@@ -103,16 +112,21 @@ class GeminiUiAgentProvider : UiAgentProvider {
                     errorCode = "HTTP_$responseCode"
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Gemini test connection error", e)
+            Log.e(TAG, "Gemini test connection error: ${e.javaClass.simpleName}")
             UiAgentTestResult(
                 success = false,
-                message = "Network error: ${e.localizedMessage ?: "Failed to reach Gemini"}",
+                message = "Network error: Failed to reach Gemini",
                 provider = id,
                 model = targetModel,
                 latencyMs = System.currentTimeMillis() - startTime,
                 errorCode = "NETWORK_ERROR"
             )
+        } finally {
+            // HttpURLConnection is not Closeable; disconnect releases its socket and streams.
+            connection?.disconnect()
         }
     }
 
@@ -177,15 +191,15 @@ class GeminiUiAgentProvider : UiAgentProvider {
             return@withContext UiAgentReasoningResult.Error("Gemini API key is missing", errorCode = "MISSING_KEY", retryable = false)
         }
         val targetModel = GeminiModelResolver.resolveBestUiModel(effectiveKey, model)
+        var connection: HttpURLConnection? = null
 
         try {
-            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$effectiveKey"
-            val url = URL(endpoint)
-            val connection = (url.openConnection() as HttpURLConnection).apply {
+            val url = URL(buildGenerateContentUrl(targetModel))
+            connection = (url.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS
-                setRequestProperty("Content-Type", "application/json")
+                configureGeminiRequest(this, effectiveKey)
                 doOutput = true
             }
 
@@ -197,8 +211,8 @@ class GeminiUiAgentProvider : UiAgentProvider {
                 val responseText = connection.inputStream.bufferedReader().use { it.readText() }
                 parseGeminiResponse(responseText)
             } else {
-                val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-                Log.w(TAG, "Gemini reasoning request failed with HTTP $responseCode ($targetModel): $errorBody")
+                connection.errorStream?.bufferedReader()?.use { it.readText() }
+                Log.w(TAG, "Gemini reasoning request failed with HTTP $responseCode ($targetModel)")
                 
                 // If 404 (model not available) and targetModel wasn't already the fallback, attempt fallback model
                 if (responseCode == 404 && targetModel != UiAgentModels.GEMINI_UI_AGENT_FALLBACK) {
@@ -222,13 +236,17 @@ class GeminiUiAgentProvider : UiAgentProvider {
                     retryable = (responseCode != 401 && responseCode != 403)
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Log.e(TAG, "Gemini reasoning network error", e)
+            Log.e(TAG, "Gemini reasoning network error: ${e.javaClass.simpleName}")
             UiAgentReasoningResult.Error(
                 message = "UI Agent network connection issue. Retrying...",
                 errorCode = "NETWORK_ERROR",
                 retryable = true
             )
+        } finally {
+            connection?.disconnect()
         }
     }
 
@@ -239,13 +257,13 @@ class GeminiUiAgentProvider : UiAgentProvider {
         apiKey: String,
         targetModel: String
     ): UiAgentReasoningResult {
+        var connection: HttpURLConnection? = null
         try {
-            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent?key=$apiKey"
-            val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+            connection = (URL(buildGenerateContentUrl(targetModel)).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 connectTimeout = TIMEOUT_MS
                 readTimeout = TIMEOUT_MS
-                setRequestProperty("Content-Type", "application/json")
+                configureGeminiRequest(this, apiKey)
                 doOutput = true
             }
 
@@ -257,12 +275,16 @@ class GeminiUiAgentProvider : UiAgentProvider {
                 val responseText = connection.inputStream.bufferedReader().use { it.readText() }
                 parseGeminiResponse(responseText)
             } else {
-                val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() } ?: "HTTP $responseCode"
-                Log.w(TAG, "Fallback Gemini reasoning request failed with HTTP $responseCode ($targetModel): $errorBody")
+                connection.errorStream?.bufferedReader()?.use { it.readText() }
+                Log.w(TAG, "Fallback Gemini reasoning request failed with HTTP $responseCode ($targetModel)")
                 UiAgentReasoningResult.Error("UI Agent is temporarily unavailable. Reconnecting...", errorCode = "HTTP_$responseCode")
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             return UiAgentReasoningResult.Error("UI Agent network connection issue.", errorCode = "NETWORK_ERROR")
+        } finally {
+            connection?.disconnect()
         }
     }
 
@@ -406,16 +428,16 @@ class GeminiUiAgentProvider : UiAgentProvider {
     private fun mapGeminiAction(name: String, args: JSONObject): UiAgentReasoningResult {
         return when (name.lowercase()) {
             "tap" -> UiAgentReasoningResult.ActionDecision(
-                action = UiAction(type = UiAction.Type.TAP, x = args.optInt("x", 500), y = args.optInt("y", 1000)),
-                reasoning = "Gemini tap at (${args.optInt("x")}, ${args.optInt("y")})"
+                action = UiAction(type = UiAction.Type.TAP, x = optionalCoordinate(args, "x"), y = optionalCoordinate(args, "y")),
+                reasoning = "Gemini tap at (${optionalCoordinate(args, "x")}, ${optionalCoordinate(args, "y")})"
             )
             "swipe" -> UiAgentReasoningResult.ActionDecision(
                 action = UiAction(
                     type = UiAction.Type.SWIPE,
-                    x = args.optInt("start_x", 500),
-                    y = args.optInt("start_y", 1200),
-                    endX = args.optInt("end_x", 500),
-                    endY = args.optInt("end_y", 400)
+                    x = optionalCoordinate(args, "start_x"),
+                    y = optionalCoordinate(args, "start_y"),
+                    endX = optionalCoordinate(args, "end_x"),
+                    endY = optionalCoordinate(args, "end_y")
                 ),
                 reasoning = "Gemini swipe"
             )
@@ -442,5 +464,14 @@ class GeminiUiAgentProvider : UiAgentProvider {
             )
             else -> UiAgentReasoningResult.Error("Unknown function call: $name")
         }
+    }
+
+    private fun optionalCoordinate(args: JSONObject, key: String): Int? {
+        val value = args.opt(key)
+        if (value !is Number) return null
+        val doubleValue = value.toDouble()
+        if (!doubleValue.isFinite() || doubleValue % 1.0 != 0.0) return null
+        if (doubleValue < Int.MIN_VALUE || doubleValue > Int.MAX_VALUE) return null
+        return doubleValue.toInt()
     }
 }

@@ -13,36 +13,44 @@ This is an **owner-only** utility for generating and hashing commercial lifetime
 - **Hash Algorithm:** SHA-256 (matches Android app `LicenseKeyHelper.kt`)
 - **Firestore Collection:** `licenseKeys/{sha256Hex}`
 
-## Usage
+## Quick Commands for Owners
 
-### 1. Generate 1 Lifetime Key (stdout)
+### 1. Generate & Register 1 Lifetime Key in Firestore (Recommended)
 ```bash
-node generate.js
+node generate.js --register
 ```
-Output:
+Or:
+```bash
+npm run create-key
 ```
-MAX-LIFE-7K4P-X9QM-28TZ
+This generates the key and immediately registers its hash into Firestore with `status: "UNUSED"`. It also outputs a ready-to-copy WhatsApp/SMS message to send directly to your customer!
+
+### 2. Register a Key That Was Created Earlier (Offline)
+```bash
+node generate.js --register-key MAX-LIFE-XXXX-XXXX-XXXX
+```
+Registers that specific key in Firestore so the user can activate it.
+
+### 3. Directly Grant Lifetime Premium to a User (No Key Needed!)
+```bash
+node generate.js --grant-user <USER_ID>
+```
+Instantly activates Lifetime Premium for that Google user ID in Firestore.
+
+### 4. Check Status of a Key
+```bash
+node generate.js --status MAX-LIFE-XXXX-XXXX-XXXX
+```
+Shows if the key is `UNUSED`, or `CLAIMED` by which account and when.
+
+### 5. List Registered Keys
+```bash
+node generate.js --list
 ```
 
-### 2. Generate 10 Keys in Text Format
+### 6. Bulk Export Keys (e.g. 50 keys to CSV / JSON)
 ```bash
-node generate.js --count 10
+node generate.js --count 50 --format csv --out keys.csv --register
+node generate.js --count 50 --format json --out keys.json --register
 ```
 
-### 3. Generate JSON with SHA-256 Hashes
-```bash
-node generate.js --count 10 --format json --out keys.json
-```
-
-### 4. Generate CSV for Customer Tracking
-```bash
-node generate.js --count 20 --format csv --out customers.csv
-```
-
-### 5. Direct Registration to Firestore (Optional)
-If you have your Firebase Service Account JSON (`serviceAccountKey.json`):
-```bash
-npm install
-node generate.js --count 5 --register --service-account ./serviceAccountKey.json
-```
-This registers the SHA-256 hashes with `status: "UNUSED"` directly in `licenseKeys/{hash}`.

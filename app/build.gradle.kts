@@ -96,6 +96,7 @@ android {
       isIncludeAndroidResources = true
       isReturnDefaultValues = true
       all {
+        it.maxHeapSize = "2048m"
         it.systemProperty("junit.jupiter.tempdir.cleanup.mode.default", "never")
       }
     }
@@ -172,6 +173,7 @@ dependencies {
   androidTestImplementation(libs.androidx.runner)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
+  debugImplementation(libs.leakcanary)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }

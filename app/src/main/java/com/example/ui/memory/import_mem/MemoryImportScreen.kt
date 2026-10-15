@@ -19,7 +19,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.memory.universal.ImportAction
@@ -48,32 +47,29 @@ fun MemoryImportScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            MaxTopBar(
-                title = "Import Memories",
-                onBackClick = onNavigateBack,
-                actions = {
-                    if (uiState.previewResult != null) {
-                        IconButton(onClick = { viewModel.reset() }) {
-                            Icon(
-                                imageVector = Icons.Default.RestartAlt,
-                                contentDescription = "Reset",
-                                tint = MaxPrimary
-                            )
-                        }
-                    }
+    MaxScreen(
+        title = "Import Memories",
+        eyebrow = "DATA INGESTION",
+        auroraMode = AuroraMode.SUBTLE,
+        scrollable = false,
+        onBack = onNavigateBack,
+        topBarActions = {
+            if (uiState.previewResult != null) {
+                IconButton(onClick = { viewModel.reset() }) {
+                    Icon(
+                        imageVector = Icons.Default.RestartAlt,
+                        contentDescription = "Reset",
+                        tint = MaxSemanticColors.accentCyan
+                    )
                 }
-            )
-        },
-        containerColor = MaxBgDark
-    ) { padding ->
+            }
+        }
+    ) {
         if (uiState.previewResult == null) {
             val scrollState = rememberScrollState()
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
                     .verticalScroll(scrollState)
                     .padding(MaxDimensions.spaceMd),
                 verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceMd)
@@ -87,22 +83,21 @@ fun MemoryImportScreen(
                             Icon(
                                 imageVector = Icons.Default.AutoAwesome,
                                 contentDescription = null,
-                                tint = MaxPrimary,
+                                tint = MaxSemanticColors.accentCyan,
                                 modifier = Modifier.size(22.dp)
                             )
                             Text(
                                 text = "Universal Memory Importer",
-                                fontSize = 16.sp,
+                                style = MaxType.Headline,
                                 fontWeight = FontWeight.Bold,
-                                color = MaxTextPrimary
+                                color = MaxSemanticColors.textPrimary
                             )
                         }
                         Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
                         Text(
                             text = "Import memories directly from ChatGPT export, Claude markdown, Obsidian notes, Gemini takeout, or standard Markdown files.",
-                            fontSize = 13.sp,
-                            color = MaxTextMuted,
-                            lineHeight = 18.sp
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textMuted
                         )
                         if (uiState.detectedProvider != null) {
                             Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
@@ -112,20 +107,20 @@ fun MemoryImportScreen(
                             ) {
                                 Text(
                                     text = "Detected Format:",
-                                    fontSize = 12.sp,
-                                    color = MaxTextSecondary
+                                    style = MaxType.Caption,
+                                    color = MaxSemanticColors.textSecondary
                                 )
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-                                        .background(MaxPrimary.copy(alpha = 0.2f))
+                                        .background(MaxSemanticColors.primaryRoyal.copy(alpha = 0.2f))
                                         .padding(horizontal = 8.dp, vertical = 2.dp)
                                 ) {
                                     Text(
                                         text = uiState.detectedProvider!!.name,
-                                        fontSize = 11.sp,
+                                        style = MaxType.Eyebrow,
                                         fontWeight = FontWeight.Bold,
-                                        color = MaxPrimary
+                                        color = MaxSemanticColors.accentCyan
                                     )
                                 }
                             }
@@ -134,35 +129,20 @@ fun MemoryImportScreen(
                 }
 
                 // Text input area
-                OutlinedTextField(
+                MaxTextField(
                     value = uiState.rawText,
                     onValueChange = { viewModel.updateRawText(it) },
-                    placeholder = {
-                        Text(
-                            text = "Paste ChatGPT custom instructions, Claude memory markdown, Obsidian frontmatter notes, or list of facts...",
-                            color = MaxTextMuted,
-                            fontSize = 13.sp
-                        )
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(280.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedContainerColor = MaxSurface,
-                        unfocusedContainerColor = MaxSurface,
-                        focusedBorderColor = MaxPrimary,
-                        unfocusedBorderColor = MaxBorder,
-                        focusedTextColor = MaxTextPrimary,
-                        unfocusedTextColor = MaxTextPrimary
-                    ),
-                    shape = RoundedCornerShape(MaxDimensions.radiusLg)
+                    placeholder = "Paste ChatGPT custom instructions, Claude memory markdown, Obsidian frontmatter notes, or list of facts...",
+                    singleLine = false,
+                    maxLines = 10,
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 if (uiState.errorMessage != null) {
                     Text(
                         text = uiState.errorMessage!!,
-                        color = MaxError,
-                        fontSize = 13.sp
+                        color = MaxSemanticColors.destructive,
+                        style = MaxType.Caption
                     )
                 }
 
@@ -182,7 +162,6 @@ fun MemoryImportScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding)
                     .padding(horizontal = MaxDimensions.spaceMd)
             ) {
                 Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
@@ -192,18 +171,18 @@ fun MemoryImportScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                 ) {
-                    ImportStatCard(label = "New Insert", count = preview.insertCount, color = MaxSuccess, modifier = Modifier.weight(1f))
-                    ImportStatCard(label = "Update/Supersede", count = preview.supersedeCount, color = MaxPrimary, modifier = Modifier.weight(1f))
-                    ImportStatCard(label = "Duplicate Skip", count = preview.duplicateCount, color = MaxTextMuted, modifier = Modifier.weight(1f))
+                    ImportStatCard(label = "New Insert", count = preview.insertCount, color = MaxSemanticColors.success, modifier = Modifier.weight(1f))
+                    ImportStatCard(label = "Update/Supersede", count = preview.supersedeCount, color = MaxSemanticColors.accentCyan, modifier = Modifier.weight(1f))
+                    ImportStatCard(label = "Duplicate Skip", count = preview.duplicateCount, color = MaxSemanticColors.textMuted, modifier = Modifier.weight(1f))
                 }
 
                 Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
 
                 Text(
                     text = "Items to Import (${preview.items.size})",
-                    fontSize = 14.sp,
+                    style = MaxType.Body,
                     fontWeight = FontWeight.Bold,
-                    color = MaxTextPrimary
+                    color = MaxSemanticColors.textPrimary
                 )
 
                 Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
@@ -252,16 +231,16 @@ private fun ImportStatCard(
         ) {
             Text(
                 text = count.toString(),
-                fontSize = 20.sp,
+                style = MaxType.Headline,
                 fontWeight = FontWeight.Bold,
                 color = color
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = label,
-                fontSize = 10.sp,
+                style = MaxType.Eyebrow,
                 fontWeight = FontWeight.SemiBold,
-                color = MaxTextMuted
+                color = MaxSemanticColors.textMuted
             )
         }
     }
@@ -273,9 +252,9 @@ private fun ImportPreviewItemCard(
     modifier: Modifier = Modifier
 ) {
     val (actionLabel, actionColor) = when (item.action) {
-        ImportAction.INSERT -> "INSERT" to MaxSuccess
-        ImportAction.UPDATE_SUPERSEDE -> "UPDATE" to MaxPrimary
-        ImportAction.SKIP_DUPLICATE -> "SKIP" to MaxTextMuted
+        ImportAction.INSERT -> "INSERT" to MaxSemanticColors.success
+        ImportAction.UPDATE_SUPERSEDE -> "UPDATE" to MaxSemanticColors.accentCyan
+        ImportAction.SKIP_DUPLICATE -> "SKIP" to MaxSemanticColors.textMuted
     }
 
     MaxCard(modifier = modifier.fillMaxWidth()) {
@@ -287,9 +266,9 @@ private fun ImportPreviewItemCard(
             ) {
                 Text(
                     text = item.candidate.title,
-                    fontSize = 14.sp,
+                    style = MaxType.Body,
                     fontWeight = FontWeight.Bold,
-                    color = MaxTextPrimary,
+                    color = MaxSemanticColors.textPrimary,
                     modifier = Modifier.weight(1f)
                 )
                 Box(
@@ -300,7 +279,7 @@ private fun ImportPreviewItemCard(
                 ) {
                     Text(
                         text = actionLabel,
-                        fontSize = 10.sp,
+                        style = MaxType.Eyebrow,
                         fontWeight = FontWeight.Bold,
                         color = actionColor
                     )
@@ -311,17 +290,16 @@ private fun ImportPreviewItemCard(
 
             Text(
                 text = item.candidate.content,
-                fontSize = 12.sp,
-                color = MaxTextSecondary,
-                lineHeight = 16.sp
+                style = MaxType.Caption,
+                color = MaxSemanticColors.textSecondary
             )
 
             if (item.reason != null) {
                 Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
                 Text(
                     text = item.reason,
-                    fontSize = 10.sp,
-                    color = MaxTextMuted
+                    style = MaxType.Eyebrow,
+                    color = MaxSemanticColors.textMuted
                 )
             }
         }

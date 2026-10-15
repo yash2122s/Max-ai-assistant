@@ -19,7 +19,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.Reminder
@@ -64,28 +63,25 @@ fun RemindersScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            MaxTopBar(
-                title = "Reminders",
-                onBackClick = onNavigateBack,
-                actions = {
-                    IconButton(onClick = { viewModel.startCreate() }) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add Reminder",
-                            tint = MaxPrimary
-                        )
-                    }
-                }
-            )
-        },
-        containerColor = MaxBgDark
-    ) { padding ->
+    MaxScreen(
+        title = "Reminders",
+        eyebrow = "TASK MANAGEMENT",
+        auroraMode = AuroraMode.SUBTLE,
+        scrollable = false,
+        onBack = onNavigateBack,
+        topBarActions = {
+            IconButton(onClick = { viewModel.startCreate() }) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Reminder",
+                    tint = MaxSemanticColors.accentCyan
+                )
+            }
+        }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .padding(horizontal = MaxDimensions.spaceMd)
         ) {
             Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
@@ -101,16 +97,16 @@ fun RemindersScreen(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-                            .background(if (isSelected) MaxPrimary else MaxSurfaceVariant)
+                            .background(if (isSelected) MaxSemanticColors.accentCyan else MaxSemanticColors.surfaceVariant)
                             .clickable { viewModel.onFilterSelected(filter) }
                             .padding(vertical = MaxDimensions.spaceSm),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = filter,
-                            fontSize = 12.sp,
+                            style = MaxType.Caption,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = if (isSelected) MaxBgDark else MaxTextSecondary
+                            color = if (isSelected) Color.White else MaxSemanticColors.textSecondary
                         )
                     }
                 }
@@ -154,7 +150,7 @@ fun RemindersScreen(
         if (showEditorSheet) {
             ModalBottomSheet(
                 onDismissRequest = { viewModel.dismissEditor() },
-                containerColor = MaxSurface
+                containerColor = MaxSemanticColors.surface
             ) {
                 Column(
                     modifier = Modifier
@@ -164,9 +160,9 @@ fun RemindersScreen(
                 ) {
                     Text(
                         text = if (uiState.selectedReminderForEdit != null) "Edit Reminder" else "New Reminder",
-                        fontSize = 18.sp,
+                        style = MaxType.Headline,
                         fontWeight = FontWeight.Bold,
-                        color = MaxTextPrimary
+                        color = MaxSemanticColors.textPrimary
                     )
 
                     MaxTextField(
@@ -179,9 +175,9 @@ fun RemindersScreen(
 
                     Text(
                         text = "Remind me in:",
-                        fontSize = 13.sp,
+                        style = MaxType.Caption,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaxTextMuted
+                        color = MaxSemanticColors.textMuted
                     )
 
                     Row(
@@ -194,16 +190,16 @@ fun RemindersScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-                                    .background(if (isSelected) MaxPrimary else MaxSurfaceVariant)
+                                    .background(if (isSelected) MaxSemanticColors.accentCyan else MaxSemanticColors.surfaceVariant)
                                     .clickable { selectedMinutesOffset = mins }
                                     .padding(vertical = MaxDimensions.spaceSm),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = label,
-                                    fontSize = 12.sp,
+                                    style = MaxType.Caption,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    color = if (isSelected) MaxBgDark else MaxTextSecondary
+                                    color = if (isSelected) Color.White else MaxSemanticColors.textSecondary
                                 )
                             }
                         }
@@ -269,7 +265,7 @@ private fun ReminderItemCard(
                     Icon(
                         imageVector = if (isCompleted) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
                         contentDescription = "Complete",
-                        tint = if (isCompleted) MaxSuccess else MaxTextMuted,
+                        tint = if (isCompleted) MaxSemanticColors.success else MaxSemanticColors.textMuted,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -277,16 +273,16 @@ private fun ReminderItemCard(
                 Column {
                     Text(
                         text = reminder.message,
-                        fontSize = 14.sp,
+                        style = MaxType.Body,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isCompleted) MaxTextMuted else MaxTextPrimary,
+                        color = if (isCompleted) MaxSemanticColors.textMuted else MaxSemanticColors.textPrimary,
                         textDecoration = if (isCompleted) TextDecoration.LineThrough else TextDecoration.None
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = timeStr,
-                        fontSize = 11.sp,
-                        color = if (isCompleted) MaxTextMuted else MaxPrimary
+                        style = MaxType.Caption,
+                        color = if (isCompleted) MaxSemanticColors.textMuted else MaxSemanticColors.accentCyan
                     )
                 }
             }
@@ -296,7 +292,7 @@ private fun ReminderItemCard(
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit",
-                        tint = MaxTextMuted,
+                        tint = MaxSemanticColors.textMuted,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -304,7 +300,7 @@ private fun ReminderItemCard(
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Delete",
-                        tint = MaxError.copy(alpha = 0.7f),
+                        tint = MaxSemanticColors.destructive.copy(alpha = 0.7f),
                         modifier = Modifier.size(18.dp)
                     )
                 }

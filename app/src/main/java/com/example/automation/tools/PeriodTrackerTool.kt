@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.data.local.AppDatabase
 import com.example.data.local.PeriodLog
 import com.example.data.local.PeriodLogDao
+import com.example.memory.account.MemoryAccountScope
+import com.example.memory.account.MemorySession
 import com.example.automation.engine.ExecutionRequest
 import com.example.automation.verification.RetryPolicy
 import org.json.JSONArray
@@ -90,6 +92,8 @@ class PeriodTrackerTool : Tool {
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
+        val session = MemoryAccountScope.capture()
+        MemoryAccountScope.requireCurrent(session)
         val db = AppDatabase.getDatabase(context)
         val dao = db.periodLogDao()
         val jsonPayload = JSONObject(request.arguments.toString())
@@ -101,7 +105,7 @@ class PeriodTrackerTool : Tool {
                     val startDate = parseDateExpression(dateExpr)
                     val notes = if (jsonPayload.has("notes") && !jsonPayload.isNull("notes")) jsonPayload.getString("notes") else null
 
-                    val latest = dao.getLatestPeriod()
+                    val latest = dao.getLatestPeriod(session.ownerKey)
                     if (latest != null && latest.endDate == null) {
                         return ToolResult(
                             success = false,
@@ -115,8 +119,9 @@ class PeriodTrackerTool : Tool {
                         startDate = startDate,
                         endDate = null,
                         durationDays = 0,
-                        notes = notes
+                        notes = notes, ownerKey = session.ownerKey
                     )
+                    MemoryAccountScope.requireCurrent(session)
                     dao.insertPeriod(log)
 
                     ToolResult(
@@ -131,7 +136,7 @@ class PeriodTrackerTool : Tool {
                     val dateExpr = jsonPayload.optString("date", "today")
                     val endDate = parseDateExpression(dateExpr)
 
-                    val latest = dao.getLatestPeriod()
+                    val latest = dao.getLatestPeriod(session.ownerKey)
                     if (latest == null) {
                         return ToolResult(
                             success = false,
@@ -151,7 +156,8 @@ class PeriodTrackerTool : Tool {
                     }
 
                     val durationDays = (((endDate - latest.startDate) / (24 * 3600 * 1000)) + 1).toInt()
-                    dao.updatePeriodEndDate(latest.id, endDate, durationDays)
+                    MemoryAccountScope.requireCurrent(session)
+                    dao.updatePeriodEndDate(latest.id, endDate, durationDays, session.ownerKey)
 
                     ToolResult(
                         success = true,
@@ -172,7 +178,7 @@ class PeriodTrackerTool : Tool {
                         )
                     }
 
-                    val latest = dao.getLatestPeriod()
+                    val latest = dao.getLatestPeriod(session.ownerKey)
                     if (latest == null) {
                         return ToolResult(
                             success = false,
@@ -183,7 +189,8 @@ class PeriodTrackerTool : Tool {
                     }
 
                     val updatedNotes = if (latest.notes.isNullOrBlank()) notes else "${latest.notes}\n$notes"
-                    dao.updatePeriodNotes(latest.id, updatedNotes)
+                    MemoryAccountScope.requireCurrent(session)
+                    dao.updatePeriodNotes(latest.id, updatedNotes, session.ownerKey)
 
                     ToolResult(
                         success = true,
@@ -194,7 +201,8 @@ class PeriodTrackerTool : Tool {
                 }
 
                 "GET_PERIOD_HISTORY" -> {
-                    val periods = dao.getAllPeriods()
+                    val periods = dao.getAllPeriods(session.ownerKey)
+                    MemoryAccountScope.requireCurrent(session)
                     val arr = JSONArray()
                     val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
                     for (p in periods) {
@@ -218,7 +226,8 @@ class PeriodTrackerTool : Tool {
                 }
 
                 "GET_PERIOD_PREDICTION" -> {
-                    val predictions = getPredictions(dao)
+                    val predictions = getPredictions(dao, session)
+                    MemoryAccountScope.requireCurrent(session)
                     val sdf = SimpleDateFormat("EEEE, MMMM dd, yyyy", Locale.getDefault())
                     val nextStart = predictions.optLong("predictedNextStartDate", 0L)
                     val fertileStart = predictions.optLong("predictedFertileStartDate", 0L)
@@ -260,7 +269,8 @@ class PeriodTrackerTool : Tool {
                 }
 
                 "CLEAR_ALL_PERIOD_DATA" -> {
-                    dao.deleteAllPeriods()
+                    MemoryAccountScope.requireCurrent(session)
+                    dao.deleteAllPeriods(session.ownerKey)
                     ToolResult(
                         success = true,
                         toolName = name,
@@ -278,6 +288,8 @@ class PeriodTrackerTool : Tool {
                     )
                 }
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             ToolResult(
                 success = false,
@@ -288,8 +300,8 @@ class PeriodTrackerTool : Tool {
         }
     }
 
-    private suspend fun getPredictions(dao: PeriodLogDao): JSONObject {
-        val periods = dao.getAllPeriods()
+    private suspend fun getPredictions(dao: PeriodLogDao, session: MemorySession): JSONObject {
+        val periods = dao.getAllPeriods(session.ownerKey)
         val result = JSONObject()
 
         if (periods.isEmpty()) {

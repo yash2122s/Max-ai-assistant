@@ -2,7 +2,7 @@ package com.example.automation.engine
 
 import android.content.Context
 import android.util.Log
-import com.example.telegram.CloudSocketManager
+import com.example.features.telegram.CloudSocketManager
 import org.json.JSONArray
 import org.json.JSONObject
 

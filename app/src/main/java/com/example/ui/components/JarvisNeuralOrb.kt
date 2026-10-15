@@ -3,25 +3,33 @@ package com.example.ui.components
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
 import kotlin.math.*
 
+import androidx.compose.animation.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import kotlinx.coroutines.delay
+
 /**
- * Jarvis-style animated neural orb — a glowing sphere with orbiting
- * electron/proton particles, pulsing core, and dynamic orbital rings.
- * Reacts to microphone RMS for organic, alive feeling.
+ * Jarvis-style animated neural orb (Stitch Aether HUD) — glowing sphere with
+ * orbiting particle electrons, pulsing core, and dual counter-rotating containment rings.
+ * Reacts to microphone RMS for an organic, breathing AI entity.
  */
 @Composable
 fun JarvisNeuralOrb(
@@ -30,7 +38,10 @@ fun JarvisNeuralOrb(
     isAiSpeaking: Boolean,
     isThinking: Boolean,
     rms: Float = 0f,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    orbSize: androidx.compose.ui.unit.Dp = 170.dp,
+    showSuggestions: Boolean = false,
+    onClick: (() -> Unit)? = null
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "jarvis_orb")
 
@@ -80,6 +91,29 @@ fun JarvisNeuralOrb(
         )
     } else remember { mutableFloatStateOf(0f) }
 
+    // Stitch Aether HUD: Outer containment rings (10s and 15s counter-rotation)
+    val outerRing1Angle by if (isActive) {
+        infiniteTransition.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(10000, easing = LinearEasing)
+            ),
+            label = "outerRing1"
+        )
+    } else remember { mutableFloatStateOf(0f) }
+
+    val outerRing2Angle by if (isActive) {
+        infiniteTransition.animateFloat(
+            initialValue = 360f,
+            targetValue = 0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(15000, easing = LinearEasing)
+            ),
+            label = "outerRing2"
+        )
+    } else remember { mutableFloatStateOf(0f) }
+
     val innerGlowPulse by if (isActive) {
         infiniteTransition.animateFloat(
             initialValue = 0.4f,
@@ -115,58 +149,114 @@ fun JarvisNeuralOrb(
         )
     } else remember { mutableFloatStateOf(0f) }
 
-    // Color state: cyan when listening, indigo when AI speaking, purple when thinking
-    val activeColor = when {
-        !isActive -> MaxTextMuted
-        isRecording -> AccentCyan
-        isAiSpeaking -> AccentIndigo
-        isThinking -> AccentPurple
-        else -> NeonBlue
+    val isDark = LocalIsDarkMode.current
+
+    // Color state: Stitch Aether HUD palette with Vibrant Luminous Pink for Day Mode
+    val activeColor = if (isDark) {
+        when {
+            !isActive -> MaxTextMuted
+            isRecording -> AetherNeonCyan
+            isAiSpeaking -> AetherNeonPurple
+            isThinking -> AetherNeonCyanDim
+            else -> AetherNeonCyan
+        }
+    } else {
+        when {
+            !isActive -> MaxTextMuted
+            isRecording -> NeonPink
+            isAiSpeaking -> MagentaRose
+            isThinking -> MaxSemanticColors.accentPink
+            else -> NeonPink
+        }
     }
-    val secondaryColor = when {
-        !isActive -> BorderDark
-        isRecording -> NeonBlue
-        isAiSpeaking -> AccentPurple
-        isThinking -> NeonPink
-        else -> AccentCyan
+    val secondaryColor = if (isDark) {
+        when {
+            !isActive -> BorderDark
+            isRecording -> AetherNeonPurple
+            isAiSpeaking -> MaxPrimaryRoyal
+            isThinking -> AetherNeonCyan
+            else -> AetherNeonPurple
+        }
+    } else {
+        when {
+            !isActive -> SoftRoseBorder
+            isRecording -> MagentaRose
+            isAiSpeaking -> MaxSemanticColors.accentPink
+            isThinking -> NeonPink
+            else -> MagentaRose
+        }
     }
 
     // RMS influence: makes the orb react to voice amplitude
-    val rmsScale = if (isActive) 1f + (rms.coerceIn(0f, 1f) * 0.3f) else 1f
+    val rmsScale = if (isActive) 1f + (rms.coerceIn(0f, 1f) * 0.35f) else 1f
 
     val statusText = when {
-        !isActive -> "MAX OFF"
-        isRecording -> "Listening..."
-        isAiSpeaking -> "MAX Speaking..."
-        isThinking -> "Processing..."
-        else -> "Ready"
+        !isActive -> "MAX OFFLINE"
+        isRecording -> "LISTENING..."
+        isAiSpeaking -> "MAX SPEAKING..."
+        isThinking -> "PROCESSING..."
+        else -> "ONLINE & READY"
     }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = modifier.semantics {
-            contentDescription = "MAX Neural Core status: $statusText"
+            contentDescription = "MAX status: $statusText"
         }
     ) {
         Box(
             contentAlignment = Alignment.Center,
-            modifier = Modifier.size(220.dp)
+            modifier = Modifier.size(orbSize)
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val centerX = size.width / 2f
                 val centerY = size.height / 2f
-                val baseRadius = size.minDimension / 2f * 0.38f
+                val baseRadius = size.minDimension / 2f * 0.36f
+
+                // --- Layer 0: Stitch Aether HUD Outer Containment Rings ---
+                if (isActive) {
+                    val ring1Radius = baseRadius * 1.95f * rmsScale
+                    val ring2Radius = baseRadius * 2.15f * rmsScale
+                    drawCircle(
+                        color = activeColor.copy(alpha = 0.18f),
+                        radius = ring1Radius,
+                        center = Offset(centerX, centerY),
+                        style = Stroke(width = 1.dp.toPx())
+                    )
+                    drawCircle(
+                        color = secondaryColor.copy(alpha = 0.12f),
+                        radius = ring2Radius,
+                        center = Offset(centerX, centerY),
+                        style = Stroke(width = MaxStroke.hairline.toPx())
+                    )
+                    // Orbital ticks on containment ring
+                    for (k in 0 until 4) {
+                        val tickAngleRad = (outerRing1Angle + (k * 90f)) * PI.toFloat() / 180f
+                        val tx = centerX + ring1Radius * cos(tickAngleRad)
+                        val ty = centerY + ring1Radius * sin(tickAngleRad)
+                        drawCircle(
+                            color = activeColor.copy(alpha = 0.7f),
+                            radius = 2.5f,
+                            center = Offset(tx, ty)
+                        )
+                    }
+                }
 
                 // --- Layer 1: Deep outer aura glow ---
                 val auraRadius = baseRadius * 2.2f * corePulse * rmsScale
+                val auraColors = if (isDark) listOf(
+                    activeColor.copy(alpha = 0.14f * innerGlowPulse),
+                    secondaryColor.copy(alpha = 0.05f),
+                    Color.Transparent
+                ) else listOf(
+                    activeColor.copy(alpha = 0.32f * innerGlowPulse),
+                    secondaryColor.copy(alpha = 0.15f),
+                    Color.Transparent
+                )
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(
-                            activeColor.copy(alpha = 0.12f * innerGlowPulse),
-                            activeColor.copy(alpha = 0.04f),
-                            Color.Transparent
-                        ),
+                        colors = auraColors,
                         center = Offset(centerX, centerY),
                         radius = auraRadius
                     ),
@@ -180,11 +270,12 @@ fun JarvisNeuralOrb(
                     Triple(orbit2Angle, baseRadius * 1.45f * breatheRing, 65f),   // tilt 65°
                     Triple(orbit3Angle, baseRadius * 1.55f * breatheRing, 45f)    // tilt 45° (reverse)
                 )
-                val orbitColors = listOf(activeColor, secondaryColor, NeonPink)
+                val orbitColors = if (isDark) listOf(activeColor, secondaryColor, NeonPink)
+                    else listOf(NeonPink, MagentaRose, MaxSemanticColors.accentPink)
 
                 orbits.forEachIndexed { index, (angle, radius, tiltDeg) ->
                     val tiltRad = tiltDeg * PI.toFloat() / 180f
-                    val ringAlpha = 0.25f + (innerGlowPulse * 0.15f)
+                    val ringAlpha = if (isDark) 0.25f + (innerGlowPulse * 0.15f) else 0.52f + (innerGlowPulse * 0.20f)
 
                     // Draw orbital ring path (ellipse)
                     drawOvalRing(
@@ -192,7 +283,7 @@ fun JarvisNeuralOrb(
                         radiusX = radius * rmsScale,
                         radiusY = radius * rmsScale * cos(tiltRad) * 0.6f,
                         color = orbitColors[index].copy(alpha = ringAlpha),
-                        strokeWidth = 1.2f
+                        strokeWidth = if (isDark) 1.2f else 1.8f
                     )
 
                     // Electron particle on the orbit
@@ -205,8 +296,8 @@ fun JarvisNeuralOrb(
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                orbitColors[index].copy(alpha = 0.8f),
-                                orbitColors[index].copy(alpha = 0.2f),
+                                orbitColors[index].copy(alpha = 0.9f),
+                                orbitColors[index].copy(alpha = 0.3f),
                                 Color.Transparent
                             ),
                             center = Offset(px, py),
@@ -253,8 +344,8 @@ fun JarvisNeuralOrb(
                     brush = Brush.radialGradient(
                         colors = listOf(
                             Color.Transparent,
-                            activeColor.copy(alpha = 0.3f * innerGlowPulse),
-                            activeColor.copy(alpha = 0.08f),
+                            activeColor.copy(alpha = if (isDark) 0.3f * innerGlowPulse else 0.65f * innerGlowPulse),
+                            activeColor.copy(alpha = if (isDark) 0.08f else 0.2f),
                             Color.Transparent
                         ),
                         center = Offset(centerX, centerY),
@@ -262,21 +353,29 @@ fun JarvisNeuralOrb(
                     ),
                     radius = shieldRadius,
                     center = Offset(centerX, centerY),
-                    style = Stroke(width = 2f)
+                    style = Stroke(width = if (isDark) 2f else 2.5f)
                 )
 
                 // --- Layer 5: Core sphere with gradient ---
                 val coreRadius = baseRadius * corePulse * rmsScale * 0.85f
+                val coreColors = if (isDark) listOf(
+                    Color.White.copy(alpha = 0.35f),
+                    activeColor.copy(alpha = 0.6f * innerGlowPulse),
+                    activeColor.copy(alpha = 0.25f),
+                    secondaryColor.copy(alpha = 0.15f),
+                    Color.Transparent
+                ) else listOf(
+                    Color.White,
+                    NeonPink,
+                    MagentaRose,
+                    MaxSemanticColors.destructive.copy(alpha = 0.85f),
+                    MaxSemanticColors.accentPink.copy(alpha = 0.25f),
+                    Color.Transparent
+                )
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = 0.35f),
-                            activeColor.copy(alpha = 0.6f * innerGlowPulse),
-                            activeColor.copy(alpha = 0.25f),
-                            secondaryColor.copy(alpha = 0.15f),
-                            Color.Transparent
-                        ),
-                        center = Offset(centerX, centerY - coreRadius * 0.15f),
+                        colors = coreColors,
+                        center = Offset(centerX, centerY - coreRadius * 0.12f),
                         radius = coreRadius
                     ),
                     radius = coreRadius,
@@ -284,33 +383,73 @@ fun JarvisNeuralOrb(
                 )
 
                 // --- Layer 6: Specular highlight (glassy 3D effect) ---
-                val highlightRadius = coreRadius * 0.45f
+                val highlightRadius = coreRadius * 0.42f
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.4f),
-                            Color.White.copy(alpha = 0.05f),
+                            Color.White.copy(alpha = if (isDark) 0.4f else 0.9f),
+                            Color.White.copy(alpha = if (isDark) 0.05f else 0.2f),
                             Color.Transparent
                         ),
-                        center = Offset(centerX - coreRadius * 0.2f, centerY - coreRadius * 0.3f),
+                        center = Offset(centerX - coreRadius * 0.2f, centerY - coreRadius * 0.26f),
                         radius = highlightRadius
                     ),
                     radius = highlightRadius,
-                    center = Offset(centerX - coreRadius * 0.2f, centerY - coreRadius * 0.3f)
+                    center = Offset(centerX - coreRadius * 0.2f, centerY - coreRadius * 0.26f)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Status text below orb
+        // Status telemetry badge below orb
         Text(
             text = statusText,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = activeColor.copy(alpha = 0.9f),
-            letterSpacing = 1.5.sp
+            style = MaxType.Mono,
+            color = activeColor.copy(alpha = 0.95f)
         )
+
+    }
+}
+
+@Composable
+fun RotatingSuggestions(
+    suggestions: List<String>,
+    onSuggestionClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    intervalMs: Long = 5000L
+) {
+    var index by remember { mutableIntStateOf(0) }
+    LaunchedEffect(suggestions) {
+        if (suggestions.size < 2) return@LaunchedEffect
+        while (true) {
+            delay(intervalMs)
+            index = (index + 1) % suggestions.size
+        }
+    }
+    AnimatedContent(
+        targetState = index,
+        transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+        modifier = modifier,
+        label = "suggestions"
+    ) { i ->
+        val text = suggestions[i]
+        Box(
+            Modifier
+                .heightIn(min = 48.dp)
+                .clip(MaxShapes.pill)
+                .clickable(role = Role.Button, onClickLabel = "Use this suggestion") {
+                    onSuggestionClick(text)
+                }
+                .padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                "Try: “$text”",
+                style = MaxType.Caption,
+                color = MaxSemanticColors.textSecondary
+            )
+        }
     }
 }
 

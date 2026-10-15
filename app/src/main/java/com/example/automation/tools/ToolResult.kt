@@ -9,7 +9,13 @@ enum class ToolResultStatus {
     FAILURE,
     NEEDS_INPUT,
     USER_ACTION_REQUIRED,
-    PENDING_USER_ACTION
+    PENDING_USER_ACTION,
+    ACCEPTED,
+    ATTEMPTED_UNVERIFIED,
+    OUTCOME_UNKNOWN,
+    COMPLETED,
+    RUNNING,
+    BLOCKED
 }
 
 data class ToolResult(
@@ -27,8 +33,33 @@ data class ToolResult(
     val outputData: Map<String, Any?> = emptyMap(),
     val needsInputQuestion: String? = null,
     val needsInputOptions: List<String> = emptyList(),
-    val targetParam: String? = null
+    val targetParam: String? = null,
+
+    // JARVIS migration — verification & state
+    val verified: Boolean? = null,                     // true/false/null(unknown)
+    val currentStateSummary: String = "",              // fresh UI snapshot for next prompt
+    val requiresUserConfirmation: Boolean = false      // sensitive-action gate
 ) {
+    val options: List<String> get() = needsInputOptions
+
+    /** Dispatch acceptance, unverified attempts, and pending user input are never verified completion. */
+    val isVerifiedSuccess: Boolean
+        get() = success && (status == ToolResultStatus.SUCCESS || status == ToolResultStatus.COMPLETED) &&
+            if (verificationRequired) (verification != null && verification.success) else true
+
+    /** Serialize for the model, matching JARVIS's TaskActionResult.toJsonObject() */
+    fun toModelJson(): JSONObject = JSONObject().apply {
+        put("success", success)
+        message?.let { put("message", it) }
+        errorCode?.let { put("errorCode", it) }
+        put("status", status.name)
+        if (verificationRequired) put("verificationRequired", true)
+        verified?.let { put("verified", it) }
+        if (currentStateSummary.isNotBlank()) put("current_state", currentStateSummary)
+        if (requiresUserConfirmation) put("requires_confirmation", true)
+        needsInputQuestion?.let { put("needs_input", it) }
+    }
+
     companion object {
         fun success(
             toolName: String,
@@ -91,6 +122,45 @@ data class ToolResult(
             toolName = toolName,
             message = message,
             status = ToolResultStatus.PENDING_USER_ACTION
+        )
+
+        fun accepted(
+            toolName: String,
+            message: String? = null,
+            metadata: JSONObject = JSONObject()
+        ): ToolResult = ToolResult(
+            success = true,
+            toolName = toolName,
+            message = message,
+            status = ToolResultStatus.ACCEPTED,
+            verificationRequired = true,
+            metadata = metadata
+        )
+
+        fun attemptedUnverified(
+            toolName: String,
+            message: String? = null,
+            metadata: JSONObject = JSONObject()
+        ): ToolResult = ToolResult(
+            success = true,
+            toolName = toolName,
+            message = message,
+            status = ToolResultStatus.ATTEMPTED_UNVERIFIED,
+            verificationRequired = true,
+            metadata = metadata
+        )
+
+        fun outcomeUnknown(
+            toolName: String,
+            message: String? = null,
+            metadata: JSONObject = JSONObject()
+        ): ToolResult = ToolResult(
+            success = false,
+            toolName = toolName,
+            message = message,
+            status = ToolResultStatus.OUTCOME_UNKNOWN,
+            verificationRequired = true,
+            metadata = metadata
         )
     }
 }

@@ -15,16 +15,18 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material.icons.rounded.*
+import androidx.compose.material.icons.automirrored.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -40,13 +42,17 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import com.example.network.ConnectionState
 import com.example.network.model.GeminiModelMode
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -71,33 +77,15 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val audioRms by viewModel.audioRms.collectAsStateWithLifecycle()
-    val liveUserCaption by viewModel.liveUserCaption.collectAsStateWithLifecycle()
-    val liveAiCaption by viewModel.liveAiCaption.collectAsStateWithLifecycle()
+    val isDarkMode by viewModel.isDarkMode.collectAsStateWithLifecycle()
     val edgeRevealTrigger by viewModel.edgeRevealTrigger.collectAsStateWithLifecycle()
     val cloudLicense by viewModel.cloudLicense.collectAsStateWithLifecycle()
     val dailyUsage by viewModel.dailyUsage.collectAsStateWithLifecycle()
 
     val snackbarHostState = remember { SnackbarHostState() }
-    val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
-    val context = LocalContext.current
-    val keyboardController = LocalSoftwareKeyboardController.current
-
-    var inputText by remember { mutableStateOf("") }
-    var showQuickPrompts by remember { mutableStateOf(false) }
-
-    // Scroll-to-bottom badge state
-    val isScrolledUp by remember {
-        derivedStateOf {
-            val totalItems = listState.layoutInfo.totalItemsCount
-            if (totalItems <= 1) false
-            else {
-                val lastVisibleIndex = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                lastVisibleIndex < totalItems - 2
-            }
-        }
-    }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val navigate by rememberUpdatedState(onNavigateTo)
 
     // Permission launcher for voice recording
     val micPermissionLauncher = rememberLauncherForActivityResult(
@@ -113,19 +101,19 @@ fun HomeScreen(
     }
 
     // Handle one-shot events
-    LaunchedEffect(Unit) {
+    LaunchedEffect(viewModel, lifecycleOwner) {
+      lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
         viewModel.uiEvents.collectLatest { event ->
             when (event) {
                 is HomeUiEvent.ShowSnackbar -> snackbarHostState.showSnackbar(event.message)
                 is HomeUiEvent.RequestPermission -> micPermissionLauncher.launch(event.permission)
-                is HomeUiEvent.NavigateTo -> onNavigateTo(event.route)
-                is HomeUiEvent.ScrollToBottom -> {
-                    if (uiState.messages.isNotEmpty()) {
-                        listState.animateScrollToItem(uiState.messages.size - 1)
-                    }
-                }
+                is HomeUiEvent.NavigateTo -> navigate(event.route)
+                // The feed follows actual content changes only while near the
+                // bottom; a token must not pull someone away from older text.
+                is HomeUiEvent.ScrollToBottom -> Unit
             }
         }
+      }
     }
 
     // Auto-connect on screen display
@@ -133,31 +121,96 @@ fun HomeScreen(
         viewModel.ensureConnected()
     }
 
-    // Auto-scroll on new message
-    LaunchedEffect(uiState.messages.size, uiState.liveAiCaption) {
-        if (uiState.messages.isNotEmpty() && !isScrolledUp) {
-            listState.animateScrollToItem(uiState.messages.size - 1)
+    MaxScreen(
+        auroraMode = AuroraMode.SUBTLE,
+        showTopBar = false,
+        scrollable = false,
+        modifier = modifier
+    ) {
+        HomeScreenContent(
+            uiState = uiState,
+            isDarkMode = isDarkMode,
+            edgeRevealTrigger = edgeRevealTrigger,
+            cloudLicense = cloudLicense,
+            dailyUsage = dailyUsage,
+            audioRms = viewModel.audioRms,
+            onOpenDrawer = onOpenDrawer,
+            onNavigateTo = onNavigateTo,
+            onToggleDarkMode = viewModel::toggleDarkMode,
+            onSetRuntimeEnabled = viewModel::setRuntimeEnabled,
+            onClearChatHistory = viewModel::clearChatHistory,
+            onClearError = viewModel::clearError,
+            onCancelActiveTask = viewModel::cancelActiveTask,
+            onSendTextMessage = viewModel::sendTextMessage,
+            onStopRecording = viewModel::stopRecording,
+            onInterruptSpeech = viewModel::interruptSpeech,
+            onRequestMicPermission = { micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO) },
+            modifier = Modifier.fillMaxSize(),
+            snackbarHostState = snackbarHostState
+        )
+    }
+}
+
+@Composable
+internal fun HomeScreenContent(
+    uiState: HomeUiState,
+    isDarkMode: Boolean,
+    edgeRevealTrigger: Long?,
+    cloudLicense: com.example.firebase.model.CloudLicense,
+    dailyUsage: Long,
+    audioRms: kotlinx.coroutines.flow.StateFlow<Float>,
+    onOpenDrawer: () -> Unit,
+    onNavigateTo: (String) -> Unit,
+    onToggleDarkMode: () -> Unit,
+    onSetRuntimeEnabled: (Boolean) -> Unit,
+    onClearChatHistory: () -> Unit,
+    onClearError: () -> Unit,
+    onCancelActiveTask: () -> Unit,
+    onSendTextMessage: (String) -> Unit,
+    onStopRecording: () -> Unit,
+    onInterruptSpeech: () -> Unit,
+    onRequestMicPermission: () -> Unit,
+    modifier: Modifier = Modifier,
+    snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
+) {
+    val activityState = uiState.activity
+    val listState = rememberLazyListState()
+    val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var inputText by rememberSaveable { mutableStateOf("") }
+    var showQuickPrompts by rememberSaveable { mutableStateOf(false) }
+    val presentation = uiState.presentation
+    val isScrolledUp by remember {
+        derivedStateOf {
+            listState.canScrollForward &&
+                (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) <
+                listState.layoutInfo.totalItemsCount - 2
+        }
+    }
+    val lastMessage = uiState.messages.lastOrNull()
+    LaunchedEffect(uiState.messages.size, lastMessage?.text, presentation.phase) {
+        if (!isScrolledUp && !listState.isScrollInProgress) {
+            val last = listState.layoutInfo.totalItemsCount - 1
+            if (last >= 0) listState.scrollToItem(last)
         }
     }
 
     Scaffold(
         modifier = modifier
             .fillMaxSize()
-            .background(MaxIOSColors.DarkBase)
-            .edgeRevealAnimation(triggerKey = edgeRevealTrigger)
-            .edgeLightingGlow(
-                state = uiState.edgeLightingState,
-                amplitude = audioRms
-            ),
-        containerColor = MaxIOSColors.DarkBase,
+            .edgeRevealAnimation(triggerKey = edgeRevealTrigger),
+        containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             IOSTopBar(
                 isMaxEnabled = uiState.isMaxEnabled,
                 connectionState = uiState.connectionState,
+                isDarkMode = isDarkMode,
+                onToggleDarkMode = onToggleDarkMode,
                 onMenuClick = onOpenDrawer,
-                onToggleMax = { viewModel.setRuntimeEnabled(it) },
-                onClearChat = { viewModel.clearChatHistory() },
+                onToggleMax = onSetRuntimeEnabled,
+                onClearChat = onClearChatHistory,
                 onNavigateToSettings = { onNavigateTo(com.example.ui.navigation.MaxDestinations.SETTINGS) }
             )
         }
@@ -166,7 +219,7 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .navigationBarsPadding()
+                .consumeWindowInsets(innerPadding)
                 .imePadding()
         ) {
             TrialQuotaBanner(
@@ -181,18 +234,15 @@ fun HomeScreen(
                     .weight(1f)
             ) {
                 // Main Message Feed or Empty State
-            if (uiState.messages.isEmpty() && liveAiCaption.isBlank() && !uiState.isThinking) {
+            if (uiState.messages.isEmpty() && !presentation.canStop) {
                 IOSDashboardEmptyState(
-                    onPromptSelected = { prompt ->
-                        viewModel.sendTextMessage(prompt)
+                    onPromptSelected = { prompt: String ->
+                        inputText = prompt
                     },
-                    onMicClick = {
-                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
-                    },
+                    onSendTextMessage = onSendTextMessage,
+                    onMicClick = onRequestMicPermission,
+                    presentation = presentation,
                     audioRms = audioRms,
-                    isListening = uiState.isRecording,
-                    isThinking = uiState.isThinking,
-                    isSpeaking = uiState.isAiSpeaking,
                     onNavigateTo = onNavigateTo,
                     modifier = Modifier.fillMaxSize()
                 )
@@ -202,58 +252,31 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 16.dp),
-                    contentPadding = PaddingValues(top = 16.dp, bottom = 100.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                    contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    items(
+                    itemsIndexed(
                         items = uiState.messages,
-                        key = { it.id }
-                    ) { msg ->
+                        key = { _, msg -> msg.id }
+                    ) { index, msg ->
+                        val showIdentity = index == 0 || uiState.messages[index - 1].isUser != msg.isUser
                         if (msg.isUser) {
                             IOSUserMessageBubble(
                                 message = msg,
+                                showIdentity = showIdentity,
                                 onCopyText = { copyToClipboard(context, msg.text) }
                             )
                         } else {
                             IOSMaxMessageBubble(
                                 message = msg,
+                                showIdentity = showIdentity,
                                 onCopyText = { copyToClipboard(context, msg.text) }
                             )
                         }
                     }
 
-                    // Live AI Caption streaming chunk if active
-                    if (uiState.isAiSpeaking && liveAiCaption.isNotBlank()) {
-                        item(key = "live_ai_streaming") {
-                            MaxGlassSurface(
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                                shape = MaxIOSShapes.ShapeLarge,
-                                backgroundColor = MaxIOSColors.DarkSurfaceGrouped.copy(alpha = 0.9f)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(14.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(MaxIOSColors.SystemTeal)
-                                    )
-                                    Text(
-                                        text = liveAiCaption,
-                                        color = MaxIOSColors.TextPrimaryDark,
-                                        fontSize = 15.sp,
-                                        lineHeight = 22.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Three-Dot Typing Indicator when thinking
-                    if (uiState.isThinking && !uiState.isAiSpeaking) {
+                    // The pending chat item is the only streaming text surface.
+                    if (presentation.phase == AssistantPhase.THINKING) {
                         item(key = "typing_indicator") {
                             IOSTypingIndicator()
                         }
@@ -268,20 +291,19 @@ fun HomeScreen(
                 exit = fadeOut() + scaleOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 84.dp)
+                    .padding(bottom = 12.dp)
             ) {
                 Surface(
                     onClick = {
                         coroutineScope.launch {
-                            if (uiState.messages.isNotEmpty()) {
-                                listState.animateScrollToItem(uiState.messages.size - 1)
-                            }
+                            val last = listState.layoutInfo.totalItemsCount - 1
+                            if (last >= 0) listState.animateScrollToItem(last)
                         }
                     },
-                    shape = MaxIOSShapes.ShapePill,
-                    color = MaxIOSColors.DarkSurfaceElevated,
+                    shape = MaxShapes.pill,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     shadowElevation = 4.dp,
-                    border = androidx.compose.foundation.BorderStroke(0.5.dp, MaxIOSColors.HairlineDark)
+                    border = androidx.compose.foundation.BorderStroke(MaxStroke.hairline, MaxColors.extra.borderSubtle)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
@@ -289,16 +311,15 @@ fun HomeScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Default.KeyboardArrowDown,
+                            imageVector = Icons.Rounded.KeyboardArrowDown,
                             contentDescription = "Scroll down",
-                            tint = MaxIOSColors.SystemBlue,
-                            modifier = Modifier.size(16.dp)
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(MaxIconTokens.Small)
                         )
                         Text(
                             text = "New messages",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = MaxIOSColors.TextPrimaryDark
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                     }
                 }
@@ -311,62 +332,90 @@ fun HomeScreen(
                 exit = slideOutVertically { it } + fadeOut(),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 76.dp, start = 16.dp, end = 16.dp)
+                    .padding(bottom = 12.dp, start = 16.dp, end = 16.dp)
             ) {
                 IOSQuickActionsCard(
                     onSelectPrompt = { prompt ->
                         showQuickPrompts = false
-                        viewModel.sendTextMessage(prompt)
+                        inputText = prompt
                     },
                     onDismiss = { showQuickPrompts = false }
                 )
             }
 
-            // Floating iOS-Style Input Dock with background scrim
-            Box(
+            }
+            // Measured layout, not an overlay: the composer never covers chat.
+            Column(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
                     .fillMaxWidth()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                MaxIOSColors.DarkBase.copy(alpha = 0.85f),
-                                MaxIOSColors.DarkBase
-                            )
-                        )
-                    )
-                    .padding(bottom = 12.dp)
+                    .background(Color.Transparent)
+                    .padding(bottom = 8.dp)
             ) {
+                if (uiState.error != null) {
+                    AssistantStatusStrip(presentation, uiState.isMaxEnabled,
+                        onDismissError = onClearError)
+                }
+                if (presentation.phase == AssistantPhase.LISTENING && uiState.liveUserCaption.isNotBlank()) {
+                    Text(uiState.liveUserCaption, color = MaxSemanticColors.textSecondary,
+                        style = MaterialTheme.typography.bodySmall, maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
+                }
+                // Live Agent Task Execution Activity Card with Stop Control
+                androidx.compose.animation.AnimatedVisibility(
+                    visible = activityState.active || (presentation.phase in setOf(
+                        AssistantPhase.COMPLETED, AssistantPhase.CANCELLED, AssistantPhase.FAILED,
+                        AssistantPhase.BLOCKED, AssistantPhase.UNVERIFIED) && !activityState.goal.isNullOrBlank()),
+                    enter = slideInVertically { it } + fadeIn(),
+                    exit = slideOutVertically { it } + fadeOut(),
+                    modifier = Modifier.padding(bottom = 6.dp)
+                ) {
+                    com.example.ui.components.AgentActivityCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        presentation = presentation,
+                        activityState = activityState,
+                        onDismiss = { com.example.automation.activity.AgentActivityTracker.reset() },
+                        onStopTask = onCancelActiveTask
+                    )
+                }
+
                 MaxInputDock(
                     text = inputText,
                     onTextChange = { inputText = it },
                     onSend = {
                         val textToSend = inputText.trim()
                         if (textToSend.isNotEmpty()) {
-                            viewModel.sendTextMessage(textToSend)
+                            onSendTextMessage(textToSend)
                             inputText = ""
                             keyboardController?.hide()
                         }
                     },
                     onMicClick = {
-                        micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                        if (uiState.isRecording) onStopRecording()
+                        else onRequestMicPermission()
                     },
                     onPlusClick = {
                         showQuickPrompts = !showQuickPrompts
                     },
-                    isListening = uiState.isRecording,
-                    isSpeaking = uiState.isAiSpeaking,
+                    isListening = presentation.phase == AssistantPhase.LISTENING,
+                    isSpeaking = presentation.phase == AssistantPhase.SPEAKING,
+                    isBusy = presentation.canStop && presentation.phase !in setOf(
+                        AssistantPhase.WAITING_FOR_INPUT, AssistantPhase.WAITING_FOR_APPROVAL,
+                        AssistantPhase.LISTENING),
+                    isCancelling = presentation.phase == AssistantPhase.CANCELLING,
+                    onStopTask = onCancelActiveTask,
+                    enabled = uiState.isMaxEnabled,
+                    placeholder = if (presentation.phase == AssistantPhase.WAITING_FOR_APPROVAL) "Reply Allow or Cancel…"
+                        else if (presentation.phase == AssistantPhase.WAITING_FOR_INPUT) "Your answer…" else "Message MAX…",
                     onStopSpeaking = {
-                        viewModel.stopRecording()
-                        viewModel.interruptSpeech()
+                        onStopRecording()
+                        onInterruptSpeech()
                     },
                     modifier = Modifier.fillMaxWidth()
                 )
             }
         }
     }
-}
 }
 
 private data class TrialBannerData(
@@ -389,33 +438,37 @@ fun TrialQuotaBanner(
     val isExpired = license.isExpired()
     val isLimitReached = dailyUsage >= 10L
     val remainingDays = license.remainingTrialDays()
+    val isDark = com.example.ui.theme.LocalIsDarkMode.current
 
     val banner = when {
         isExpired -> {
             TrialBannerData(
-                listOf(Color(0xFF3B151A), Color(0xFF260D10)),
+                if (isDark) listOf(MaxSemanticColors.destructiveSurface, MaxSemanticColors.destructiveSurface.copy(alpha = 0.6f))
+                else listOf(MaxDestructiveApple.copy(alpha = 0.12f), MaxDestructiveApple.copy(alpha = 0.05f)),
                 "Free Trial Expired",
                 "Your 3-day trial has ended. Tap to activate Lifetime Premium.",
-                Icons.Default.ErrorOutline,
-                Color(0xFFFF453A)
+                Icons.Rounded.ErrorOutline,
+                MaxDestructiveApple
             )
         }
         isLimitReached -> {
             TrialBannerData(
-                listOf(Color(0xFF38230D), Color(0xFF231608)),
+                if (isDark) listOf(MaxSemanticColors.warningSurface, MaxSemanticColors.warningSurface.copy(alpha = 0.6f))
+                else listOf(MaxWarningApple.copy(alpha = 0.15f), MaxWarningApple.copy(alpha = 0.08f)),
                 "Daily Free Limit Reached (10/10)",
                 "Daily quota used. Tap to activate Lifetime Premium.",
-                Icons.Default.Warning,
-                Color(0xFFFF9F0A)
+                Icons.Rounded.Warning,
+                MaxWarningApple
             )
         }
         else -> {
             TrialBannerData(
-                listOf(Color(0xFF0F2640), Color(0xFF091728)),
+                if (isDark) listOf(MaxSemanticColors.primaryRoyal.copy(alpha = 0.25f), MaxSemanticColors.surfaceVariant)
+                else listOf(com.example.ui.theme.SoftRoseTint, Color.White),
                 "3-Day Free Trial Active",
                 "$remainingDays days remaining • $dailyUsage/10 messages used today",
-                Icons.Default.HourglassTop,
-                Color(0xFF30D158)
+                Icons.Rounded.HourglassTop,
+                if (isDark) MaxColors.extra.link else MaterialTheme.colorScheme.primary
             )
         }
     }
@@ -425,9 +478,12 @@ fun TrialQuotaBanner(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 6.dp),
-        shape = RoundedCornerShape(12.dp),
+        shape = MaxShapes.card,
         color = Color.Transparent,
-        border = androidx.compose.foundation.BorderStroke(0.5.dp, banner.iconColor.copy(alpha = 0.4f))
+        border = androidx.compose.foundation.BorderStroke(
+            MaxStroke.hairline,
+            if (isDark) banner.iconColor.copy(alpha = 0.4f) else MaxColors.extra.borderStrong
+        )
     ) {
         Box(
             modifier = Modifier
@@ -438,31 +494,56 @@ fun TrialQuotaBanner(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Icon(
-                    imageVector = banner.icon,
-                    contentDescription = null,
-                    tint = banner.iconColor,
-                    modifier = Modifier.size(20.dp)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(CircleShape)
+                        .background(banner.iconColor.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = banner.icon,
+                        contentDescription = null,
+                        tint = banner.iconColor,
+                        modifier = Modifier.size(MaxIconTokens.Medium)
+                    )
+                }
+
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = banner.text,
-                        fontSize = 13.sp,
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = banner.subtext,
-                        fontSize = 11.5.sp,
-                        color = Color.White.copy(alpha = 0.8f)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaxColors.extra.textSecondary
                     )
                 }
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.5f),
-                    modifier = Modifier.size(16.dp)
-                )
+
+                Box(
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Surface(
+                        shape = MaxShapes.pill,
+                        color = if (isDark) banner.iconColor.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(
+                            MaxStroke.hairline,
+                            if (isDark) banner.iconColor.copy(alpha = 0.5f) else MaxColors.extra.borderStrong
+                        )
+                    ) {
+                        Text(
+                            text = "UPGRADE",
+                            color = if (isDark) banner.iconColor else MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -473,21 +554,25 @@ fun TrialQuotaBanner(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun IOSTopBar(
+internal fun IOSTopBar(
     isMaxEnabled: Boolean,
     connectionState: ConnectionState,
+    isDarkMode: Boolean,
+    onToggleDarkMode: () -> Unit,
     onMenuClick: () -> Unit,
     onToggleMax: (Boolean) -> Unit,
     onClearChat: () -> Unit,
     onNavigateToSettings: () -> Unit
 ) {
     var showMenu by remember { mutableStateOf(false) }
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val safeTopPadding = if (statusBarTop > 0.dp) statusBarTop else 24.dp
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .statusBarsPadding()
-            .background(MaxIOSColors.DarkBase)
+            .background(Color.Transparent)
+            .padding(top = safeTopPadding)
     ) {
         Row(
             modifier = Modifier
@@ -501,121 +586,131 @@ private fun IOSTopBar(
             IconButton(
                 onClick = onMenuClick,
                 modifier = Modifier
-                    .size(36.dp)
-                    .clip(MaxIOSShapes.ShapeSmall)
-                    .background(MaxIOSColors.DarkSurfaceElevated)
-                    .border(0.5.dp, MaxIOSColors.HairlineDark, MaxIOSShapes.ShapeSmall)
+                    .size(48.dp)
+                    .clip(MaxShapes.card)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .border(MaxStroke.hairline, MaxColors.extra.borderSubtle, MaxShapes.card)
             ) {
                 Icon(
-                    imageVector = Icons.Outlined.Menu,
+                    imageVector = Icons.Rounded.Menu,
                     contentDescription = "Open Drawer",
-                    tint = MaxIOSColors.TextPrimaryDark,
-                    modifier = Modifier.size(18.dp)
+                    tint = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.size(MaxIconTokens.Medium)
                 )
             }
 
-            // Center Assistant Identity & Status Pill
+            // Center Assistant Brand Title (Jarvis Minimal Luxury)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .size(8.dp)
                         .clip(CircleShape)
                         .background(
-                            if (!isMaxEnabled) MaxIOSColors.TextTertiaryDark
+                            if (!isMaxEnabled) MaterialTheme.colorScheme.onSurfaceVariant
                             else when (connectionState) {
-                                ConnectionState.CONNECTED -> MaxIOSColors.SystemGreen
-                                ConnectionState.CONNECTING -> MaxIOSColors.SystemAmber
-                                else -> MaxIOSColors.TextTertiaryDark
+                                ConnectionState.CONNECTED -> MaxColors.extra.glow
+                                ConnectionState.CONNECTING -> MaxWarningApple
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
                             }
                         )
                 )
                 Text(
-                    text = if (!isMaxEnabled) "MAX Offline" else "MAX",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaxIOSColors.TextPrimaryDark,
-                    letterSpacing = (-0.41).sp
+                    text = "MAX",
+                    style = MaxType.Title,
+                    color = MaxSemanticColors.accentCyan
                 )
             }
 
-            // Options & Settings Menu
-            Box {
+            // Right Actions: Day/Night Mode Switch + Options Menu
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // Day / Night Mode Toggle Icon Button
                 IconButton(
-                    onClick = { showMenu = true },
+                    onClick = onToggleDarkMode,
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(MaxIOSShapes.ShapeSmall)
-                        .background(MaxIOSColors.DarkSurfaceElevated)
-                        .border(0.5.dp, MaxIOSColors.HairlineDark, MaxIOSShapes.ShapeSmall)
+                        .size(48.dp)
+                        .clip(MaxShapes.card)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .border(MaxStroke.hairline, MaxColors.extra.borderSubtle, MaxShapes.card)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.MoreVert,
-                        contentDescription = "Options",
-                        tint = MaxIOSColors.TextPrimaryDark,
-                        modifier = Modifier.size(18.dp)
+                        imageVector = if (isDarkMode) Icons.Rounded.WbSunny else Icons.Rounded.NightsStay,
+                        contentDescription = if (isDarkMode) "Switch to Day Mode" else "Switch to Night Mode",
+                        tint = if (isDarkMode) MaxRoyalGold else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(MaxIconTokens.Medium)
                     )
                 }
 
-                DropdownMenu(
-                    expanded = showMenu,
-                    onDismissRequest = { showMenu = false },
-                    modifier = Modifier.background(MaxIOSColors.DarkSurfaceGrouped)
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Text(
-                                    text = if (isMaxEnabled) "MAX Active" else "MAX Paused",
-                                    color = MaxIOSColors.TextPrimaryDark,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium
-                                )
-                                Spacer(modifier = Modifier.weight(1f))
-                                Switch(
-                                    checked = isMaxEnabled,
-                                    onCheckedChange = {
-                                        onToggleMax(it)
-                                        showMenu = false
-                                    },
-                                    colors = SwitchDefaults.colors(
-                                        checkedThumbColor = Color.White,
-                                        checkedTrackColor = MaxIOSColors.SystemBlue
+                // Options Dropdown Menu
+                Box {
+                    IconButton(
+                        onClick = { showMenu = true },
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(MaxShapes.card)
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .border(MaxStroke.hairline, MaxColors.extra.borderSubtle, MaxShapes.card)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "Options",
+                            tint = MaterialTheme.colorScheme.onBackground,
+                            modifier = Modifier.size(MaxIconTokens.Medium)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showMenu,
+                        onDismissRequest = { showMenu = false },
+                        modifier = Modifier.background(MaterialTheme.colorScheme.surface)
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text(
+                                        text = if (isMaxEnabled) "MAX Active" else "MAX Paused",
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Medium
                                     )
-                                )
+                                    Spacer(modifier = Modifier.weight(1f))
+                                    Switch(
+                                        checked = isMaxEnabled,
+                                        onCheckedChange = {
+                                            onToggleMax(it)
+                                            showMenu = false
+                                        },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = MaterialTheme.colorScheme.primary
+                                        )
+                                    )
+                                }
+                            },
+                            onClick = { onToggleMax(!isMaxEnabled) }
+                        )
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = MaxStroke.hairline)
+
+                        DropdownMenuItem(
+                            text = { Text("Clear Chat History", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium) },
+                            leadingIcon = {
+                                Icon(Icons.Rounded.Refresh, contentDescription = "Clear Chat History", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(MaxIconTokens.Medium))
+                            },
+                            onClick = {
+                                onClearChat()
+                                showMenu = false
                             }
-                        },
-                        onClick = { onToggleMax(!isMaxEnabled) }
-                    )
-
-                    HorizontalDivider(color = MaxIOSColors.HairlineDark, thickness = 0.5.dp)
-
-                    DropdownMenuItem(
-                        text = { Text("Clear Chat History", color = MaxIOSColors.TextPrimaryDark, fontSize = 14.sp) },
-                        leadingIcon = {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = MaxIOSColors.TextSecondaryDark, modifier = Modifier.size(18.dp))
-                        },
-                        onClick = {
-                            onClearChat()
-                            showMenu = false
-                        }
-                    )
-
-                    DropdownMenuItem(
-                        text = { Text("Settings", color = MaxIOSColors.TextPrimaryDark, fontSize = 14.sp) },
-                        leadingIcon = {
-                            Icon(Icons.Default.Settings, contentDescription = null, tint = MaxIOSColors.TextSecondaryDark, modifier = Modifier.size(18.dp))
-                        },
-                        onClick = {
-                            onNavigateToSettings()
-                            showMenu = false
-                        }
-                    )
+                        )
+                    }
                 }
             }
         }
@@ -626,120 +721,250 @@ private fun IOSTopBar(
 // DASHBOARD EMPTY STATE (Greeting + Reactive Orb + Quick Action Pills)
 // ─────────────────────────────────────────────────────────────────────────────
 
+enum class PromptMode { EXECUTE, PREFILL }
+
+data class QuickPrompt(
+    val label: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector,
+    val prompt: String,
+    val mode: PromptMode
+)
+
+val quickPrompts = listOf(
+    QuickPrompt("Open Maps", androidx.compose.material.icons.Icons.Rounded.Explore, "Open Maps", PromptMode.EXECUTE),
+    QuickPrompt("Alarm at 7 AM", androidx.compose.material.icons.Icons.Rounded.Alarm, "Set an alarm for 7 AM", PromptMode.EXECUTE),
+    QuickPrompt("Read screen", androidx.compose.material.icons.Icons.Rounded.Visibility, "Read my screen", PromptMode.EXECUTE),
+    QuickPrompt("Summarize chats", androidx.compose.material.icons.Icons.Rounded.ChatBubble, "Summarize my chats from ", PromptMode.PREFILL),
+    QuickPrompt("Search web", androidx.compose.material.icons.Icons.Rounded.Search, "Search the web for ", PromptMode.PREFILL)
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun IOSDashboardEmptyState(
+internal fun IOSDashboardEmptyState(
     onPromptSelected: (String) -> Unit,
+    onSendTextMessage: (String) -> Unit = {},
     onMicClick: () -> Unit,
-    audioRms: Float,
-    isListening: Boolean,
-    isThinking: Boolean,
-    isSpeaking: Boolean,
+    presentation: AssistantPresentation,
+    audioRms: kotlinx.coroutines.flow.StateFlow<Float>,
     onNavigateTo: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val greeting = remember {
-        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
-        when (hour) {
-            in 5..11 -> "Good morning"
-            in 12..16 -> "Good afternoon"
-            in 17..21 -> "Good evening"
-            else -> "Hello"
-        }
-    }
+    var showCapabilitiesSheet by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 28.dp, bottom = 120.dp),
+        contentPadding = PaddingValues(top = 32.dp, bottom = 24.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
-        // Assistant Orb Hero
+        // Assistant Orb Hero with Luminous Telemetry
         item {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                MaxAssistantOrb(
-                    isListening = isListening,
-                    isThinking = isThinking,
-                    isSpeaking = isSpeaking,
-                    audioRms = audioRms,
-                    size = 92.dp,
-                    onClick = onMicClick
-                )
-
+                // Clean Greeting & Subtitle
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(
-                        text = greeting,
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaxIOSColors.TextPrimaryDark,
-                        letterSpacing = 0.36.sp
+                        text = "Hello Yash",
+                        style = MaxType.Title,
+                        color = MaxSemanticColors.textPrimary
+                    )
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = "Your Autonomous AI Partner",
+                        style = MaxType.Body,
+                        color = MaxSemanticColors.textSecondary
+                    )
+                }
+
+                LiveAssistantOrb(presentation, audioRms, onMicClick)
+
+                RotatingSuggestions(
+                    suggestions = listOf(
+                        "Open Chrome",
+                        "Send a WhatsApp message",
+                        "Set an alarm for 7 AM",
+                        "Split screen apps",
+                        "Read my screen"
+                    ),
+                    onSuggestionClick = onPromptSelected
+                )
+
+                Text(
+                    text = "Tap the mic to talk to MAX",
+                    style = MaxType.Caption,
+                    color = MaxSemanticColors.textSecondary
+                )
+            }
+        }
+
+        // 2x2 Quick Automations Grid
+        item {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "QUICK AUTOMATIONS",
+                        style = MaxType.Eyebrow,
+                        color = MaxSemanticColors.textSecondary
                     )
                     Text(
-                        text = "What can I help you with?",
-                        fontSize = 16.sp,
-                        color = MaxIOSColors.TextSecondaryDark,
-                        modifier = Modifier.padding(top = 4.dp)
+                        text = "View all →",
+                        style = MaxType.Caption,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaxSemanticColors.accentCyan,
+                        modifier = Modifier.clickable { showCapabilitiesSheet = true }
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    MaxQuickAutomationCard(
+                        title = "WhatsApp AI",
+                        subtitle = "Automated chat flows",
+                        badge = "Flow",
+                        icon = androidx.compose.material.icons.Icons.AutoMirrored.Rounded.Chat,
+                        onClick = { onPromptSelected("Send a WhatsApp message") },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    MaxQuickAutomationCard(
+                        title = "Screen Vision",
+                        subtitle = "Analyze active screen",
+                        badge = "Vision",
+                        icon = androidx.compose.material.icons.Icons.Rounded.Visibility,
+                        onClick = { onSendTextMessage("Read my screen") },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    MaxQuickAutomationCard(
+                        title = "Device Control",
+                        subtitle = "Automate settings & apps",
+                        badge = "Tools",
+                        icon = androidx.compose.material.icons.Icons.Rounded.Tune,
+                        onClick = { showCapabilitiesSheet = true },
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    MaxQuickAutomationCard(
+                        title = "Live Search",
+                        subtitle = "Real-time AI research",
+                        badge = "Search",
+                        icon = androidx.compose.material.icons.Icons.Rounded.Search,
+                        onClick = { onPromptSelected("Search the web for news") },
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
         }
 
-        // Quick Actions Scrollable Pill Row
+        // Quick Actions Row using TouchChip
         item {
-            val quickActions = listOf(
-                "💬 Message" to "Send a WhatsApp message",
-                "⏰ Alarm" to "Set an alarm for 7 AM",
-                "🗺️ Open Maps" to "Open Google Maps",
-                "📷 Camera" to "Take a photo",
-                "🔍 Search" to "Search the web for news"
-            )
-
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                quickActions.forEach { (label, prompt) ->
-                    MaxQuickActionCapsule(
-                        text = label,
-                        onClick = { onPromptSelected(prompt) }
+                quickPrompts.forEach { p ->
+                    TouchChip(
+                        label = p.label,
+                        onClick = {
+                            when (p.mode) {
+                                PromptMode.EXECUTE -> onSendTextMessage(p.prompt)
+                                PromptMode.PREFILL -> onPromptSelected(p.prompt)
+                            }
+                        },
+                        leading = {
+                            Icon(
+                                imageVector = p.icon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(MaxIconTokens.Small)
+                            )
+                        },
+                        trailing = if (p.mode == PromptMode.PREFILL) {
+                            {
+                                Icon(
+                                    imageVector = androidx.compose.material.icons.Icons.Rounded.Edit,
+                                    contentDescription = "Edit prompt before sending",
+                                    tint = MaxColors.extra.textSecondary,
+                                    modifier = Modifier.size(12.dp)
+                                )
+                            }
+                        } else null
                     )
                 }
             }
         }
+    }
 
-        // Inset Grouped Section for Common Capabilities
-        item {
-            MaxIOSSettingsSection(title = "Capabilities") {
+    if (showCapabilitiesSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showCapabilitiesSheet = false }
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Capabilities",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
                 MaxIOSSettingsRow(
-                    title = "Device & App Automation",
+                    title = "Make things happen",
                     subtitle = "Split-screen, open apps, control settings",
-                    icon = Icons.Default.AutoAwesome,
-                    iconBg = MaxIOSColors.SystemBlue,
-                    onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.CAPABILITIES) },
+                    icon = androidx.compose.material.icons.Icons.Rounded.AutoAwesome,
+                    iconBg = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        showCapabilitiesSheet = false
+                        onNavigateTo(com.example.ui.navigation.MaxDestinations.CAPABILITIES)
+                    },
                     showDivider = true
                 )
                 MaxIOSSettingsRow(
-                    title = "Memory Vault",
+                    title = "Your memory vault",
                     subtitle = "Search & manage personal AI knowledge",
-                    icon = Icons.Default.FolderShared,
-                    iconBg = MaxIOSColors.SystemPurple,
-                    onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.MEMORY) },
+                    icon = androidx.compose.material.icons.Icons.Rounded.FolderShared,
+                    iconBg = MaterialTheme.colorScheme.primary,
+                    onClick = {
+                        showCapabilitiesSheet = false
+                        onNavigateTo(com.example.ui.navigation.MaxDestinations.MEMORY)
+                    },
                     showDivider = true
                 )
                 MaxIOSSettingsRow(
-                    title = "Reminders & Routines",
+                    title = "Stay a step ahead",
                     subtitle = "Manage scheduled tasks and automated workflows",
-                    icon = Icons.Default.Alarm,
-                    iconBg = MaxIOSColors.SystemAmber,
-                    onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.ROUTINES) },
+                    icon = androidx.compose.material.icons.Icons.Rounded.Alarm,
+                    iconBg = MaterialTheme.colorScheme.tertiary,
+                    onClick = {
+                        showCapabilitiesSheet = false
+                        onNavigateTo(com.example.ui.navigation.MaxDestinations.ROUTINES)
+                    },
                     showDivider = false
                 )
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
     }
@@ -750,12 +975,14 @@ private fun IOSDashboardEmptyState(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun IOSUserMessageBubble(
+internal fun IOSUserMessageBubble(
     message: ChatMessageItem,
+    showIdentity: Boolean = true,
     onCopyText: () -> Unit
 ) {
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     val formattedTime = remember(message.timestamp) { timeFormat.format(Date(message.timestamp)) }
+    val isDark = LocalIsDarkMode.current
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -763,31 +990,39 @@ private fun IOSUserMessageBubble(
     ) {
         Column(
             horizontalAlignment = Alignment.End,
-            modifier = Modifier.widthIn(max = 280.dp)
+            modifier = Modifier.fillMaxWidth(0.85f).widthIn(max = 560.dp)
         ) {
+            if (showIdentity) Text(
+                "YOU",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(end = 4.dp, bottom = 6.dp)
+            )
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 4.dp))
-                    .background(MaxIOSColors.SystemBlue)
-                    .clickable { onCopyText() }
-                    .padding(horizontal = 16.dp, vertical = 10.dp)
+                    .clip(MaxShapes.bubbleUser)
+                    .background(if (isDark) MaxSemanticColors.surfaceVariant else com.example.ui.theme.NeonPink)
+                    .border(
+                        MaxStroke.hairline,
+                        if (isDark) MaxSemanticColors.borderStrong else com.example.ui.theme.MagentaRose,
+                        MaxShapes.bubbleUser
+                    )
+                    .padding(horizontal = 16.dp, vertical = 11.dp)
             ) {
                 SelectionContainer {
                     Text(
                         text = message.text,
                         color = Color.White,
-                        fontSize = 15.sp,
-                        lineHeight = 21.sp,
-                        fontWeight = FontWeight.Normal
+                        style = MaterialTheme.typography.bodyMedium
                     )
                 }
             }
 
             Text(
                 text = formattedTime,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                color = MaxIOSColors.TextTertiaryDark,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = MaxMono,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, end = 4.dp)
             )
         }
@@ -795,14 +1030,16 @@ private fun IOSUserMessageBubble(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAX MESSAGE BUBBLE (Open Conversational Left-Aligned Layout)
+// MAX MESSAGE BUBBLE (Stitch Luminous Neural Glassmorphic Left-Aligned Layout)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun IOSMaxMessageBubble(
+internal fun IOSMaxMessageBubble(
     message: ChatMessageItem,
+    showIdentity: Boolean = true,
     onCopyText: () -> Unit
 ) {
+    val isDark = com.example.ui.theme.LocalIsDarkMode.current
     val timeFormat = remember { SimpleDateFormat("h:mm a", Locale.getDefault()) }
     val formattedTime = remember(message.timestamp) { timeFormat.format(Date(message.timestamp)) }
 
@@ -812,97 +1049,95 @@ private fun IOSMaxMessageBubble(
     ) {
         Column(
             horizontalAlignment = Alignment.Start,
-            modifier = Modifier.widthIn(max = 310.dp)
+            modifier = Modifier.fillMaxWidth(0.92f).widthIn(max = 640.dp)
         ) {
+            if (showIdentity) Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(bottom = 6.dp, start = 2.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(if (isDark) Color.Black else com.example.ui.theme.SoftRoseTint)
+                        .border(1.dp, if (isDark) com.example.ui.theme.NeonPink.copy(alpha = 0.5f) else com.example.ui.theme.SoftRoseBorder, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Rounded.AutoAwesome,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(12.dp)
+                    )
+                }
+                Text(
+                    "MAX",
+                    color = MaxSemanticColors.accentCyan,
+                    style = MaxType.Eyebrow
+                )
+            }
             MaxGlassSurface(
-                shape = RoundedCornerShape(topStart = 4.dp, topEnd = 18.dp, bottomStart = 18.dp, bottomEnd = 18.dp),
-                backgroundColor = MaxIOSColors.DarkSurfaceGrouped,
-                borderColor = MaxIOSColors.HairlineDark,
-                borderWidth = 0.5.dp,
-                modifier = Modifier.clickable { onCopyText() }
+                shape = MaxShapes.bubbleMax,
+                backgroundColor = if (isDark) MaxSemanticColors.surfaceVariant else Color.White,
+                borderColor = if (isDark) MaterialTheme.colorScheme.primary.copy(alpha = 0.35f) else com.example.ui.theme.SoftRoseBorder,
+                borderWidth = MaxStroke.hairline,
+                modifier = Modifier.fillMaxWidth()
             ) {
                 SelectionContainer {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                        MarkdownChatText(text = message.text)
+                        PremiumMessageText(text = message.text)
                     }
                 }
             }
 
-            Text(
-                text = if (message.isPending) "MAX • Generating…" else "MAX • $formattedTime",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium,
-                color = if (message.isPending) MaxIOSColors.SystemBlue else MaxIOSColors.TextTertiaryDark,
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Text(
+                text = if (message.isPending) "Streaming…" else formattedTime,
+                style = MaterialTheme.typography.labelSmall,
+                fontFamily = MaxMono,
+                color = if (message.isPending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp, start = 4.dp)
-            )
+              )
+              Spacer(Modifier.weight(1f))
+              if (!message.isPending) IconButton(onClick = onCopyText) {
+                  Icon(
+                      Icons.Rounded.ContentCopy,
+                      "Copy response",
+                      tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                      modifier = Modifier.size(MaxIconTokens.Small)
+                  )
+              }
+            }
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TYPING INDICATOR
+// TYPING INDICATOR (Stitch Aether HUD Aligned)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun IOSTypingIndicator() {
-    val transition = rememberInfiniteTransition(label = "typing_dots")
-    val dot1 by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = -4f,
-        animationSpec = infiniteRepeatable(tween(400, easing = LinearEasing), RepeatMode.Reverse),
-        label = "dot1"
-    )
-    val dot2 by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = -4f,
-        animationSpec = infiniteRepeatable(tween(400, delayMillis = 150, easing = LinearEasing), RepeatMode.Reverse),
-        label = "dot2"
-    )
-    val dot3 by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = -4f,
-        animationSpec = infiniteRepeatable(tween(400, delayMillis = 300, easing = LinearEasing), RepeatMode.Reverse),
-        label = "dot3"
-    )
-
+    val lifecycle by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Start
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            modifier = Modifier
-                .clip(MaxIOSShapes.ShapeMedium)
-                .background(MaxIOSColors.DarkSurfaceGrouped)
-                .border(0.5.dp, MaxIOSColors.HairlineDark, MaxIOSShapes.ShapeMedium)
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Box(
-                    modifier = Modifier
-                        .offset(y = dot1.dp)
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(MaxIOSColors.TextSecondaryDark)
-                )
-                Box(
-                    modifier = Modifier
-                        .offset(y = dot2.dp)
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(MaxIOSColors.TextSecondaryDark)
-                )
-                Box(
-                    modifier = Modifier
-                        .offset(y = dot3.dp)
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(MaxIOSColors.TextSecondaryDark)
-                )
-            }
+        if (lifecycle.isAtLeast(Lifecycle.State.RESUMED)) {
+            CircularProgressIndicator(
+                Modifier.size(16.dp),
+                color = MaterialTheme.colorScheme.primary,
+                strokeWidth = 2.dp
+            )
         }
+        Text(
+            "MAX is processing…",
+            color = MaxColors.extra.textSecondary,
+            fontFamily = MaxMono,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
 
@@ -915,11 +1150,19 @@ private fun IOSQuickActionsCard(
     onSelectPrompt: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val quickItems = remember {
+        listOf(
+            Triple(Icons.AutoMirrored.Rounded.Send, "Send message", "Send a WhatsApp message"),
+            Triple(Icons.Rounded.ViewAgenda, "Split screen", "Open Maps and Instagram in split screen"),
+            Triple(Icons.AutoMirrored.Rounded.StickyNote2, "Take note", "Save a note in memory")
+        )
+    }
+
     MaxGlassSurface(
-        shape = MaxIOSShapes.ShapeLarge,
-        backgroundColor = MaxIOSColors.DarkSurfaceElevated,
-        borderColor = MaxIOSColors.HairlineDark,
-        borderWidth = 0.5.dp,
+        shape = MaxShapes.card,
+        backgroundColor = MaxSemanticColors.surfaceElevated,
+        borderColor = MaxColors.extra.borderSubtle,
+        borderWidth = MaxStroke.hairline,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -930,46 +1173,55 @@ private fun IOSQuickActionsCard(
             ) {
                 Text(
                     text = "Quick Actions",
-                    fontSize = 15.sp,
+                    style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaxIOSColors.TextPrimaryDark
+                    color = MaterialTheme.colorScheme.onSurface
                 )
-                IconButton(onClick = onDismiss, modifier = Modifier.size(24.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "Close", tint = MaxIOSColors.TextSecondaryDark, modifier = Modifier.size(18.dp))
+                IconButton(onClick = onDismiss) {
+                    Icon(
+                        Icons.Rounded.Close,
+                        contentDescription = "Close",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(MaxIconTokens.Medium)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
-            val quickItems = listOf(
-                "💬 Message" to "Send a WhatsApp message",
-                "🗺️ Split Screen Apps" to "Open Maps and Instagram in split screen",
-                "🔍 Vision" to "Read what's on my screen",
-                "⏰ Alarm" to "Set an alarm for 7:00 AM",
-                "📝 Memory" to "Save a note in memory"
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                quickItems.forEach { (title, prompt) ->
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                quickItems.forEach { (icon, title, prompt) ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(MaxIOSShapes.ShapeMedium)
+                            .defaultMinSize(minHeight = 48.dp)
+                            .clip(MaxShapes.card)
                             .clickable { onSelectPrompt(prompt) }
-                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text(
-                            text = title,
-                            fontSize = 14.sp,
-                            color = MaxIOSColors.TextPrimaryDark
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = icon,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(MaxIconTokens.Medium)
+                            )
+                            Text(
+                                text = title,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                         Icon(
-                            imageVector = Icons.Default.PlayArrow,
+                            imageVector = Icons.Rounded.PlayArrow,
                             contentDescription = null,
-                            tint = MaxIOSColors.SystemBlue,
-                            modifier = Modifier.size(16.dp)
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(MaxIconTokens.Small)
                         )
                     }
                 }
@@ -982,86 +1234,46 @@ private fun IOSQuickActionsCard(
 // MARKDOWN TEXT RENDERER & CLIPBOARD HELPER
 // ─────────────────────────────────────────────────────────────────────────────
 
-@Composable
-private fun MarkdownChatText(text: String) {
-    val cleanText = text.trim()
-    val lines = cleanText.lines()
-
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        for (line in lines) {
-            val trimmedLine = line.trim()
-            when {
-                trimmedLine.startsWith("```") -> {
-                    // Skip markdown code fence markers
-                }
-                trimmedLine.startsWith("# ") -> {
-                    Text(
-                        text = trimmedLine.removePrefix("# "),
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaxIOSColors.TextPrimaryDark,
-                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
-                    )
-                }
-                trimmedLine.startsWith("## ") -> {
-                    Text(
-                        text = trimmedLine.removePrefix("## "),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaxIOSColors.TextPrimaryDark,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-                trimmedLine.startsWith("- ") || trimmedLine.startsWith("* ") -> {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.padding(start = 4.dp)
-                    ) {
-                        Text(text = "•", color = MaxIOSColors.SystemBlue, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        Text(
-                            text = buildAnnotatedInline(trimmedLine.substring(2)),
-                            color = MaxIOSColors.TextPrimaryDark,
-                            fontSize = 14.5.sp,
-                            lineHeight = 21.sp
-                        )
-                    }
-                }
-                else -> {
-                    if (trimmedLine.isNotEmpty()) {
-                        Text(
-                            text = buildAnnotatedInline(trimmedLine),
-                            color = MaxIOSColors.TextPrimaryDark,
-                            fontSize = 14.5.sp,
-                            lineHeight = 21.sp
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-private fun buildAnnotatedInline(text: String) = buildAnnotatedString {
-    var cursor = 0
-    val boldRegex = Regex("\\*\\*(.*?)\\*\\*")
-    val matches = boldRegex.findAll(text)
-
-    for (match in matches) {
-        if (match.range.first > cursor) {
-            append(text.substring(cursor, match.range.first))
-        }
-        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = MaxIOSColors.TextPrimaryDark)) {
-            append(match.groupValues[1])
-        }
-        cursor = match.range.last + 1
-    }
-    if (cursor < text.length) {
-        append(text.substring(cursor))
-    }
-}
-
 private fun copyToClipboard(context: Context, text: String) {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
     val clip = ClipData.newPlainText("MAX Response", text)
     clipboard?.setPrimaryClip(clip)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREVIEW
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Change preview visibility from private to internal so Compose Preview reflection can locate the method
+@Preview(name = "HomeScreen Preview", showBackground = true)
+@Composable
+internal fun HomeScreenPreview() {
+    MaxTheme {
+        HomeScreenContent(
+            uiState = HomeUiState(
+                isMaxEnabled = true,
+                connectionState = ConnectionState.CONNECTED,
+                messages = listOf(
+                    ChatMessageItem(id = 1, sender = "user", text = "Hello MAX, how are you?", timestamp = System.currentTimeMillis()),
+                    ChatMessageItem(id = 2, sender = "max", text = "Hello! I am online and ready to assist you.", timestamp = System.currentTimeMillis())
+                )
+            ),
+            isDarkMode = true,
+            edgeRevealTrigger = null,
+            cloudLicense = com.example.firebase.model.CloudLicense(userId = "preview_user"),
+            dailyUsage = 2L,
+            audioRms = remember { MutableStateFlow(0f) },
+            onOpenDrawer = {},
+            onNavigateTo = {},
+            onToggleDarkMode = {},
+            onSetRuntimeEnabled = {},
+            onClearChatHistory = {},
+            onClearError = {},
+            onCancelActiveTask = {},
+            onSendTextMessage = {},
+            onStopRecording = {},
+            onInterruptSpeech = {},
+            onRequestMicPermission = {}
+        )
+    }
 }

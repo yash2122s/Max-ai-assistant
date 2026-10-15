@@ -57,12 +57,41 @@ class ClickUiVerifier : Verifier {
                 } catch (_: Throwable) { false }
 
                 Log.d("ClickUiVerifier", "State check for 'first account': profileOrMessageButton=$hasProfileOrMessageButton, searchFocused=$hasSearchInputFocused")
+                if (hasSearchInputFocused && !hasProfileOrMessageButton) {
+                    return VerificationResult(
+                        success = false,
+                        reason = "Search edit text still active; failed to transition to account profile",
+                        retryRecommended = true,
+                        snapshot = snapshot
+                    )
+                }
             }
+        }
+
+        // Action acceptance or unconfirmed escalation must never count as verified completion
+        if (result.status == com.example.automation.tools.ToolResultStatus.ACCEPTED ||
+            result.status == com.example.automation.tools.ToolResultStatus.ATTEMPTED_UNVERIFIED) {
+            return VerificationResult(
+                success = false,
+                reason = "Action '$action' for target '$target' was accepted by OS but produced no verified postcondition",
+                retryRecommended = true,
+                snapshot = snapshot
+            )
+        }
+
+        // Explicitly unverified results (e.g. screen signature didn't change and no toggle/playback state verified)
+        if (result.verified == false) {
+            return VerificationResult(
+                success = false,
+                reason = result.message ?: "Action '$action' on '$target' did not produce a verified UI state transition",
+                retryRecommended = true,
+                snapshot = snapshot
+            )
         }
 
         return VerificationResult(
             success = true,
-            reason = null,
+            reason = "Action '$action' for target '$target' verified",
             retryRecommended = false,
             snapshot = snapshot
         )

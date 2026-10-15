@@ -67,7 +67,7 @@ class OpenAppVerifier : Verifier {
             Log.d(TAG, "✓ Immediate verification success for '$appName' ($expectedPackage) in 0ms (currentPackage='$currentPackage')")
             return VerificationResult(
                 success = true,
-                reason = null,
+                reason = "Live foreground package=$currentPackage expected=$expectedPackage",
                 retryRecommended = false,
                 snapshot = currentSnapshot
             )
@@ -97,7 +97,7 @@ class OpenAppVerifier : Verifier {
                 Log.d(TAG, "✓ Polled verification success for '$appName' ($expectedPackage) in ${elapsedMs}ms (currentPackage='$currentPackage')")
                 return VerificationResult(
                     success = true,
-                    reason = null,
+                    reason = "Live foreground package=$currentPackage expected=$expectedPackage",
                     retryRecommended = false,
                     snapshot = currentSnapshot
                 )
@@ -117,16 +117,13 @@ class OpenAppVerifier : Verifier {
 
         return VerificationResult(
             success = isFinalMatch,
-            reason = if (isFinalMatch) null else failureReason,
+            reason = if (isFinalMatch) "Live foreground package=$currentPackage expected=$expectedPackage" else failureReason,
             retryRecommended = false,
             snapshot = currentSnapshot
         )
     }
 
     private fun resolveCurrentPackage(context: Context, snapshot: DeviceContext): String {
-        val snapshotPkg = snapshot.ui.packageName.trim()
-        if (snapshotPkg.isNotEmpty()) return snapshotPkg
-
         // Fallback 1: Live accessibility root node
         val activeRootPkg = com.example.service.JarvisAccessibilityService.getActiveRoot()?.packageName?.toString()?.trim().orEmpty()
         if (activeRootPkg.isNotEmpty()) return activeRootPkg
@@ -136,31 +133,14 @@ class OpenAppVerifier : Verifier {
         if (livePkg.isNotEmpty()) return livePkg
 
         // Fallback 2: Active or focused accessibility window root
-        val windowPkg = service?.windows?.firstOrNull { it.isFocused || it.isActive }?.root?.packageName?.toString()?.trim().orEmpty()
+        val windowPkg = com.example.service.JarvisAccessibilityService.getActiveWindows()?.firstOrNull { it.isFocused || it.isActive }?.root?.packageName?.toString()?.trim().orEmpty()
         if (windowPkg.isNotEmpty()) return windowPkg
-
-        // Fallback 3: WorldStateManager
-        val statePkg = com.example.automation.state.WorldStateManager.getCurrentState().currentApp.trim()
-        if (statePkg.isNotEmpty()) return statePkg
 
         return ""
     }
 
     private fun isPackageMatch(currentPackage: String, expectedPackage: String): Boolean {
         if (currentPackage.isEmpty() || expectedPackage.isEmpty()) return false
-        if (currentPackage.equals(expectedPackage, ignoreCase = true)) return true
-        
-        // Handle common OEM calculator/settings/camera package variations
-        if ((expectedPackage.contains("calculator", ignoreCase = true) || expectedPackage.contains("calc", ignoreCase = true)) &&
-            (currentPackage.contains("calculator", ignoreCase = true) || currentPackage.contains("calc", ignoreCase = true))) {
-            return true
-        }
-        if (expectedPackage == "com.android.settings" && currentPackage.contains("settings", ignoreCase = true)) {
-            return true
-        }
-        if (expectedPackage == "com.android.camera" && currentPackage.contains("camera", ignoreCase = true)) {
-            return true
-        }
-        return false
+        return currentPackage == expectedPackage
     }
 }

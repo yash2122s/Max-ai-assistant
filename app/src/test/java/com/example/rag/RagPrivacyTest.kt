@@ -48,7 +48,7 @@ class RagPrivacyTest {
         val db = AppDatabase.getDatabase(context)
         val periodDao = db.periodLogDao()
         val ragDao = db.ragChunkDao()
-        ragDao.deleteAll()
+        ragDao.deleteAll("legacy")
 
         // Insert period log into separate table
         val periodLog = PeriodLog(
@@ -60,7 +60,7 @@ class RagPrivacyTest {
         periodDao.insertPeriod(periodLog)
 
         // Verify RAG chunks table has 0 chunks from period logs
-        val ragChunkCount = ragDao.getChunkCount()
+        val ragChunkCount = ragDao.getChunkCount("legacy")
         assertEquals(0, ragChunkCount)
     }
 }

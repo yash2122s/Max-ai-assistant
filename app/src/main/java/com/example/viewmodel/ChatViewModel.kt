@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import com.example.memory.data.MemoryRepository
 import com.example.memory.data.PermanentMemory
+import com.example.memory.account.MemoryAccountScope
+import com.example.memory.account.MemorySession
 import kotlinx.coroutines.Job
 import com.example.network.ConnectionState
 import com.example.utils.playAudioResponse
@@ -16,9 +18,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onStart
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
+import com.example.data.repository.JarvisRepository
 
 class ChatViewModel : ViewModel() {
     companion object {
@@ -43,22 +50,39 @@ class ChatViewModel : ViewModel() {
     
     var appContext: Context? = null
     private var memoryRepository: MemoryRepository? = null
+    private var jarvisRepository: JarvisRepository? = null
     private var chatHistoryJob: Job? = null
     private var eventObservationJob: Job? = null
     private var captionClearJob: Job? = null
     private var thinkingTimeoutJob: Job? = null
 
     private var engine: AssistantEngine? = null
+    @Volatile private var accountSession: MemorySession = MemoryAccountScope.capture()
+
+    private fun resetAccount(session: MemorySession) {
+        accountSession = session
+        captionClearJob?.cancel()
+        thinkingTimeoutJob?.cancel()
+        _uiState.update { it.copy(messages = emptyList(), pendingAutomation = null,
+            liveAiCaption = "", liveUserCaption = "", isThinking = false, isAiSpeaking = false) }
+    }
     
     fun initialize(context: Context, apiKey: String, voiceName: String = "Aoede", responseLanguage: String = "Tenglish", preferredModel: String = "Auto") {
         appContext = context.applicationContext
         val appCtx = context.applicationContext
         memoryRepository = MemoryRepository.getInstance(appCtx)
+        jarvisRepository = JarvisRepository(appCtx)
 
         if (chatHistoryJob == null || chatHistoryJob?.isActive == false) {
             chatHistoryJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                com.example.data.local.AppDatabase.getDatabase(appCtx).chatMessageDao()
-                    .getAllMessagesFlow().collect { roomMsgs ->
+                MemoryAccountScope.sessions.flatMapLatest { session ->
+                    resetAccount(session)
+                    if (session.ownerKey == MemoryAccountScope.UNAVAILABLE) flowOf(emptyList())
+                    else com.example.data.local.AppDatabase.getDatabase(appCtx).chatMessageDao()
+                        .getAllMessagesFlow(session.ownerKey).map { rows ->
+                            if (MemoryAccountScope.isCurrent(session)) rows else emptyList()
+                        }.onStart { emit(emptyList()) }
+                }.collect { roomMsgs ->
                         val viewMsgs = roomMsgs.map { 
                             ChatMessage(
                                 role = if (it.sender == "user") "You" else "Gemini", 
@@ -66,13 +90,9 @@ class ChatViewModel : ViewModel() {
                                 timestamp = it.timestamp
                             ) 
                         }.reversed()
-                        _uiState.update { state ->
-                            if (state.messages.isEmpty()) {
-                                state.copy(messages = viewMsgs)
-                            } else {
-                                state
-                            }
-                        }
+                         if (MemoryAccountScope.isCurrent(MemoryAccountScope.capture())) {
+                             _uiState.update { state -> state.copy(messages = viewMsgs) }
+                         }
                     }
             }
         }
@@ -218,7 +238,17 @@ class ChatViewModel : ViewModel() {
     }
 
     private fun persistChatMessage(role: String, text: String) {
-        // Canonical chat persistence is handled by HomeViewModel / AssistantEngine
+        val repo = jarvisRepository ?: return
+        val session = MemoryAccountScope.capture()
+        if (!MemoryAccountScope.isCurrent(session)) return
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                MemoryAccountScope.requireCurrent(session)
+                repo.insertMessage(if (role.equals("you", true) || role.equals("user", true)) "user" else "jarvis", text)
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                // Account changed while the write was queued; discard the callback.
+            }
+        }
     }
 
     fun reconnect(newApiKey: String? = null, voiceName: String = "Aoede", responseLanguage: String = "Tenglish", preferredModel: String = "Auto") {
@@ -226,6 +256,8 @@ class ChatViewModel : ViewModel() {
     }
     
     fun sendTextMessage(text: String) {
+        val session = MemoryAccountScope.capture()
+        if (!MemoryAccountScope.isCurrent(session)) return
         val ctx = appContext
         if (ctx != null && !com.example.core.lifecycle.MaxRuntimeManager.isMaxEnabled(ctx)) {
             _uiState.update { it.copy(error = "MAX is currently OFF. Enable MAX in Settings.") }
@@ -245,6 +277,7 @@ class ChatViewModel : ViewModel() {
         thinkingTimeoutJob?.cancel()
         thinkingTimeoutJob = viewModelScope.launch {
             kotlinx.coroutines.delay(8000)
+            if (!MemoryAccountScope.isCurrent(session)) return@launch
             if (_uiState.value.isThinking) {
                 _uiState.update { it.copy(isThinking = false) }
             }
@@ -284,39 +317,132 @@ class ChatViewModel : ViewModel() {
         // P1.2 — typed reply to a pending approval (Allow / Cancel)
         if (com.example.automation.approval.ApprovalCoordinator.hasPending()) {
             viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-                val intent = com.example.automation.approval.ApprovalCoordinator.parseReply(text)
-                when (intent) {
-                    com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE -> {
-                        val pending = com.example.automation.approval.ApprovalCoordinator.resolve()
-                        if (pending != null) {
-                            val actCtx = com.example.automation.approval.ApprovalCoordinator.context()
-                                ?: appContext
-                            if (actCtx != null) {
-                                try {
-                                    com.example.automation.engine.ActionDispatcher.dispatchWithResult(actCtx, pending.payload)
-                                } catch (e: Exception) {
-                                    _uiState.update { it.copy(isThinking = false, error = e.message) }
-                                }
-                            }
-                        }
-                    }
-                    com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY ->
-                        com.example.automation.approval.ApprovalCoordinator.cancel()
-                    com.example.automation.approval.ApprovalCoordinator.ReplyIntent.OTHER -> Unit
+                val actCtx = com.example.automation.approval.ApprovalCoordinator.context()
+                    ?: appContext
+                if (actCtx != null) {
+                    com.example.automation.approval.ApprovalCoordinator.handleReply(text, actCtx)
                 }
-                if (intent != com.example.automation.approval.ApprovalCoordinator.ReplyIntent.OTHER) {
-                    _uiState.update { it.copy(isThinking = false) }
-                }
+                _uiState.update { it.copy(isThinking = false) }
             }
             return
         }
 
+        // P1-4: Typed selection for multi-contact disambiguation
+        if (com.example.automation.engine.PendingCallManager.state is com.example.automation.engine.CallState.AwaitingContactSelection) {
+            val replyIntent = com.example.automation.approval.ApprovalCoordinator.parseReply(text)
+            if (replyIntent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY) {
+                com.example.automation.engine.PendingCallManager.cancel()
+                val reply = "Call cancelled."
+                persistChatMessage("Gemini", reply)
+                thinkingTimeoutJob?.cancel()
+                _uiState.update { state ->
+                    state.copy(
+                        messages = listOf(ChatMessage("MAX", reply)) + state.messages,
+                        isThinking = false,
+                        liveAiCaption = reply
+                    )
+                }
+                scheduleCaptionClear()
+                return
+            }
+
+            val selectedCandidate = com.example.automation.engine.PendingCallManager.resolveAndSelectCandidate(text)
+            if (selectedCandidate != null) {
+                val confirmPrompt = "Do you want to call ${selectedCandidate.contactMatch.displayName} (${selectedCandidate.phoneNumber.normalizedNumber})? Please say yes to confirm or cancel."
+                persistChatMessage("Gemini", confirmPrompt)
+                thinkingTimeoutJob?.cancel()
+                _uiState.update { state ->
+                    state.copy(
+                        messages = listOf(ChatMessage("MAX", confirmPrompt)) + state.messages,
+                        isThinking = false,
+                        liveAiCaption = confirmPrompt
+                    )
+                }
+                scheduleCaptionClear()
+                return
+            } else {
+                val clarification = "Please choose which number or contact to call (e.g., 1, 2, Mobile, or Work)."
+                persistChatMessage("Gemini", clarification)
+                thinkingTimeoutJob?.cancel()
+                _uiState.update { state ->
+                    state.copy(
+                        messages = listOf(ChatMessage("MAX", clarification)) + state.messages,
+                        isThinking = false,
+                        liveAiCaption = clarification
+                    )
+                }
+                scheduleCaptionClear()
+                return
+            }
+        }
+
+        // Typed reply to a pending phone call confirmation
+        if (com.example.automation.engine.PendingCallManager.hasPendingConfirmation()) {
+            val replyIntent = com.example.automation.approval.ApprovalCoordinator.parseReply(text)
+            if (replyIntent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE) {
+                val pending = com.example.automation.engine.PendingCallManager.getPendingConfirmation()
+                if (pending != null) {
+                    com.example.automation.engine.PendingCallManager.confirmPendingCall(pending.contactId, pending.phoneId)
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                        val actCtx = com.example.automation.approval.ApprovalCoordinator.context() ?: appContext ?: ctx
+                        val callArgs = org.json.JSONObject().apply {
+                            put("action", "CALL_PHONE")
+                            put("contactId", pending.contactId)
+                            put("phoneId", pending.phoneId)
+                            put("contact", pending.displayName)
+                            put("phoneNumber", pending.phoneNumber)
+                            put("confirmed", true)
+                            put("user_confirmed", true)
+                            put("last_input_transcription", text)
+                        }
+                        val resultJsonStr = if (actCtx != null) {
+                            com.example.automation.engine.ActionDispatcher.dispatchWithResult(actCtx, callArgs)
+                        } else "{}"
+                        val resultObj = runCatching { org.json.JSONObject(resultJsonStr) }.getOrNull()
+                        val isSuccess = resultObj?.optBoolean("success", false) == true
+                        val reply = if (isSuccess) {
+                            "Calling ${pending.displayName}..."
+                        } else {
+                            resultObj?.optString("message") ?: "Failed to place call."
+                        }
+                        persistChatMessage("Gemini", reply)
+                        thinkingTimeoutJob?.cancel()
+                        _uiState.update { state ->
+                            state.copy(
+                                messages = listOf(ChatMessage("MAX", reply)) + state.messages,
+                                isThinking = false,
+                                liveAiCaption = reply
+                            )
+                        }
+                        scheduleCaptionClear()
+                    }
+                    return
+                }
+            } else if (replyIntent == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.DENY) {
+                com.example.automation.engine.PendingCallManager.cancel()
+                val reply = "Call cancelled."
+                persistChatMessage("Gemini", reply)
+                thinkingTimeoutJob?.cancel()
+                _uiState.update { state ->
+                    state.copy(
+                        messages = listOf(ChatMessage("MAX", reply)) + state.messages,
+                        isThinking = false,
+                        liveAiCaption = reply
+                    )
+                }
+                scheduleCaptionClear()
+                return
+            }
+        }
+
         if (ctx != null) {
             viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                if (!MemoryAccountScope.isCurrent(session)) return@launch
                 val offlineResult = com.example.automation.engine.OfflineCommandEngine.executeIfMatched(ctx, text)
+                if (!MemoryAccountScope.isCurrent(session)) return@launch
                 if (offlineResult != null) {
                     val rawMsg = offlineResult.message ?: if (offlineResult.success) "Action executed." else "Action failed."
-                    val replyText = if (offlineResult.success) rawMsg else "Failed: $rawMsg"
+                    val replyText = if (offlineResult.success || offlineResult.status == com.example.automation.tools.ToolResultStatus.NEEDS_INPUT) rawMsg else "Failed: $rawMsg"
                     persistChatMessage("Gemini", replyText)
                     thinkingTimeoutJob?.cancel()
                     _uiState.update { state ->
@@ -330,6 +456,7 @@ class ChatViewModel : ViewModel() {
 
                 // Check memory save directly
                 val saveResult = com.example.memory.retrieval.MemoryFactResolver.extractAndSaveMemoryFact(ctx, text)
+                if (!MemoryAccountScope.isCurrent(session)) return@launch
                 if (saveResult != null) {
                     val app = ctx as? com.example.MyApplication
                     app?.entitlementGate?.checkAndConsumeQuota()
@@ -349,6 +476,7 @@ class ChatViewModel : ViewModel() {
                 // Check memory retrieval directly
                 if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(text)) {
                     val factResult = com.example.memory.retrieval.MemoryFactResolver.resolve(ctx, text)
+                    if (!MemoryAccountScope.isCurrent(session)) return@launch
                     if (factResult != null && factResult.found) {
                         val app = ctx as? com.example.MyApplication
                         app?.entitlementGate?.checkAndConsumeQuota()
@@ -367,7 +495,7 @@ class ChatViewModel : ViewModel() {
                 }
 
                 // If not handled offline, delegate prompt to canonical AssistantEngine
-                engine?.sendTextMessage(text)
+                if (MemoryAccountScope.isCurrent(session)) engine?.sendTextMessage(text)
             }
         } else {
             engine?.sendTextMessage(text)
@@ -435,9 +563,14 @@ class ChatViewModel : ViewModel() {
     }
 
     fun clearChatHistory() {
+        val session = MemoryAccountScope.capture()
+        MemoryAccountScope.requireCurrent(session)
         val appCtx = appContext ?: return
+        resetAccount(session)
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            com.example.data.local.AppDatabase.getDatabase(appCtx).chatMessageDao().clearAllMessages()
+            MemoryAccountScope.requireCurrent(session)
+            com.example.data.local.AppDatabase.getDatabase(appCtx).chatMessageDao().clearAllMessages(session.ownerKey)
+            if (!MemoryAccountScope.isCurrent(session)) return@launch
             _uiState.update { it.copy(
                 messages = emptyList(),
                 liveAiCaption = "",

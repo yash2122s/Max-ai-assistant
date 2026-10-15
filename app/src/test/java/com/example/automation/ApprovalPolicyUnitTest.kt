@@ -54,9 +54,9 @@ class ApprovalPolicyUnitTest {
     }
 
     @Test
-    fun `SAFE_AUTO plus allowlisted CAUTION auto-approves`() {
+    fun `SAFE_AUTO plus allowlisted external side effect still confirms`() {
         ActionAuthorizer.setCautionAllowlist(setOf("SEND_SMS"))
-        assertEquals(ApprovalDecision.APPROVED, decisionFor(ApprovalMode.SAFE_AUTO, "SEND_SMS", "send sms"))
+        assertEquals(ApprovalDecision.NEEDS_CONFIRMATION, decisionFor(ApprovalMode.SAFE_AUTO, "SEND_SMS", "send sms"))
     }
 
     @Test
@@ -67,15 +67,9 @@ class ApprovalPolicyUnitTest {
     }
 
     @Test
-    fun `CRITICAL runs only under an explicit direct command`() {
-        assertEquals(
-            ApprovalDecision.APPROVED,
-            decisionFor(ApprovalMode.SAFE_AUTO, "RUN_ADB_COMMAND", "run adb command pm list packages")
-        )
-        assertEquals(
-            ApprovalDecision.APPROVED,
-            decisionFor(ApprovalMode.FULL_AUTO, "WINDOWS_AGENT", "open chrome on my pc")
-        )
+    fun `CRITICAL remains blocked even under an explicit direct command`() {
+        assertEquals(ApprovalDecision.BLOCKED, decisionFor(ApprovalMode.SAFE_AUTO, "RUN_ADB_COMMAND", "run adb command pm list packages"))
+        assertEquals(ApprovalDecision.APPROVED, decisionFor(ApprovalMode.FULL_AUTO, "WINDOWS_AGENT", "open chrome on my pc"))
     }
 
     // --- FULL_AUTO ---
@@ -90,8 +84,8 @@ class ApprovalPolicyUnitTest {
     }
 
     @Test
-    fun `FULL_AUTO plus CAUTION auto-approves only when policy allows`() {
-        assertEquals(ApprovalDecision.APPROVED, ActionAuthorizer.evaluateApproval(
+    fun `FULL_AUTO cannot bypass confirmation for external side effects`() {
+        assertEquals(ApprovalDecision.NEEDS_CONFIRMATION, ActionAuthorizer.evaluateApproval(
             ApprovalMode.FULL_AUTO, "SEND_SMS", "send sms", allowCautionAutoInFullAuto = true
         ).decision)
     }

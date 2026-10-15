@@ -43,9 +43,13 @@ function parseArgs() {
     const config = {
         count: 1,
         plan: 'lifetime',
-        format: 'text', // 'text' | 'json' | 'csv'
+        format: 'text', // 'text' | 'json' | 'csv' | 'raw'
         out: null,
         register: false,
+        registerKey: null,
+        grantUser: null,
+        verifyKey: null,
+        listKeys: false,
         serviceAccount: null
     };
 
@@ -59,8 +63,16 @@ function parseArgs() {
             config.format = (args[++i] || 'text').toLowerCase();
         } else if (arg === '--out' || arg === '-o') {
             config.out = args[++i];
-        } else if (arg === '--register') {
+        } else if (arg === '--register' || arg === '-r') {
             config.register = true;
+        } else if (arg === '--register-key') {
+            config.registerKey = args[++i];
+        } else if (arg === '--grant-user' || arg === '-g') {
+            config.grantUser = args[++i];
+        } else if (arg === '--status' || arg === '--verify' || arg === '-s') {
+            config.verifyKey = args[++i];
+        } else if (arg === '--list' || arg === '-l') {
+            config.listKeys = true;
         } else if (arg === '--service-account') {
             config.serviceAccount = args[++i];
         } else if (arg === '--help' || arg === '-h') {
@@ -81,35 +93,47 @@ function parseArgs() {
 
 function printHelp() {
     console.log(`
-MAX License Key Generator (Owner / Developer CLI)
-=================================================
+MAX License Key Generator & Management Tool (Owner CLI)
+======================================================
 
 Usage:
   node generate.js [options]
 
-Options:
+Commands & Options:
+  --register, -r               Generate and register new key(s) in Firestore in 1 step
+  --register-key <KEY>         Register an existing key (e.g. MAX-LIFE-XXXX-XXXX-XXXX) in Firestore
+  --grant-user <USER_ID>       Directly grant LIFETIME PREMIUM to a user without needing a key
+  --status, -s <KEY>           Check status of a key (UNUSED, CLAIMED, claimedBy)
+  --list, -l                   List registered keys in Firestore
   --count, -c <number>         Number of keys to generate (default: 1)
   --plan, -p <lifetime>        License plan (default: lifetime)
   --format, -f <text|json|csv> Output format (default: text)
   --out, -o <file>             Output file path (default: stdout)
-  --register                   Register generated key hashes into Firestore (requires firebase-admin)
-  --service-account <file>     Path to Firebase Service Account JSON (required if --register)
+  --service-account <file>     Path to Firebase Service Account JSON
   --help, -h                   Show this help message
 
 Examples:
-  node generate.js --count 5
-  node generate.js --count 10 --format json --out keys.json
-  node generate.js --count 5 --register --service-account ./service-account.json
+  # 1. Generate and immediately register 1 key in Firestore:
+  node generate.js --register
+
+  # 2. Register a key that was already created:
+  node generate.js --register-key MAX-LIFE-FPT4-HDTK-LCL9
+
+  # 3. Directly give a user Lifetime Premium without a key:
+  node generate.js --grant-user g3nGmeybdTYacojqIxwEFiTno3I2
+
+  # 4. Check if a key was claimed:
+  node generate.js --status MAX-LIFE-FPT4-HDTK-LCL9
 `);
 }
 
-async function registerInFirestore(records, serviceAccountPath) {
+function getAdmin(serviceAccountPath) {
     let admin;
     try {
         admin = require('firebase-admin');
     } catch (e) {
-        console.error('\n[Error] firebase-admin package is required for --register.');
-        console.error('Run: npm install firebase-admin in tools/license-generator/');
+        console.error('\n[Error] firebase-admin package is required.');
+        console.error('Run: npm install in tools/license-generator/');
         process.exit(1);
     }
 
@@ -119,13 +143,18 @@ async function registerInFirestore(records, serviceAccountPath) {
         process.exit(1);
     }
 
-    const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf-8'));
     if (!admin.apps.length) {
+        const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, 'utf-8'));
         admin.initializeApp({
             credential: admin.credential.cert(serviceAccount)
         });
     }
 
+    return admin;
+}
+
+async function registerInFirestore(records, serviceAccountPath) {
+    const admin = getAdmin(serviceAccountPath);
     const db = admin.firestore();
     const batch = db.batch();
 
@@ -141,11 +170,152 @@ async function registerInFirestore(records, serviceAccountPath) {
     }
 
     await batch.commit();
-    console.log(`\n[Success] Registered ${records.length} license key hashes in Firestore (licenseKeys collection).`);
+    console.log(`\n[Success] Registered ${records.length} license key(s) in Firestore (licenseKeys collection).`);
+}
+
+async function handleRegisterSpecificKey(rawKey, serviceAccountPath) {
+    const normalizedKey = rawKey.trim().toUpperCase();
+    const hash = sha256Hex(normalizedKey);
+    const admin = getAdmin(serviceAccountPath);
+    const db = admin.firestore();
+    const docRef = db.collection('licenseKeys').doc(hash);
+
+    const doc = await docRef.get();
+    if (doc.exists) {
+        console.log(`\n[Info] Key already registered in Firestore!`);
+        console.log(`Status: ${doc.data().status}`);
+        if (doc.data().claimedBy) {
+            console.log(`Claimed by: ${doc.data().claimedBy}`);
+        }
+        return;
+    }
+
+    await docRef.set({
+        type: 'LIFETIME',
+        status: 'UNUSED',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        claimedBy: null,
+        claimedAt: null
+    });
+
+    console.log(`
+=============================================================
+✅ KEY SUCCESSFULLY REGISTERED IN FIRESTORE
+=============================================================
+
+🔑 Key:    ${normalizedKey}
+🛡️  Hash:   ${hash}
+⚡ Status: UNUSED (Ready for Customer Activation)
+
+-------------------------------------------------------------
+📩 WHATSAPP / CUSTOMER MESSAGE (Copy & Send):
+-------------------------------------------------------------
+🎉 Here is your MAX AI Assistant Lifetime License Key:
+
+👉 ${normalizedKey}
+
+How to activate:
+1. Open the MAX app on your Android phone
+2. Sign in with your Google account
+3. Go to License Screen and paste this key!
+=============================================================
+`);
+}
+
+async function handleGrantUser(userId, serviceAccountPath) {
+    const admin = getAdmin(serviceAccountPath);
+    const db = admin.firestore();
+    const docRef = db.collection('licenses').doc(userId.trim());
+
+    await docRef.set({
+        userId: userId.trim(),
+        plan: 'LIFETIME',
+        status: 'ACTIVE',
+        licenseId: 'ADMIN_MANUAL_GRANT',
+        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        expiresAt: null,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
+    console.log(`
+=============================================================
+🎉 USER DIRECTLY GRANTED LIFETIME PREMIUM
+=============================================================
+User ID:   ${userId}
+Plan:      LIFETIME
+Status:    ACTIVE
+Expires:   NEVER (Lifetime)
+
+👉 The user can now restart the MAX app or tap 'Sync Now'
+   to immediately enjoy Lifetime Premium!
+=============================================================
+`);
+}
+
+async function handleStatus(keyOrHash, serviceAccountPath) {
+    const admin = getAdmin(serviceAccountPath);
+    const db = admin.firestore();
+    const cleaned = keyOrHash.trim().toUpperCase();
+    const hash = cleaned.length === 64 && /^[0-9A-F]+$/i.test(cleaned) ? cleaned.toLowerCase() : sha256Hex(cleaned);
+
+    const doc = await db.collection('licenseKeys').doc(hash).get();
+    if (!doc.exists) {
+        console.log(`\n❌ Key NOT FOUND in Firestore! (Hash: ${hash})`);
+        return;
+    }
+
+    const data = doc.data();
+    console.log(`
+=============================================================
+📋 LICENSE KEY DETAILS
+=============================================================
+Document ID (Hash): ${hash}
+Type:               ${data.type}
+Status:             ${data.status}
+Claimed By:         ${data.claimedBy || 'None (UNUSED)'}
+Claimed At:         ${data.claimedAt ? data.claimedAt.toDate().toISOString() : 'None'}
+Created At:         ${data.createdAt ? data.createdAt.toDate().toISOString() : 'Unknown'}
+=============================================================
+`);
+}
+
+async function handleList(serviceAccountPath) {
+    const admin = getAdmin(serviceAccountPath);
+    const db = admin.firestore();
+    const snap = await db.collection('licenseKeys').limit(50).get();
+
+    console.log(`\nTotal registered keys in Firestore (first 50): ${snap.size}`);
+    console.log('-------------------------------------------------------------');
+    snap.forEach(doc => {
+        const d = doc.data();
+        console.log(`Hash: ${doc.id.substring(0, 16)}... | Status: ${d.status.padEnd(8)} | Type: ${d.type} | ClaimedBy: ${d.claimedBy || '-'}`);
+    });
+    console.log('-------------------------------------------------------------\n');
 }
 
 async function main() {
     const config = parseArgs();
+
+    if (config.registerKey) {
+        await handleRegisterSpecificKey(config.registerKey, config.serviceAccount);
+        return;
+    }
+
+    if (config.grantUser) {
+        await handleGrantUser(config.grantUser, config.serviceAccount);
+        return;
+    }
+
+    if (config.verifyKey) {
+        await handleStatus(config.verifyKey, config.serviceAccount);
+        return;
+    }
+
+    if (config.listKeys) {
+        await handleList(config.serviceAccount);
+        return;
+    }
+
     const records = [];
 
     for (let i = 0; i < config.count; i++) {
@@ -176,20 +346,26 @@ async function main() {
 🔑 NEW MAX COMMERCIAL LICENSE KEY GENERATED
 =============================================================
 
-1️⃣  CUSTOMER KEY (యూజర్‌కి / కస్టమర్‌కి ఇచ్చే కీ):
+1️⃣  CUSTOMER KEY:
     👉  ${r.rawKey}
 
--------------------------------------------------------------
-2️⃣  FIREBASE CONSOLE SETUP (Firestore లో 30 సెకన్లలో యాడ్ చేయండి):
-    📁 Collection:   licenseKeys
-    📄 Document ID:  ${r.keyHash}
+${config.register ? '⚡ STATUS: Registered in Firestore (UNUSED)' : `-------------------------------------------------------------
+⚠️  NOT YET REGISTERED IN FIRESTORE!
+    To register this key so users can activate it, run:
+    node generate.js --register-key ${r.rawKey}
+    (Or next time use: node generate.js --register)`}
 
-    📝 Fields (Add these 5 fields):
-       • status     : "UNUSED"       (Type: string)
-       • type       : "${r.plan}"     (Type: string)
-       • claimedBy  : null           (Type: null)
-       • claimedAt  : null           (Type: null)
-       • createdAt  : [Server timestamp] (Type: timestamp)
+-------------------------------------------------------------
+📩 WHATSAPP / CUSTOMER MESSAGE (Copy & Send):
+-------------------------------------------------------------
+🎉 Here is your MAX AI Assistant Lifetime License Key:
+
+👉 ${r.rawKey}
+
+How to activate:
+1. Open the MAX app on your Android phone
+2. Sign in with your Google account
+3. Go to License Screen and paste this key!
 =============================================================
 `;
         } else {
@@ -213,3 +389,4 @@ main().catch(err => {
     console.error('Fatal error:', err);
     process.exit(1);
 });
+

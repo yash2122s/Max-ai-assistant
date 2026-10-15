@@ -3,7 +3,8 @@ package com.example.data.export
 import android.content.Context
 import com.example.data.local.AppDatabase
 import com.example.data.local.PeriodLog
-import com.example.data.preferences.SettingsManager
+import com.example.memory.account.MemoryAccountScope
+import com.example.memory.account.MemorySession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -40,18 +41,28 @@ class PeriodMarkdownExporter(private val context: Context) {
      * Stored strictly in MAX_DATA/people/<realPersonId>/period_data.md.
      * GUARANTEE: Period data remains 100% outside MAX_MEMORY.md.
      */
-    suspend fun exportPersonPeriodMarkdown(targetPersonId: String? = null): File = withContext(Dispatchers.IO) {
-        val realPersonId = targetPersonId?.takeIf { it.isNotBlank() } 
-            ?: SettingsManager(context).userId
+    suspend fun exportPersonPeriodMarkdown(
+        targetPersonId: String? = null,
+        session: MemorySession = MemoryAccountScope.capture()
+    ): File {
+        MemoryAccountScope.requireCurrent(session)
+        return withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
+        val realPersonId = MemoryAccountScope.directoryName(session)
 
         val baseDir = File(context.getExternalFilesDir(null) ?: context.filesDir, "MAX_DATA")
-        val personDir = File(File(baseDir, "people"), realPersonId).apply { mkdirs() }
+        val personDir = File(File(baseDir, "people"), realPersonId)
         val periodFile = File(personDir, "period_data.md")
         val tempFile = File(personDir, "period_data.md.tmp")
 
-        val logs = dao.getAllPeriods()
-        val markdownContent = generatePeriodMarkdown(realPersonId, logs)
+        val logs = dao.getAllPeriods(session.ownerKey)
+        // The directory is deliberately hashed for account privacy, while the
+        // optional display identifier remains available inside the owner's own
+        // export for backwards-compatible human-readable reports.
+        val markdownContent = generatePeriodMarkdown(targetPersonId ?: realPersonId, logs)
 
+        MemoryAccountScope.requireCurrent(session)
+        personDir.mkdirs()
         tempFile.writeText(markdownContent, Charsets.UTF_8)
         if (periodFile.exists()) {
             val backupFile = File(personDir, "period_data.md.bak")
@@ -63,7 +74,9 @@ class PeriodMarkdownExporter(private val context: Context) {
             tempFile.delete()
         }
 
+        MemoryAccountScope.requireCurrent(session)
         periodFile
+        }
     }
 
     private fun generatePeriodMarkdown(personId: String, logs: List<PeriodLog>): String {

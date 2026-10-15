@@ -24,7 +24,8 @@ object ShellCommandPolicy {
     )
 
     private val BLOCKED_SUBSTRINGS = listOf(
-        ";", "|", "`", "$", "rm ", "rmdir", "mkfs", "reboot", "su ", "dd ",
+        ";", "|", "`", "$", "\"", "'", "\\", "<", ">", "\n", "\r",
+        "rm ", "rmdir", "mkfs", "reboot", "su ", "dd ",
         "chmod 777", "chmod 755 /", "pm uninstall", "setprop", "mount ", "sh "
     )
 

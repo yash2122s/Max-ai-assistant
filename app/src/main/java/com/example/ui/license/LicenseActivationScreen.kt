@@ -6,10 +6,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -21,9 +19,9 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.firebase.model.CloudLicense
 import com.example.firebase.model.DeviceRegistration
@@ -44,6 +42,7 @@ fun LicenseActivationScreen(
     viewModel: LicenseViewModel = viewModel()
 ) {
     val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
     val entitlement by viewModel.entitlement.collectAsState()
     val importState by viewModel.importState.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
@@ -70,23 +69,15 @@ fun LicenseActivationScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            MaxTopBar(
-                title = "Account & Licensing",
-                subtitle = "Firebase Cloud Licensing",
-                onBackClick = onNavigateBack
-            )
-        },
-        containerColor = MaxBaseDark
-    ) { padding ->
+    MaxScreen(
+        title = "Account & Licensing",
+        eyebrow = "CLOUD LICENSING",
+        auroraMode = AuroraMode.SUBTLE,
+        onBack = onNavigateBack
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = MaxDimensions.spaceLg, vertical = MaxDimensions.spaceMd),
-            verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceLg)
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceMd)
         ) {
             // 1. Google Account Card
             GoogleAccountSection(
@@ -99,7 +90,10 @@ fun LicenseActivationScreen(
                         Toast.makeText(context, "Activity context unavailable", Toast.LENGTH_SHORT).show()
                     }
                 },
-                onSignOut = { viewModel.signOut() }
+                onSignOut = { viewModel.signOut() },
+                onSwitchAccount = {
+                    (context as? Activity)?.let(viewModel::switchAccount)
+                }
             )
 
             // 2. Cloud License & Entitlement Hero Card
@@ -116,26 +110,22 @@ fun LicenseActivationScreen(
             if (!isLicenseActive) {
                 Text(
                     text = "ACTIVATE PREMIUM LICENSE KEY",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaxTextTertiary,
-                    letterSpacing = 1.sp,
+                    style = MaxType.Eyebrow,
+                    color = MaxSemanticColors.textMuted,
                     modifier = Modifier.padding(start = 4.dp, top = 4.dp)
                 )
 
                 MaxCard(
                     cornerRadius = MaxDimensions.radiusXl,
-                    backgroundColor = MaxSurfaceCard,
-                    contentPadding = PaddingValues(16.dp)
+                    contentPadding = PaddingValues(MaxDimensions.spaceMd)
                 ) {
                     Column(
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                        verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                     ) {
                         Text(
                             text = "Enter Lifetime License Key",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaxTextPrimary
+                            style = MaxType.Headline,
+                            color = MaxSemanticColors.textPrimary
                         )
 
                         // If wrong key, display the error banner
@@ -144,60 +134,125 @@ fun LicenseActivationScreen(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(MaxDimensions.radiusMd))
-                                    .background(MaxDestructiveApple.copy(alpha = 0.15f))
-                                    .border(1.dp, MaxDestructiveApple.copy(alpha = 0.5f), RoundedCornerShape(MaxDimensions.radiusMd))
-                                    .padding(12.dp),
+                                    .background(MaxSemanticColors.destructiveSurface)
+                                    .border(MaxDimensions.borderHairline, MaxSemanticColors.destructive.copy(alpha = 0.5f), RoundedCornerShape(MaxDimensions.radiusMd))
+                                    .padding(MaxDimensions.spaceSm),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 Icon(
                                     imageVector = Icons.Default.Cancel,
                                     contentDescription = null,
-                                    tint = MaxDestructiveApple,
+                                    tint = MaxSemanticColors.destructive,
                                     modifier = Modifier.size(20.dp)
                                 )
                                 Column {
                                     Text(
                                         text = "Invalid License Key",
-                                        fontSize = 13.sp,
+                                        style = MaxType.Body,
                                         fontWeight = FontWeight.Bold,
-                                        color = MaxDestructiveApple
+                                        color = MaxSemanticColors.destructive
                                     )
                                     Text(
                                         text = (importState as LicenseImportState.Error).error,
-                                        fontSize = 11.5.sp,
-                                        color = MaxDestructiveApple.copy(alpha = 0.9f)
+                                        style = MaxType.Caption,
+                                        color = MaxSemanticColors.destructive.copy(alpha = 0.9f)
                                     )
                                 }
                             }
                         } else {
                             Text(
                                 text = "Enter your commercial license key to permanently bind Lifetime Premium to your Google account.",
-                                fontSize = 12.sp,
-                                color = MaxTextTertiary
+                                style = MaxType.Caption,
+                                color = MaxSemanticColors.textSecondary
                             )
                         }
 
-                        OutlinedTextField(
+                        MaxTextField(
                             value = licenseKeyInput,
-                            onValueChange = {
-                                licenseKeyInput = it.uppercase()
+                            onValueChange = { raw ->
+                                val cleaned = raw.uppercase().filter { it.isLetterOrDigit() || it == '-' || it == ' ' }.replace(" ", "-")
+                                licenseKeyInput = cleaned
                                 if (importState is LicenseImportState.Error) {
                                     viewModel.resetState()
                                 }
                             },
-                            placeholder = { Text("MAX-LIFE-XXXX-XXXX-XXXX", color = MaxTextMuted) },
-                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = "MAX-LIFE-XXXX-XXXX-XXXX",
                             singleLine = true,
                             isError = importState is LicenseImportState.Error,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaxPrimary,
-                                unfocusedBorderColor = if (importState is LicenseImportState.Error) MaxDestructiveApple else MaxBorder,
-                                focusedTextColor = MaxTextPrimary,
-                                unfocusedTextColor = MaxTextPrimary
-                            ),
-                            shape = RoundedCornerShape(MaxDimensions.radiusMd)
+                            trailingIcon = {
+                                if (licenseKeyInput.isNotEmpty()) {
+                                    IconButton(onClick = {
+                                        licenseKeyInput = ""
+                                        if (importState is LicenseImportState.Error) {
+                                            viewModel.resetState()
+                                        }
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Default.Close,
+                                            contentDescription = "Clear",
+                                            tint = MaxSemanticColors.textMuted,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else {
+                                    IconButton(onClick = {
+                                        val clipText = clipboardManager.getText()?.text
+                                        if (!clipText.isNullOrBlank()) {
+                                            licenseKeyInput = com.example.firebase.model.LicenseKeyHelper.normalize(clipText)
+                                            if (importState is LicenseImportState.Error) {
+                                                viewModel.resetState()
+                                            }
+                                        }
+                                    }) {
+                                        Icon(
+                                            imageVector = Icons.Default.ContentPaste,
+                                            contentDescription = "Paste from clipboard",
+                                            tint = MaxSemanticColors.accentCyan,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+                            }
                         )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Key: MAX-LIFE-XXXX-XXXX-XXXX",
+                                style = MaxType.Caption,
+                                color = MaxSemanticColors.textMuted
+                            )
+                            TextButton(
+                                onClick = {
+                                    val clipText = clipboardManager.getText()?.text
+                                    if (!clipText.isNullOrBlank()) {
+                                        licenseKeyInput = com.example.firebase.model.LicenseKeyHelper.normalize(clipText)
+                                        if (importState is LicenseImportState.Error) {
+                                            viewModel.resetState()
+                                        }
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentPaste,
+                                    contentDescription = null,
+                                    tint = MaxSemanticColors.accentCyan,
+                                    modifier = Modifier.size(MaxIconTokens.Micro)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Paste from Clipboard",
+                                    style = MaxType.Caption,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaxSemanticColors.accentCyan
+                                )
+                            }
+                        }
 
                         MaxButton(
                             text = if (importState is LicenseImportState.Loading) "Activating..." else "Activate License Key",
@@ -224,12 +279,12 @@ fun LicenseActivationScreen(
 fun GoogleAccountSection(
     user: FirebaseUserAccount?,
     onSignIn: () -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    onSwitchAccount: () -> Unit = onSignIn
 ) {
     MaxCard(
         cornerRadius = MaxDimensions.radius2xl,
-        backgroundColor = MaxSurfaceCard,
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(MaxDimensions.spaceMd),
         specularHighlight = true
     ) {
         if (user != null) {
@@ -239,81 +294,96 @@ fun GoogleAccountSection(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Row(
+                    modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                 ) {
                     Box(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(MaxPrimaryRoyal.copy(alpha = 0.2f))
-                            .border(1.dp, MaxPrimaryRoyal.copy(alpha = 0.5f), CircleShape),
+                            .background(MaxSemanticColors.primaryRoyal.copy(alpha = 0.2f))
+                            .border(MaxDimensions.borderHairline, MaxSemanticColors.primaryRoyal.copy(alpha = 0.5f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = (user.displayName?.firstOrNull() ?: user.email?.firstOrNull() ?: 'U').uppercase(),
-                            fontSize = 18.sp,
+                            style = MaxType.Headline,
                             fontWeight = FontWeight.Bold,
-                            color = MaxPrimaryRoyal
+                            color = MaxSemanticColors.primaryRoyal
                         )
                     }
 
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = user.displayName ?: "Google User",
-                            fontSize = 15.sp,
+                            style = MaxType.Body,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaxTextPrimary
+                            color = MaxSemanticColors.textPrimary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                         Text(
                             text = user.email ?: user.uid,
-                            fontSize = 12.sp,
-                            color = MaxTextTertiary
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textSecondary,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                         )
                     }
                 }
-
+            }
+            Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 MaxButton(
                     text = "Sign Out",
                     onClick = onSignOut,
                     variant = MaxButtonVariant.GHOST,
-                    height = 34.dp
+                    height = 40.dp,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                )
+                MaxButton(
+                    text = "Switch Account",
+                    onClick = onSwitchAccount,
+                    variant = MaxButtonVariant.GHOST,
+                    height = 40.dp,
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                 )
             }
         } else {
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
             ) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                 ) {
                     Box(
                         modifier = Modifier
                             .size(40.dp)
                             .clip(CircleShape)
-                            .background(MaxAccentCyan.copy(alpha = 0.15f)),
+                            .background(MaxSemanticColors.accentCyan.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.AccountCircle,
                             contentDescription = null,
-                            tint = MaxAccentCyan,
-                            modifier = Modifier.size(24.dp)
+                            tint = MaxSemanticColors.accentCyan,
+                            modifier = Modifier.size(MaxIconTokens.Large)
                         )
                     }
                     Column {
                         Text(
                             text = "Google Account Authentication",
-                            fontSize = 15.sp,
+                            style = MaxType.Body,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaxTextPrimary
+                            color = MaxSemanticColors.textPrimary
                         )
                         Text(
                             text = "Sign in to activate your 7-day trial and sync license",
-                            fontSize = 12.sp,
-                            color = MaxTextTertiary
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textSecondary
                         )
                     }
                 }
@@ -350,62 +420,71 @@ fun CloudLicenseHeroCard(
     val formatter = DateTimeFormatter.ofPattern("dd MMM yyyy, HH:mm").withZone(ZoneId.systemDefault())
 
     val hero = when {
-        license.plan == LicensePlan.LIFETIME -> {
+        license.plan == LicensePlan.LIFETIME && license.status == LicenseStatus.ACTIVE -> {
             LicenseHeroConfig(
                 title = "LIFETIME PREMIUM ACTIVE",
                 subtitle = "Permanent Lifetime Access • Unlimited AI Messages",
-                badgeColor = MaxRoyalGold,
+                badgeColor = MaxSemanticColors.royalGold,
                 icon = Icons.Default.Verified,
-                accentGradient = listOf(Color(0xFF2A2311), MaxSurfaceCard)
+                accentGradient = listOf(MaxSemanticColors.warningSurface, MaxSemanticColors.surface)
             )
         }
         entitlement is Entitlement.Premium -> {
             LicenseHeroConfig(
                 title = "MAX ${license.plan.name} ACTIVE",
                 subtitle = if (license.expiresAtEpochMillis != null) "Expires: ${formatter.format(Instant.ofEpochMilli(license.expiresAtEpochMillis))}" else "Permanent Active License",
-                badgeColor = MaxRoyalGold,
+                badgeColor = MaxSemanticColors.royalGold,
                 icon = Icons.Default.Verified,
-                accentGradient = listOf(Color(0xFF2A2311), MaxSurfaceCard)
+                accentGradient = listOf(MaxSemanticColors.warningSurface, MaxSemanticColors.surface)
+            )
+        }
+        license.plan == LicensePlan.LIFETIME && license.status != LicenseStatus.ACTIVE -> {
+            LicenseHeroConfig(
+                title = "Lifetime Inactive (${license.status.name})",
+                subtitle = "Your lifetime license is currently not active. Please re-activate or contact support.",
+                badgeColor = MaxSemanticColors.destructive,
+                icon = Icons.Default.Warning,
+                accentGradient = listOf(MaxSemanticColors.destructiveSurface, MaxSemanticColors.surface)
             )
         }
         entitlement is Entitlement.Trial -> {
             val days = license.remainingTrialDays()
-            val usageStatus = "$dailyUsage/10 messages used today"
+            val usageStatus = "$dailyUsage/20 messages used today"
             LicenseHeroConfig(
                 title = "3-Day Free Trial Active",
                 subtitle = "$days days remaining • $usageStatus",
-                badgeColor = if (dailyUsage >= 10L) MaxDestructiveApple else MaxAccentCyan,
-                icon = if (dailyUsage >= 10L) Icons.Default.Warning else Icons.Default.HourglassTop,
-                accentGradient = listOf(Color(0xFF0D253A), MaxSurfaceCard)
+                badgeColor = if (dailyUsage >= 20L) MaxSemanticColors.destructive else MaxSemanticColors.accentCyan,
+                icon = if (dailyUsage >= 20L) Icons.Default.Warning else Icons.Default.HourglassTop,
+                accentGradient = listOf(MaxSemanticColors.infoSurface, MaxSemanticColors.surface)
             )
         }
         entitlement is Entitlement.Expired || license.isExpired() -> LicenseHeroConfig(
             title = "Free Trial Ended",
             subtitle = "Your 3-day trial has ended. Activate MAX Premium to continue.",
-            badgeColor = MaxDestructiveApple,
+            badgeColor = MaxSemanticColors.destructive,
             icon = Icons.Default.ErrorOutline,
-            accentGradient = listOf(Color(0xFF331418), MaxSurfaceCard)
+            accentGradient = listOf(MaxSemanticColors.destructiveSurface, MaxSemanticColors.surface)
         )
         entitlement is Entitlement.Revoked -> LicenseHeroConfig(
             title = "License Revoked",
             subtitle = "This license was revoked by the issuer.",
-            badgeColor = MaxDestructiveApple,
+            badgeColor = MaxSemanticColors.destructive,
             icon = Icons.Default.Block,
-            accentGradient = listOf(Color(0xFF331418), MaxSurfaceCard)
+            accentGradient = listOf(MaxSemanticColors.destructiveSurface, MaxSemanticColors.surface)
         )
         entitlement is Entitlement.Invalid -> LicenseHeroConfig(
             title = "Invalid License",
             subtitle = "Signature mismatch or corrupted license.",
-            badgeColor = MaxDestructiveApple,
+            badgeColor = MaxSemanticColors.destructive,
             icon = Icons.Default.Warning,
-            accentGradient = listOf(Color(0xFF331418), MaxSurfaceCard)
+            accentGradient = listOf(MaxSemanticColors.destructiveSurface, MaxSemanticColors.surface)
         )
         else -> LicenseHeroConfig(
             title = "Free Tier",
             subtitle = "Sign in with Google to unlock 3-day trial and cloud licensing.",
-            badgeColor = MaxTextTertiary,
+            badgeColor = MaxSemanticColors.textMuted,
             icon = Icons.Default.Lock,
-            accentGradient = listOf(MaxSurfaceElevated, MaxSurfaceCard)
+            accentGradient = listOf(MaxSemanticColors.surfaceElevated, MaxSemanticColors.surface)
         )
     }
 
@@ -413,17 +492,15 @@ fun CloudLicenseHeroCard(
     val subtitle = hero.subtitle
     val badgeColor = hero.badgeColor
     val icon = hero.icon
-    val accentGradient = hero.accentGradient
 
     MaxCard(
         cornerRadius = MaxDimensions.radius2xl,
-        backgroundColor = MaxSurfaceCard,
-        contentPadding = PaddingValues(20.dp),
+        contentPadding = PaddingValues(MaxDimensions.spaceLg),
         specularHighlight = true
     ) {
         Column(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceMd)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -452,22 +529,20 @@ fun CloudLicenseHeroCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = title,
+                        style = MaxType.Headline,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
-                        color = MaxTextPrimary,
-                        letterSpacing = (-0.3).sp
+                        color = MaxSemanticColors.textPrimary
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = subtitle,
-                        fontSize = 13.sp,
-                        color = MaxTextSecondary,
-                        lineHeight = 18.sp
+                        style = MaxType.Caption,
+                        color = MaxSemanticColors.textSecondary
                     )
                 }
             }
 
-            HorizontalDivider(color = MaxBorderHairline, thickness = MaxDimensions.borderHairline)
+            HorizontalDivider(color = MaxSemanticColors.border, thickness = MaxDimensions.borderHairline)
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -480,16 +555,16 @@ fun CloudLicenseHeroCard(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     val (statusText, statusColor) = when (syncState) {
-                        is LicenseSyncState.Syncing -> "Syncing..." to MaxAccentCyan
+                        is LicenseSyncState.Syncing -> "Syncing..." to MaxSemanticColors.accentCyan
                         is LicenseSyncState.Synced -> {
                             if (syncState.isFromCache) {
-                                (if (syncState.isStale) "Stale Cache" else "Offline Cache") to Color(0xFFF59E0B)
+                                (if (syncState.isStale) "Stale Cache" else "Offline Cache") to MaxSemanticColors.warning
                             } else {
-                                "Cloud Synced" to Color(0xFF10B981)
+                                "Cloud Synced" to MaxSemanticColors.success
                             }
                         }
-                        is LicenseSyncState.Error -> "Offline / Sync Error" to MaxDestructiveApple
-                        LicenseSyncState.Idle -> "Ready" to MaxTextTertiary
+                        is LicenseSyncState.Error -> "Offline / Sync Error" to MaxSemanticColors.destructive
+                        LicenseSyncState.Idle -> "Ready" to MaxSemanticColors.textMuted
                     }
 
                     Box(
@@ -500,8 +575,8 @@ fun CloudLicenseHeroCard(
                     )
                     Text(
                         text = statusText,
-                        fontSize = 12.sp,
-                        color = MaxTextSecondary
+                        style = MaxType.Caption,
+                        color = MaxSemanticColors.textSecondary
                     )
                 }
 
@@ -510,7 +585,8 @@ fun CloudLicenseHeroCard(
                         text = "Sync Now",
                         onClick = onSync,
                         variant = MaxButtonVariant.GHOST,
-                        height = 32.dp
+                        height = 36.dp,
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                     )
                 }
             }
@@ -522,8 +598,7 @@ fun CloudLicenseHeroCard(
 fun DeviceStatusCard(device: DeviceRegistration?) {
     MaxCard(
         cornerRadius = MaxDimensions.radiusXl,
-        backgroundColor = MaxSurfaceCard,
-        contentPadding = PaddingValues(16.dp)
+        contentPadding = PaddingValues(MaxDimensions.spaceMd)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -533,43 +608,43 @@ fun DeviceStatusCard(device: DeviceRegistration?) {
             Box(
                 modifier = Modifier
                     .size(36.dp)
-                    .clip(RoundedCornerShape(9.dp))
-                    .background(Color(0xFF3B82F6).copy(alpha = 0.15f)),
+                    .clip(RoundedCornerShape(MaxDimensions.radiusSm))
+                    .background(MaxSemanticColors.infoSurface),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Smartphone,
                     contentDescription = null,
-                    tint = Color(0xFF3B82F6),
-                    modifier = Modifier.size(20.dp)
+                    tint = MaxSemanticColors.info,
+                    modifier = Modifier.size(MaxIconTokens.Medium)
                 )
             }
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = device?.deviceModel ?: "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}",
-                    fontSize = 14.sp,
+                    style = MaxType.Body,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaxTextPrimary
+                    color = MaxSemanticColors.textPrimary
                 )
                 Text(
                     text = "Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT}) • Device Active",
-                    fontSize = 12.sp,
-                    color = MaxTextTertiary
+                    style = MaxType.Caption,
+                    color = MaxSemanticColors.textSecondary
                 )
             }
 
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color(0xFF10B981).copy(alpha = 0.15f))
+                    .clip(RoundedCornerShape(MaxDimensions.radiusXs))
+                    .background(MaxSemanticColors.successSurface)
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 Text(
                     text = "REGISTERED",
-                    fontSize = 10.sp,
+                    style = MaxType.Eyebrow,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFF10B981)
+                    color = MaxSemanticColors.success
                 )
             }
         }

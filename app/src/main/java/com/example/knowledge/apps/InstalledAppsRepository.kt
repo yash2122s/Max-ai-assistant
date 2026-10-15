@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 object InstalledAppsRepository {
     private const val TAG = "AppsRepository"
@@ -107,7 +108,7 @@ object InstalledAppsRepository {
         val db = AppDatabase.getDatabase(context)
         val apps = runBlocking {
             try {
-                db.installedAppDao().getAllApps()
+                withTimeoutOrNull(1500L) { db.installedAppDao().getAllApps() } ?: emptyList()
             } catch (e: Exception) {
                 emptyList()
             }
@@ -148,6 +149,62 @@ object InstalledAppsRepository {
 
     private val IGNORED_ASSISTANT_NAMES = setOf("max", "jarvis", "max ai", "assistant", "ai assistant", "max assistant")
     private val IGNORED_ASSISTANT_PACKAGES = setOf("com.maxaiagent.yash", "com.aistudio.jarvis.vqzrtp", "com.example", "com.example.max")
+
+    fun extractAllMatchedApps(context: Context? = null, intent: String): Set<String> {
+        val rawClean = intent.trim().lowercase()
+        if (rawClean.isBlank()) return emptySet()
+
+        // Strip common leading wake-words (e.g., "max, ", "hey max ", "jarvis: ")
+        val cleanIntent = rawClean
+            .replaceFirst(Regex("""^(?:hey\s+|hi\s+|ok\s+)?(?:max|jarvis)[,\s:]*"""), "")
+            .trim()
+            .ifEmpty { rawClean }
+
+        val result = mutableSetOf<String>()
+
+        // 1. Check alias map matches first (high precision curated aliases)
+        for ((aliasKey, aliasPkg) in aliases) {
+            val pattern = "\\b${Regex.escape(aliasKey)}\\b".toRegex(RegexOption.IGNORE_CASE)
+            if (pattern.containsMatchIn(cleanIntent) || pattern.containsMatchIn(rawClean)) {
+                result.add(aliasPkg)
+            }
+        }
+
+        val apps = getApps(context).filter { app ->
+            val appNameLower = app.appName.lowercase().trim()
+            val pkgLower = app.packageName.lowercase().trim()
+            appNameLower !in IGNORED_ASSISTANT_NAMES &&
+            pkgLower !in IGNORED_ASSISTANT_PACKAGES &&
+            (context == null || pkgLower != context.packageName)
+        }
+
+        // 2. Match package names in intent
+        for (app in apps) {
+            val pkgLower = app.packageName.lowercase()
+            if (pkgLower.isNotBlank() && (cleanIntent.contains(pkgLower) || rawClean.contains(pkgLower))) {
+                result.add(app.packageName)
+            }
+        }
+
+        // 3. Match app names in intent (longer names first to prevent partial matches, using word boundaries)
+        val sortedApps = apps.sortedByDescending { it.appName.length }
+        for (app in sortedApps) {
+            val appNameLower = app.appName.lowercase()
+            if (appNameLower.length >= 3) {
+                val pattern = "\\b${Regex.escape(appNameLower)}\\b".toRegex(RegexOption.IGNORE_CASE)
+                if (pattern.containsMatchIn(cleanIntent) || pattern.containsMatchIn(rawClean)) {
+                    result.add(app.packageName)
+                }
+            }
+        }
+
+        // 4. Fallback: try findApp on clean intent if nothing matched
+        if (result.isEmpty()) {
+            findApp(context, cleanIntent)?.let { result.add(it) }
+        }
+
+        return result
+    }
 
     fun extractAndMatchApp(context: Context? = null, intent: String): String? {
         val rawClean = intent.trim().lowercase()
@@ -202,6 +259,11 @@ object InstalledAppsRepository {
     fun findApp(context: Context? = null, query: String): String? {
         val cleanQuery = query.trim().lowercase()
         if (cleanQuery.isBlank()) return null
+
+        // Existing canonical identities do not require a Room/cache warm-up.
+        aliases[cleanQuery]?.takeIf { it.contains(".") }?.let { return it }
+        if (context != null && cleanQuery.contains(".") &&
+            context.packageManager.getLaunchIntentForPackage(cleanQuery) != null) return cleanQuery
 
         val apps = getApps(context)
 

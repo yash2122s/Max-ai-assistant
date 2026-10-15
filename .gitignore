@@ -93,4 +93,12 @@ tools/license-generator/serviceAccountKey.json
 tools/license-generator/keys.json
 tools/license-generator/customers.csv
 
+# Local credential and audit state (ignoring does not untrack historical files).
+.env.*
+!.env.example
+**/certs/key.pem
+**/certs/*-key.pem
+/MAX_RELEASE_BUILD/
+tools/security-tests/.firebase/
+tools/security-tests/*-debug.log
 

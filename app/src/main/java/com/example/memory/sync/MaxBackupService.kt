@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.data.export.PeriodMarkdownExporter
 import com.example.data.local.AppDatabase
 import com.example.memory.security.MemoryCryptography
+import com.example.memory.account.MemoryAccountScope
+import com.example.memory.account.MemorySession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -41,18 +43,23 @@ class MaxBackupService(private val context: Context) {
      * - MAX_DATA/people/<realPersonId>/period_data.md
      * GUARANTEE: Never includes API keys, tokens, or system credentials.
      */
-    suspend fun createFullBackup(): Map<String, Any?> = withContext(Dispatchers.IO) {
+    suspend fun createFullBackup(
+        session: MemorySession = MemoryAccountScope.capture()
+    ): Map<String, Any?> = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
         val now = System.currentTimeMillis()
 
         // 1. Export MAX_MEMORY.md
-        syncService.exportToMarkdown()
+        syncService.exportToMarkdown(session)
+        MemoryAccountScope.requireCurrent(session)
 
         // 2. Export Period Data
-        periodExporter.exportPersonPeriodMarkdown()
+        val periodFile = periodExporter.exportPersonPeriodMarkdown(session = session)
+        MemoryAccountScope.requireCurrent(session)
 
         // 3. Export memories.json
-        val memories = memoryDao.getAll().map { mem ->
+        val memories = memoryDao.getAll(session.ownerKey).map { mem ->
             val decTitle = MemoryCryptography.decrypt(mem.title)
             val decContent = MemoryCryptography.decrypt(mem.content)
             val decTags = if (mem.tags.isNotBlank()) MemoryCryptography.decrypt(mem.tags) else mem.tags
@@ -85,18 +92,22 @@ class MaxBackupService(private val context: Context) {
             put("memories", JSONArray(memories))
         }
 
-        val backupFile = File(syncService.maxDataBaseDir, "memories.json")
+        MemoryAccountScope.requireCurrent(session)
+        val directory = syncService.dataDir(session)
+        val backupFile = File(directory, "memories.json")
         FileOutputStream(backupFile).use { fos ->
             fos.write(backupJsonObj.toString(2).toByteArray(Charsets.UTF_8))
             fos.flush()
             fos.fd.sync()
         }
 
+        MemoryAccountScope.requireCurrent(session)
         mapOf(
             "success" to true,
-            "backupPath" to syncService.maxDataBaseDir.absolutePath,
+            "backupPath" to directory.absolutePath,
             "memoriesFile" to backupFile.absolutePath,
-            "markdownFile" to syncService.maxMemoryFile.absolutePath,
+            "markdownFile" to syncService.memoryFile(session).absolutePath,
+            "periodFile" to periodFile.absolutePath,
             "memoryCount" to memories.size,
             "timestamp" to now
         )

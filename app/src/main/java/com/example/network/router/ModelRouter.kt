@@ -120,7 +120,7 @@ class DefaultModelRouter : ModelRouter {
             }
         }
 
-        // Default to FAST mode for ultra low-latency conversational response
+        // Default to FAST mode for low-latency conversational voice responses
         return GeminiModelMode.FAST
     }
 

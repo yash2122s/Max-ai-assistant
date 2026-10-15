@@ -12,6 +12,7 @@ import com.example.memory.data.MemoryCategory
 import com.example.memory.data.MemoryRepository
 import com.example.memory.data.MemoryType
 import com.example.memory.data.PermanentMemory
+import com.example.memory.account.MemoryAccountScope
 import com.example.memory.retrieval.MemoryFormatter
 import com.example.memory.retrieval.MemoryRetrieval
 import com.example.memory.security.MemoryCryptography
@@ -281,7 +282,7 @@ class MemorySafetyUnitTest {
         repository.addMemory(memory)
 
         // Read directly from the raw database to verify encryption on-disk
-        val rawList = AppDatabase.getDatabase(context).permanentMemoryDao().getAll()
+        val rawList = AppDatabase.getDatabase(context).permanentMemoryDao().getAll(MemoryAccountScope.capture().ownerKey)
         val rawMem = rawList.first { it.category == MemoryCategory.PREFERENCES.displayName }
         
         // Assert values are encrypted on disk (prefixed with enc_v1:)

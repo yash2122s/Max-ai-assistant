@@ -162,11 +162,13 @@ class MaxCapsuleOverlayService : Service() {
                 }
             }
         }
+        hudView.visibility = View.GONE
         hudOverlayView = hudView
 
         try {
             windowManager?.addView(hudOverlayView, windowLayoutParams)
             Log.d(TAG, "Dynamic HUD Overlay view added successfully")
+            updateOverlayVisibility()
         } catch (e: Exception) {
             Log.e(TAG, "Error adding Dynamic HUD to WindowManager", e)
         }
@@ -226,7 +228,7 @@ class MaxCapsuleOverlayService : Service() {
         serviceScope.launch {
             MyApplication.isMaxForeground.collectLatest { isFg ->
                 isMaxForeground = isFg
-                hudOverlayView?.visibility = if (isFg) View.GONE else View.VISIBLE
+                updateOverlayVisibility()
             }
         }
 
@@ -340,6 +342,41 @@ class MaxCapsuleOverlayService : Service() {
         )
 
         hudOverlayView?.updateState(resolved)
+        updateOverlayVisibility()
+    }
+
+    private fun updateOverlayVisibility() {
+        val view = hudOverlayView ?: return
+
+        // 1. If MAX app itself is in the foreground, hide the system overlay
+        if (isMaxForeground) {
+            view.visibility = View.GONE
+            return
+        }
+
+        val settings = SettingsManager(this)
+        if (!settings.overlayOnlyInVoiceMode) {
+            view.visibility = View.VISIBLE
+            return
+        }
+
+        // 2. Only show when voice mode / assistant session is actively engaged
+        val isVoiceActive = currentSessionState != SessionState.IDLE &&
+                currentSessionState != SessionState.DISCONNECTING &&
+                currentSessionState != SessionState.ERROR
+
+        val isSpeaking = isAiSpeaking
+        val isToolExecuting = activeToolName != null
+        val isAssistantSessionActive = com.example.voice.assistant.AssistantSessionManager.isSystemAssistantSessionActive()
+        val isLiveAudioActive = currentRms > 5f
+
+        val shouldBeVisible = isVoiceActive || isSpeaking || isToolExecuting || isAssistantSessionActive || isLiveAudioActive
+
+        val targetVisibility = if (shouldBeVisible) View.VISIBLE else View.GONE
+        if (view.visibility != targetVisibility) {
+            view.visibility = targetVisibility
+            Log.d(TAG, "HUD Overlay visibility transitioned to: ${if (shouldBeVisible) "VISIBLE" else "GONE"} (sessionState=$currentSessionState, isSpeaking=$isSpeaking, tool=$activeToolName)")
+        }
     }
 
     override fun onDestroy() {

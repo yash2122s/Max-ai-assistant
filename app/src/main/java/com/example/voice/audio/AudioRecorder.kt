@@ -7,9 +7,37 @@ import android.media.MediaRecorder
 import android.util.Log
 
 class AudioRecorder {
+    companion object {
+        const val TARGET_SAMPLE_RATE = 16000 // Gemini Live standard client input: 16kHz mono PCM16
+        private const val TAG = "AudioRecorder"
+
+        /**
+         * Linear interpolation resampler from [inRate] to [outRate].
+         */
+        fun resampleLinear(input: ShortArray, inputLength: Int, inRate: Int, outRate: Int): ShortArray {
+            if (inRate == outRate || inputLength <= 0) return input.copyOf(inputLength)
+            val outLength = ((inputLength.toLong() * outRate) / inRate).toInt()
+            if (outLength <= 0) return ShortArray(0)
+            val output = ShortArray(outLength)
+            val ratio = inRate.toDouble() / outRate.toDouble()
+            for (i in 0 until outLength) {
+                val inIndex = i * ratio
+                val i1 = inIndex.toInt()
+                val i2 = minOf(i1 + 1, inputLength - 1)
+                val frac = inIndex - i1
+                val sample = (input[i1] * (1.0 - frac) + input[i2] * frac).toInt()
+                output[i] = sample.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            }
+            return output
+        }
+    }
+
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
     private var recordingThread: Thread? = null
+    private var actualSampleRate = TARGET_SAMPLE_RATE
+
+    fun getActualSampleRate(): Int = actualSampleRate
 
     @SuppressLint("MissingPermission")
     @Synchronized
@@ -19,58 +47,100 @@ class AudioRecorder {
         onRmsChanged: (Float) -> Unit
     ) {
         if (isRecording) {
-            Log.w("AudioRecorder", "Recording is already in progress, ignoring start request")
+            Log.w(TAG, "Recording is already in progress, ignoring start request")
             return
         }
 
-        val sampleRate = 24000 // Gemini Live symmetric 24kHz
         val channelConfig = AudioFormat.CHANNEL_IN_MONO
         val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-        val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+
+        // Candidate rates: 16000 first (Gemini Live standard), fallback to 48000 or 44100 if hardware requires it
+        val ratesToTry = intArrayOf(TARGET_SAMPLE_RATE, 48000, 44100)
+        var selectedRecord: AudioRecord? = null
+        var selectedRate = TARGET_SAMPLE_RATE
+        var selectedBufferSize = 0
+
+        for (rate in ratesToTry) {
+            val minBuf = AudioRecord.getMinBufferSize(rate, channelConfig, audioFormat)
+            if (minBuf > 0) {
+                try {
+                    val bufferSize = maxOf(minBuf * 2, (rate / 10) * 2) // at least 100ms internal buffer
+                    val candidate = AudioRecord(
+                        MediaRecorder.AudioSource.VOICE_COMMUNICATION,
+                        rate,
+                        channelConfig,
+                        audioFormat,
+                        bufferSize
+                    )
+                    if (candidate.state == AudioRecord.STATE_INITIALIZED) {
+                        selectedRecord = candidate
+                        selectedRate = rate
+                        selectedBufferSize = minBuf
+                        Log.i(TAG, "AudioRecord initialized successfully at rate $rate Hz (minBuf=$minBuf)")
+                        break
+                    } else {
+                        candidate.release()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed initializing AudioRecord at $rate Hz: ${e.message}")
+                }
+            }
+        }
+
+        if (selectedRecord == null || selectedRecord.state != AudioRecord.STATE_INITIALIZED) {
+            Log.e(TAG, "AudioRecord initialization failed for all candidate rates")
+            selectedRecord?.release()
+            throw IllegalStateException("AudioRecord failed to initialize at supported sample rates")
+        }
+
+        audioRecord = selectedRecord
+        actualSampleRate = selectedRate
 
         try {
-            audioRecord = AudioRecord(
-                MediaRecorder.AudioSource.VOICE_COMMUNICATION,
-                sampleRate,
-                channelConfig,
-                audioFormat,
-                bufferSize * 2
-            )
-
-            if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
-                Log.e("AudioRecorder", "AudioRecord initialization failed")
-                audioRecord?.release()
-                audioRecord = null
-                throw IllegalStateException("AudioRecord failed to initialize")
-            }
-
             audioRecord?.startRecording()
             isRecording = true
             audioProcessor.reset()
 
-            val buffer = ShortArray(bufferSize)
+            // 40ms read chunk sizing (e.g. 640 samples at 16kHz = 40ms, 1920 samples at 48kHz = 40ms)
+            val chunkSamples = (actualSampleRate * 40) / 1000
+            val readBufferSize = maxOf(chunkSamples, selectedBufferSize / 2)
+            val buffer = ShortArray(readBufferSize)
+
             recordingThread = Thread({
                 while (isRecording) {
                     val shortsRead = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (shortsRead > 0) {
-                        // Pass shorts to the processor for VAD/RMS
-                        val rms = audioProcessor.processAudio(buffer, shortsRead)
-                        onRmsChanged(rms)
-
-                        // Convert short array into little-endian bytes for the Gemini Live API
-                        val byteBuffer = ByteArray(shortsRead * 2)
-                        for (i in 0 until shortsRead) {
-                            val sample = buffer[i].toInt()
-                            byteBuffer[i * 2] = (sample and 0xFF).toByte()
-                            byteBuffer[i * 2 + 1] = ((sample shr 8) and 0xFF).toByte()
+                        // Resample to 16kHz if hardware captured at another rate
+                        val targetShorts: ShortArray
+                        val targetCount: Int
+                        if (actualSampleRate == TARGET_SAMPLE_RATE) {
+                            targetShorts = buffer
+                            targetCount = shortsRead
+                        } else {
+                            targetShorts = resampleLinear(buffer, shortsRead, actualSampleRate, TARGET_SAMPLE_RATE)
+                            targetCount = targetShorts.size
                         }
-                        onAudioChunk(byteBuffer)
+
+                        if (targetCount > 0) {
+                            // Pass 16kHz shorts to processor for RMS energy
+                            val rms = audioProcessor.processAudio(targetShorts, targetCount)
+                            onRmsChanged(rms)
+
+                            // Convert short array into little-endian bytes for the Gemini Live API (16kHz mono PCM16)
+                            val byteBuffer = ByteArray(targetCount * 2)
+                            for (i in 0 until targetCount) {
+                                val sample = targetShorts[i].toInt()
+                                byteBuffer[i * 2] = (sample and 0xFF).toByte()
+                                byteBuffer[i * 2 + 1] = ((sample shr 8) and 0xFF).toByte()
+                            }
+                            onAudioChunk(byteBuffer)
+                        }
                     }
                 }
             }, "AudioRecorder-Thread")
             recordingThread?.start()
         } catch (e: Exception) {
-            Log.e("AudioRecorder", "Error starting recording", e)
+            Log.e(TAG, "Error starting recording", e)
         }
     }
 
@@ -80,7 +150,7 @@ class AudioRecorder {
         try {
             recordingThread?.join(1000)
         } catch (e: InterruptedException) {
-            Log.w("AudioRecorder", "Interrupted while joining recording thread", e)
+            Log.w(TAG, "Interrupted while joining recording thread", e)
         }
         recordingThread = null
         try {
@@ -91,7 +161,7 @@ class AudioRecorder {
                 }
             }
         } catch (e: Exception) {
-            Log.e("AudioRecorder", "Error stopping recording", e)
+            Log.e(TAG, "Error stopping recording", e)
         }
         audioRecord = null
     }

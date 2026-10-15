@@ -46,6 +46,10 @@ object ShizukuShellPlugin {
     }
 
     fun runCommand(command: String): String {
+        if (!com.example.automation.computeruse.ShellCommandPolicy.isCommandAllowed(command)) {
+            Log.w(TAG, "[SHELL_POLICY_BLOCKED] Command rejected by security policy: '$command'")
+            return "Error: Command rejected by security policy"
+        }
         if (!bindSync()) {
             return "Failed to bind to Shizuku UserService"
         }
@@ -58,6 +62,10 @@ object ShizukuShellPlugin {
     }
 
     fun runCommandBytes(command: String): ByteArray? {
+        if (!com.example.automation.computeruse.ShellCommandPolicy.isCommandAllowed(command)) {
+            Log.w(TAG, "[SHELL_POLICY_BLOCKED] Byte command rejected by security policy: '$command'")
+            return null
+        }
         if (!bindSync()) return null
         return try {
             service?.runCommandBytes(command)

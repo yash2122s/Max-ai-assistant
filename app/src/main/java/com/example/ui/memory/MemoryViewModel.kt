@@ -12,10 +12,16 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import com.example.memory.account.MemoryAccountScope
+import com.example.data.local.AppDatabase
+import com.example.memory.sync.*
 
 class MemoryViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = MemoryRepository.getInstance(application)
+    private val conflictDao = AppDatabase.getDatabase(application).memoryConflictDao()
+    val conflicts: StateFlow<List<MemoryConflict>> = MemoryAccountScope.sessions.flatMapLatest { conflictDao.unresolved(it.ownerKey) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _searchQuery = MutableStateFlow("")
     private val _selectedCategory = MutableStateFlow("ALL")
@@ -26,7 +32,7 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     private val _events = Channel<MemoryUiEvent>(Channel.BUFFERED)
     val events: Flow<MemoryUiEvent> = _events.receiveAsFlow()
 
-    val uiState: StateFlow<MemoryUiState> = combine(
+    private val baseUiState: Flow<MemoryUiState> = combine(
         repository.allMemories,
         _searchQuery,
         _selectedCategory,
@@ -51,6 +57,10 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
             isCreatingNew = isCreating,
             isLoading = false
         )
+    }
+
+    val uiState: StateFlow<MemoryUiState> = baseUiState.combine(conflicts) { state, activeConflicts ->
+        state.copy(conflicts = activeConflicts)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
@@ -137,6 +147,46 @@ class MemoryViewModel(application: Application) : AndroidViewModel(application) 
     fun toggleEnabled(memory: PermanentMemory) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.toggleEnabled(memory.memoryId, !memory.enabled)
+        }
+    }
+
+    fun resolveConflict(conflict: MemoryConflict, choice: MemoryConflictChoice) {
+        resolveConflict(conflict, choice, null)
+    }
+
+    fun resolveConflict(conflict: MemoryConflict, choice: MemoryConflictChoice, merge: PermanentMemory?) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val session = MemoryAccountScope.capture()
+            val current = conflictDao.find(session.ownerKey, conflict.conflictId)
+            if (current == null || current.remoteRevision != conflict.remoteRevision ||
+                session.ownerKey != conflict.ownerKey || !MemoryAccountScope.isCurrent(session)) {
+                _events.send(MemoryUiEvent.ShowToast("Conflict changed or account session expired")); return@launch
+            }
+            val result = MemoryConflictResolver.choose(current, choice, merge)
+            if (result.isFailure) { _events.send(MemoryUiEvent.ShowToast(result.exceptionOrNull()?.message ?: "Conflict failed")); return@launch }
+            if (choice == MemoryConflictChoice.CANCEL) {
+                conflictDao.upsert(current.copy(state = MemoryConflictState.CANCELLED, updatedAt = System.currentTimeMillis()))
+                return@launch
+            }
+            val selected = result.getOrNull()
+            if (selected == null) {
+                _events.send(MemoryUiEvent.ShowToast("Remote tombstone selected; local record retained until sync")); return@launch
+            }
+            conflictDao.upsert(current.copy(state = MemoryConflictState.RESOLVING, error = null, updatedAt = System.currentTimeMillis()))
+            when (val saved = repository.updateMemory(selected, session)) {
+                is MemoryValidationResult.Success -> {
+                    // Enqueue only after the local write succeeds. The conflict remains RESOLVING
+                    // until the queue worker reports remote success; it is never falsely resolved here.
+                    val operationId = MemorySyncQueueCoordinator.update(selected, current.remoteRevision + 1)
+                    if (operationId != null) {
+                        conflictDao.upsert(current.copy(operationId = operationId, state = MemoryConflictState.RESOLVING, error = null, updatedAt = System.currentTimeMillis()))
+                    }
+                }
+                is MemoryValidationResult.Error -> {
+                    conflictDao.upsert(current.copy(state = MemoryConflictState.FAILED, error = saved.message, updatedAt = System.currentTimeMillis()))
+                    _events.send(MemoryUiEvent.ShowToast(saved.message))
+                }
+            }
         }
     }
 }

@@ -1,5 +1,6 @@
 package com.example.ui.theme
 
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
@@ -31,7 +32,7 @@ object MaxDimensions {
     val radiusPill: Dp = 999.dp // Floating capsules, status pills
 
     // Border Hairlines & Dividers
-    val borderHairline: Dp = 0.5.dp
+    val borderHairline: Dp = 1.dp
     val borderStandard: Dp = 1.dp
     val borderFocused: Dp = 1.5.dp
 
@@ -42,7 +43,7 @@ object MaxDimensions {
     val inputHeight: Dp = 52.dp
     val topBarHeight: Dp = 56.dp
     val orbSizeCompact: Dp = 140.dp
-    val orbSizeStandard: Dp = 200.dp
+    val orbSizeStandard: Dp = 170.dp
     val bottomPillHeight: Dp = 64.dp
 
     // Elevation & Depth
@@ -50,5 +51,26 @@ object MaxDimensions {
     val elevationLow: Dp = 2.dp
     val elevationMedium: Dp = 6.dp
     val elevationHigh: Dp = 12.dp
+}
+
+object MaxRadius {
+    val xs: Dp = 4.dp
+    val sm: Dp = 8.dp
+    val md: Dp = 12.dp
+    val lg: Dp = 16.dp
+    val xl: Dp = 20.dp
+    val xxl: Dp = 28.dp
+}
+
+object MaxStroke {
+    val hairline: Dp = 1.dp
+    val emphasis: Dp = 1.5.dp
+}
+
+object MaxShapes {
+    val bubbleUser = RoundedCornerShape(MaxRadius.xl, MaxRadius.xl, MaxRadius.xl, MaxRadius.xs)
+    val bubbleMax  = RoundedCornerShape(MaxRadius.xs, MaxRadius.xl, MaxRadius.xl, MaxRadius.xl)
+    val card = RoundedCornerShape(MaxRadius.lg)
+    val pill = RoundedCornerShape(50)
 }
 

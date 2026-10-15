@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,9 +15,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
+import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,6 +28,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -36,11 +38,16 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.lifecycle.Lifecycle
+import com.example.ui.theme.*
+import com.example.ui.theme.LocalIsDarkMode
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.network.model.GeminiModelMode
-import com.example.ui.theme.MaxIOSColors
-import com.example.ui.theme.MaxIOSShapes
-import com.example.ui.theme.MaxIOSSpacing
+import com.example.ui.home.AssistantPhase
 
 /**
  * Premium iOS-Inspired Translucent Glass Surface with Specular Border.
@@ -51,22 +58,28 @@ fun MaxGlassSurface(
     shape: Shape = MaxIOSShapes.ShapeLarge,
     backgroundColor: Color = MaxIOSColors.DarkSurfaceGlass,
     borderColor: Color = MaxIOSColors.HairlineDark,
-    borderWidth: Dp = 0.5.dp,
+    borderBrush: Brush? = null,
+    borderWidth: Dp = MaxStroke.hairline,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val borderModifier = if (borderBrush != null) {
+        Modifier.border(borderWidth, borderBrush, shape)
+    } else {
+        Modifier.border(borderWidth, borderColor, shape)
+    }
+
     Box(
         modifier = modifier
             .clip(shape)
             .background(backgroundColor)
-            .border(borderWidth, borderColor, shape)
+            .then(borderModifier)
     ) {
         content()
     }
 }
 
 /**
- * 60 FPS Apple-Intelligence Inspired Assistant Orb.
- * Reacts smoothly to microphone RMS audio, speech output, and multi-step reasoning.
+ * Quiet state indicator. Only active processing pulses while visible and motion is enabled.
  */
 @Composable
 fun MaxAssistantOrb(
@@ -76,81 +89,53 @@ fun MaxAssistantOrb(
     audioRms: Float = 0f,
     modifier: Modifier = Modifier,
     size: Dp = 72.dp,
-    onClick: () -> Unit = {}
+    onClick: () -> Unit = {},
+    phase: AssistantPhase? = null
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "OrbTransitions")
-    
-    // Ambient breathing scale
-    val breathingScale by infiniteTransition.animateFloat(
-        initialValue = 0.96f,
-        targetValue = 1.04f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "OrbBreathing"
-    )
-
-    // Thinking rotation
-    val thinkingAngle by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(3000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "OrbThinking"
-    )
-
-    // Reactive amplitude scale
-    val normalizedRms = (audioRms / 100f).coerceIn(0f, 1f)
-    val rmsScale by animateFloatAsState(
-        targetValue = if (isListening) 1.0f + (normalizedRms * 0.45f) else if (isSpeaking) 1.05f else 1.0f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
-        label = "OrbRmsScale"
-    )
-
-    val currentScale = if (isThinking) breathingScale else rmsScale
-
-    // Dynamic gradient colors based on AI state
-    val orbBrush = when {
-        isThinking -> Brush.sweepGradient(
-            colors = listOf(
-                MaxIOSColors.SystemIndigo,
-                MaxIOSColors.SystemPurple,
-                MaxIOSColors.SystemBlue,
-                MaxIOSColors.SystemTeal,
-                MaxIOSColors.SystemIndigo
-            )
+    val listening = phase?.let { it == AssistantPhase.LISTENING } ?: isListening
+    val speaking = phase?.let { it == AssistantPhase.SPEAKING } ?: isSpeaking
+    val processing = phase?.let {
+        it == AssistantPhase.CONNECTING || it == AssistantPhase.THINKING ||
+            it == AssistantPhase.STREAMING || it == AssistantPhase.TOOL_EXECUTION
+    } ?: isThinking
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var resumed by remember(lifecycleOwner) {
+        mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, _ ->
+            resumed = lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val motionEnabled = (rememberCoroutineScope().coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f) > 0f
+    val pulse = if (processing && resumed && motionEnabled) {
+        val transition = rememberInfiniteTransition(label = "ProcessingPulse")
+        val value by transition.animateFloat(
+            initialValue = 0.96f,
+            targetValue = 1.04f,
+            animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "PulseScale"
         )
-        isSpeaking -> Brush.radialGradient(
-            colors = listOf(
-                MaxIOSColors.SystemTeal.copy(alpha = 0.95f),
-                MaxIOSColors.SystemBlue.copy(alpha = 0.85f),
-                MaxIOSColors.DarkBase
-            )
-        )
-        isListening -> Brush.radialGradient(
-            colors = listOf(
-                MaxIOSColors.SystemBlue.copy(alpha = 0.95f),
-                MaxIOSColors.SystemIndigo.copy(alpha = 0.80f),
-                MaxIOSColors.DarkBase
-            )
-        )
-        else -> Brush.radialGradient(
-            colors = listOf(
-                MaxIOSColors.SystemBlue.copy(alpha = 0.7f),
-                MaxIOSColors.SystemIndigo.copy(alpha = 0.4f),
-                Color.Transparent
-            )
-        )
+        value
+    } else 1f
+    val rmsScale = if (listening && motionEnabled) 1f + (audioRms / 100f).coerceIn(0f, 1f) * 0.08f else 1f
+    val accent = when {
+        phase == AssistantPhase.FAILED || phase == AssistantPhase.BLOCKED -> MaxIOSColors.SystemRed
+        phase == AssistantPhase.COMPLETED -> MaxIOSColors.SystemGreen
+        processing -> MaxIOSColors.SystemBlue
+        listening || speaking -> MaxIOSColors.SystemTeal
+        else -> MaxIOSColors.SystemIndigo
     }
 
     Box(
         modifier = modifier
             .size(size)
-            .scale(currentScale)
+            .scale(pulse * rmsScale)
             .clip(CircleShape)
+            .background(MaxIOSColors.DarkSurfaceElevated)
+            .border(1.dp, accent.copy(alpha = 0.65f), CircleShape)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -158,35 +143,24 @@ fun MaxAssistantOrb(
             ),
         contentAlignment = Alignment.Center
     ) {
-        // Outer diffuse aura
         Box(
             modifier = Modifier
-                .fillMaxSize(0.92f)
+                .fillMaxSize(0.72f)
                 .clip(CircleShape)
-                .background(orbBrush)
-                .rotate(if (isThinking) thinkingAngle else 0f)
+                .background(Brush.radialGradient(listOf(accent.copy(alpha = 0.8f), MaxIOSColors.DarkSurfaceGrouped)))
         )
-
-        // Core inner highlight
         Box(
             modifier = Modifier
-                .fillMaxSize(0.62f)
+                .fillMaxSize(0.16f)
                 .clip(CircleShape)
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(
-                            Color.White.copy(alpha = if (isSpeaking || isListening) 0.85f else 0.45f),
-                            Color.Transparent
-                        )
-                    )
-                )
+                .background(MaxIOSColors.TextPrimaryDark.copy(alpha = 0.9f))
         )
     }
 }
 
 /**
- * Floating iOS-Style Assistant Input Dock.
- * Features [ + ] quick action button, translucent input capsule, and mic/send controls.
+ * Floating Assistant Input Dock (Stitch Aether HUD Aligned).
+ * Features glowing pulse border when listening, tactile spring feedback, and glowing mic FAB.
  */
 @Composable
 fun MaxInputDock(
@@ -199,145 +173,181 @@ fun MaxInputDock(
     isSpeaking: Boolean,
     onStopSpeaking: () -> Unit,
     modifier: Modifier = Modifier,
-    placeholder: String = "Ask MAX anything..."
+    placeholder: String = "Ask MAX anything...",
+    isBusy: Boolean = false,
+    isCancelling: Boolean = false,
+    onStopTask: (() -> Unit)? = null,
+    enabled: Boolean = true,
+    statusLabel: String? = null
 ) {
+    val canSend = enabled && !isBusy && !isCancelling && text.isNotBlank()
+    val showStop = isBusy || isCancelling || isSpeaking
+
+    val infiniteTransition = rememberInfiniteTransition(label = "dock_listening")
+    val micPulse by if (isListening) {
+        infiniteTransition.animateFloat(
+            initialValue = 0.95f,
+            targetValue = 1.12f,
+            animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "mic_pulse"
+        )
+    } else remember { mutableFloatStateOf(1f) }
+
+    val borderBrush = if (isListening) {
+        Brush.horizontalGradient(
+            colors = listOf(
+                com.example.ui.theme.AetherNeonPurple.copy(alpha = 0.85f),
+                com.example.ui.theme.AetherNeonCyan,
+                com.example.ui.theme.AetherNeonPurple.copy(alpha = 0.85f)
+            )
+        )
+    } else null
+
     MaxGlassSurface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = MaxIOSSpacing.screenPadding)
-            .height(56.dp),
-        shape = MaxIOSShapes.ShapePill,
-        backgroundColor = MaxIOSColors.DarkSurfaceElevated.copy(alpha = 0.95f),
-        borderColor = MaxIOSColors.HairlineDark,
-        borderWidth = 0.5.dp
+            .padding(horizontal = MaxIOSSpacing.screenPadding),
+        shape = MaxIOSShapes.ShapeLarge,
+        backgroundColor = MaterialTheme.colorScheme.surfaceVariant,
+        borderColor = if (isListening) com.example.ui.theme.AetherNeonCyan else MaterialTheme.colorScheme.outline,
+        borderBrush = borderBrush,
+        borderWidth = if (isListening) MaxStroke.emphasis else MaxStroke.hairline
     ) {
         Row(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 8.dp),
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // [ + ] Quick Action Expander Button
             IconButton(
                 onClick = onPlusClick,
+                enabled = enabled,
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.08f))
+                    .background(MaterialTheme.colorScheme.surface)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Add,
+                    imageVector = Icons.Rounded.Add,
                     contentDescription = "Quick Actions",
-                    tint = MaxIOSColors.TextSecondaryDark,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp)
                 )
             }
 
-            // Input Text Field or Voice Indicator
-            if (isSpeaking) {
-                Row(
-                    modifier = Modifier.weight(1f),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(8.dp)
-                            .clip(CircleShape)
-                            .background(MaxIOSColors.SystemTeal)
-                    )
+            Column(modifier = Modifier.weight(1f).padding(horizontal = 4.dp)) {
+                if (!statusLabel.isNullOrBlank()) {
                     Text(
-                        text = "MAX is speaking…",
-                        color = MaxIOSColors.SystemTeal,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Medium
+                        statusLabel,
+                        color = if (isListening) com.example.ui.theme.AetherNeonCyan else MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaxType.Caption,
+                        fontFamily = com.example.ui.theme.MaxMono,
+                        maxLines = 1
                     )
                 }
-
-                // Stop button when speaking
-                IconButton(
-                    onClick = onStopSpeaking,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(MaxIOSColors.SystemRed.copy(alpha = 0.2f))
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Stop,
-                        contentDescription = "Stop",
-                        tint = MaxIOSColors.SystemRed,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            } else {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(horizontal = 4.dp),
-                    contentAlignment = Alignment.CenterStart
-                ) {
-                    if (text.isEmpty()) {
-                        Text(
-                            text = placeholder,
-                            color = MaxIOSColors.TextTertiaryDark,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Normal
-                        )
-                    }
-                    BasicTextField(
-                        value = text,
-                        onValueChange = onTextChange,
-                        textStyle = TextStyle(
-                            color = MaxIOSColors.TextPrimaryDark,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Normal
-                        ),
-                        cursorBrush = SolidColor(MaxIOSColors.SystemBlue),
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(onSend = {
-                            if (text.isNotBlank()) {
+                BasicTextField(
+                    value = text,
+                    onValueChange = onTextChange,
+                    enabled = enabled,
+                    textStyle = MaxType.Body.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = SolidColor(com.example.ui.theme.AetherNeonCyan),
+                    keyboardOptions = KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Send),
+                    keyboardActions = androidx.compose.foundation.text.KeyboardActions(
+                        onSend = {
+                            if (canSend) {
                                 onSend(text)
                             }
-                        }),
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-
-                // Dynamic Mic / Send Action
-                if (text.isNotBlank()) {
-                    IconButton(
-                        onClick = { onSend(text) },
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(MaxIOSColors.SystemBlue)
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Send,
-                            contentDescription = "Send",
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
+                        }
+                    ),
+                    minLines = 1,
+                    maxLines = 5,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = "Message MAX" },
+                    decorationBox = { innerTextField ->
+                        Box(contentAlignment = Alignment.CenterStart, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
+                            if (text.isEmpty()) Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaxType.Body)
+                            innerTextField()
+                        }
                     }
-                } else {
-                    IconButton(
-                        onClick = onMicClick,
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(CircleShape)
-                            .background(
-                                if (isListening) MaxIOSColors.SystemBlue.copy(alpha = 0.25f)
-                                else Color.White.copy(alpha = 0.08f)
+                )
+            }
+
+            // Right Button: Stop / Send / Mic with smooth animated transition
+            AnimatedContent(
+                targetState = when {
+                    showStop -> "STOP"
+                    text.isNotBlank() -> "SEND"
+                    else -> "MIC"
+                },
+                transitionSpec = {
+                    (fadeIn(tween(200)) + scaleIn(tween(200))) togetherWith
+                        (fadeOut(tween(150)) + scaleOut(tween(150)))
+                },
+                label = "dock_action_button"
+            ) { target ->
+                when (target) {
+                    "STOP" -> {
+                        IconButton(
+                            onClick = { if (isBusy || isCancelling) onStopTask?.invoke() else onStopSpeaking() },
+                            enabled = enabled && !isCancelling && (if (isBusy) onStopTask != null else true),
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(MaxIOSColors.SystemRed.copy(alpha = 0.2f))
+                        ) {
+                            Icon(
+                                Icons.Rounded.Stop,
+                                contentDescription = if (isCancelling) "Cancelling" else if (isBusy) "Stop task" else "Stop speaking",
+                                tint = MaxIOSColors.SystemRed
                             )
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mic,
-                            contentDescription = "Voice Input",
-                            tint = if (isListening) MaxIOSColors.SystemBlue else MaxIOSColors.TextSecondaryDark,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        }
+                    }
+                    "SEND" -> {
+                        IconButton(
+                            onClick = { if (canSend) onSend(text) },
+                            enabled = canSend,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    if (canSend) Brush.linearGradient(com.example.ui.theme.AetherGradientAi)
+                                    else SolidColor(com.example.ui.theme.AetherNeonCyan.copy(alpha = 0.3f))
+                                )
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Rounded.Send,
+                                contentDescription = "Send message",
+                                tint = Color.White
+                            )
+                        }
+                    }
+                    else -> {
+                        IconButton(
+                            onClick = onMicClick,
+                            enabled = enabled,
+                            modifier = Modifier
+                                .size(48.dp)
+                                .scale(micPulse)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.linearGradient(
+                                        colors = listOf(
+                                            com.example.ui.theme.NeonPink,
+                                            com.example.ui.theme.MagentaRose
+                                        )
+                                    )
+                                )
+                                .border(1.dp, com.example.ui.theme.SoftRoseBorderStrong, CircleShape)
+                        ) {
+                            Icon(
+                                Icons.Rounded.Mic,
+                                contentDescription = if (isListening) "Stop voice input" else "Start voice input",
+                                tint = Color.White
+                            )
+                        }
                     }
                 }
             }
@@ -361,9 +371,9 @@ fun MaxToolActivityCard(
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         shape = MaxIOSShapes.ShapeMedium,
-        backgroundColor = MaxIOSColors.DarkSurfaceElevated.copy(alpha = 0.85f),
-        borderColor = if (isCompleted) MaxIOSColors.SystemGreen.copy(alpha = 0.4f) else MaxIOSColors.HairlineDark,
-        borderWidth = 0.5.dp
+        backgroundColor = MaterialTheme.colorScheme.surfaceVariant,
+        borderColor = if (isCompleted) MaxIOSColors.SystemGreen.copy(alpha = 0.4f) else MaterialTheme.colorScheme.outline,
+        borderWidth = MaxStroke.hairline
     ) {
         Row(
             modifier = Modifier
@@ -385,21 +395,21 @@ fun MaxToolActivityCard(
                 Column {
                     Text(
                         text = appName,
-                        color = MaxIOSColors.TextPrimaryDark,
-                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaxType.Body,
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
                         text = statusText,
-                        color = MaxIOSColors.TextSecondaryDark,
-                        fontSize = 12.sp
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaxType.Caption
                     )
                 }
             }
 
             if (isCompleted) {
                 Icon(
-                    imageVector = Icons.Default.Check,
+                    imageVector = Icons.Rounded.Check,
                     contentDescription = "Completed",
                     tint = MaxIOSColors.SystemGreen,
                     modifier = Modifier.size(16.dp)
@@ -438,8 +448,8 @@ fun MaxModelIndicator(
     Box(
         modifier = modifier
             .clip(MaxIOSShapes.ShapePill)
-            .background(MaxIOSColors.DarkSurfaceElevated.copy(alpha = 0.85f))
-            .border(0.5.dp, accentColor.copy(alpha = 0.35f), MaxIOSShapes.ShapePill)
+            .background(MaxIOSColors.SurfaceElevated.copy(alpha = 0.85f))
+            .border(MaxStroke.hairline, accentColor.copy(alpha = 0.35f), MaxIOSShapes.ShapePill)
             .clickable(onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 4.dp),
         contentAlignment = Alignment.Center
@@ -456,10 +466,9 @@ fun MaxModelIndicator(
             )
             Text(
                 text = modeLabel,
-                color = MaxIOSColors.TextPrimaryDark,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                letterSpacing = 0.2.sp
+                color = MaxIOSColors.TextPrimary,
+                style = MaxType.Caption,
+                fontWeight = FontWeight.Medium
             )
         }
     }
@@ -475,12 +484,31 @@ fun MaxQuickActionCapsule(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.94f else 1f,
+        animationSpec = spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = Spring.DampingRatioMediumBouncy
+        ),
+        label = "capsule_press"
+    )
+
     Box(
         modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clip(MaxIOSShapes.ShapePill)
-            .background(MaxIOSColors.DarkSurfaceElevated.copy(alpha = 0.9f))
-            .border(0.5.dp, MaxIOSColors.HairlineDark, MaxIOSShapes.ShapePill)
-            .clickable(onClick = onClick)
+            .background(MaxIOSColors.SurfaceGlass)
+            .border(MaxStroke.hairline, com.example.ui.theme.SoftRoseBorder, MaxIOSShapes.ShapePill)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
             .padding(horizontal = 14.dp, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -492,14 +520,14 @@ fun MaxQuickActionCapsule(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = MaxIOSColors.SystemBlue,
-                    modifier = Modifier.size(16.dp)
+                    tint = com.example.ui.theme.NeonPink,
+                    modifier = Modifier.size(MaxIconTokens.Small)
                 )
             }
             Text(
                 text = text,
-                color = MaxIOSColors.TextPrimaryDark,
-                fontSize = 14.sp,
+                color = MaxIOSColors.TextPrimary,
+                style = MaxType.Body,
                 fontWeight = FontWeight.Medium
             )
         }
@@ -507,8 +535,117 @@ fun MaxQuickActionCapsule(
 }
 
 /**
+ * Modern Luminous 2x2 Grid Quick Automation Card (Stitch Neural Design).
+ */
+@Composable
+fun MaxQuickAutomationCard(
+    title: String,
+    subtitle: String,
+    badge: String,
+    icon: ImageVector,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    iconTint: Color = com.example.ui.theme.NeonPink
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (isPressed) 0.96f else 1f,
+        animationSpec = spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = Spring.DampingRatioMediumBouncy
+        ),
+        label = "card_press"
+    )
+
+    val isDark = LocalIsDarkMode.current
+    val cardBackground = if (isDark) {
+        Brush.verticalGradient(listOf(MaxIOSColors.DarkSurfaceGrouped, MaxIOSColors.DarkSurfaceElevated))
+    } else {
+        Brush.verticalGradient(listOf(MaxSemanticColors.surfaceElevated, MaxSemanticColors.surface))
+    }
+
+    Box(
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(RoundedCornerShape(MaxRadius.xl))
+            .background(cardBackground)
+            .border(MaxStroke.hairline, if (isDark) MaxIOSColors.HairlineDark else com.example.ui.theme.SoftRoseBorder, RoundedCornerShape(MaxRadius.xl))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .padding(13.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(MaxRadius.sm))
+                        .background(if (isDark) MaxIOSColors.DarkSurfaceElevated else com.example.ui.theme.SoftRoseTint),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = iconTint,
+                        modifier = Modifier.size(MaxIconTokens.Medium)
+                    )
+                }
+
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(MaxRadius.md))
+                        .background(if (isDark) MaxIOSColors.DarkSurfaceElevated else com.example.ui.theme.SoftRoseTint)
+                        .border(MaxStroke.hairline, if (isDark) MaxIOSColors.HairlineDark else com.example.ui.theme.SoftRoseBorderStrong, RoundedCornerShape(MaxRadius.md))
+                        .padding(horizontal = 7.dp, vertical = 2.5.dp)
+                ) {
+                    Text(
+                        text = badge,
+                        style = MaxType.Caption,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isDark) iconTint else MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    text = title,
+                    style = MaxType.Body,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) MaxSemanticColors.textPrimary else Color(0xFF0F172A),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = MaxType.Caption,
+                    color = if (isDark) MaxSemanticColors.textSecondary else Color(0xFF475569),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+/**
  * Apple Inset Grouped Section for Settings.
  */
+@Deprecated("Use MaxCard or MaxScreen components")
 @Composable
 fun MaxIOSSettingsSection(
     title: String? = null,
@@ -523,10 +660,9 @@ fun MaxIOSSettingsSection(
         if (title != null) {
             Text(
                 text = title.uppercase(),
-                fontSize = 13.sp,
+                style = MaxType.Caption,
                 fontWeight = FontWeight.SemiBold,
-                color = MaxIOSColors.TextTertiaryDark,
-                letterSpacing = 0.5.sp,
+                color = MaxIOSColors.TextTertiary,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
         }
@@ -534,9 +670,9 @@ fun MaxIOSSettingsSection(
         MaxGlassSurface(
             modifier = Modifier.fillMaxWidth(),
             shape = MaxIOSShapes.ShapeLarge,
-            backgroundColor = MaxIOSColors.DarkSurfaceGrouped,
-            borderColor = MaxIOSColors.HairlineDark,
-            borderWidth = 0.5.dp
+            backgroundColor = MaxIOSColors.SurfaceGrouped,
+            borderColor = MaxIOSColors.Hairline,
+            borderWidth = MaxStroke.hairline
         ) {
             Column(
                 modifier = Modifier.fillMaxWidth()
@@ -548,8 +684,8 @@ fun MaxIOSSettingsSection(
         if (footer != null) {
             Text(
                 text = footer,
-                fontSize = 12.sp,
-                color = MaxIOSColors.TextTertiaryDark,
+                style = MaxType.Caption,
+                color = MaxIOSColors.TextTertiary,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
         }
@@ -559,6 +695,7 @@ fun MaxIOSSettingsSection(
 /**
  * Apple Inset Grouped Settings Row with Icon in Colored Rounded Square.
  */
+@Deprecated("Use SettingsRow or MaxCard components")
 @Composable
 fun MaxIOSSettingsRow(
     title: String,
@@ -591,7 +728,7 @@ fun MaxIOSSettingsRow(
                     Box(
                         modifier = Modifier
                             .size(30.dp)
-                            .clip(RoundedCornerShape(7.dp))
+                            .clip(RoundedCornerShape(MaxRadius.sm))
                             .background(iconBg),
                         contentAlignment = Alignment.Center
                     ) {
@@ -599,7 +736,7 @@ fun MaxIOSSettingsRow(
                             imageVector = icon,
                             contentDescription = null,
                             tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(MaxIconTokens.Medium)
                         )
                     }
                 }
@@ -607,15 +744,15 @@ fun MaxIOSSettingsRow(
                 Column {
                     Text(
                         text = title,
-                        fontSize = 16.sp,
+                        style = MaxType.Headline,
                         fontWeight = FontWeight.Medium,
-                        color = MaxIOSColors.TextPrimaryDark
+                        color = MaxIOSColors.TextPrimary
                     )
                     if (subtitle != null) {
                         Text(
                             text = subtitle,
-                            fontSize = 13.sp,
-                            color = MaxIOSColors.TextSecondaryDark
+                            style = MaxType.Caption,
+                            color = MaxIOSColors.TextSecondary
                         )
                     }
                 }
@@ -625,18 +762,18 @@ fun MaxIOSSettingsRow(
                 trailingContent()
             } else if (onClick != null) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    imageVector = Icons.AutoMirrored.Rounded.KeyboardArrowRight,
                     contentDescription = null,
-                    tint = MaxIOSColors.TextTertiaryDark,
-                    modifier = Modifier.size(20.dp)
+                    tint = MaxIOSColors.TextTertiary,
+                    modifier = Modifier.size(MaxIconTokens.Medium)
                 )
             }
         }
 
         if (showDivider) {
             HorizontalDivider(
-                color = MaxIOSColors.HairlineDark,
-                thickness = 0.5.dp,
+                color = MaxIOSColors.Hairline,
+                thickness = MaxStroke.hairline,
                 modifier = Modifier.padding(start = if (icon != null) 60.dp else 16.dp)
             )
         }

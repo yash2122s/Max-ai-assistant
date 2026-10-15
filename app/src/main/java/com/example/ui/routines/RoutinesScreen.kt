@@ -13,11 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.*
@@ -45,28 +43,25 @@ fun RoutinesScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            MaxTopBar(
-                title = "Routines & Automation",
-                onBackClick = onNavigateBack,
-                actions = {
-                    IconButton(onClick = { viewModel.startCreate() }) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add Routine",
-                            tint = MaxPrimary
-                        )
-                    }
-                }
-            )
-        },
-        containerColor = MaxBgDark
-    ) { padding ->
+    MaxScreen(
+        title = "Routines & Automation",
+        eyebrow = "AUTONOMOUS WORKFLOWS",
+        auroraMode = AuroraMode.SUBTLE,
+        scrollable = false,
+        onBack = onNavigateBack,
+        topBarActions = {
+            IconButton(onClick = { viewModel.startCreate() }) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Routine",
+                    tint = MaxSemanticColors.accentCyan
+                )
+            }
+        }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .padding(horizontal = MaxDimensions.spaceMd)
         ) {
             Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
@@ -81,15 +76,15 @@ fun RoutinesScreen(
                         horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                     ) {
                         CircularProgressIndicator(
-                            color = MaxPrimary,
+                            color = MaxSemanticColors.accentCyan,
                             modifier = Modifier.size(20.dp),
                             strokeWidth = 2.dp
                         )
                         Text(
                             text = "Executing routine: '${uiState.currentlyRunningRoutine}'...",
-                            fontSize = 13.sp,
+                            style = MaxType.Body,
                             fontWeight = FontWeight.Bold,
-                            color = MaxPrimary
+                            color = MaxSemanticColors.accentCyan
                         )
                     }
                 }
@@ -117,7 +112,7 @@ fun RoutinesScreen(
         if (uiState.isCreatingNew) {
             ModalBottomSheet(
                 onDismissRequest = { viewModel.dismissCreate() },
-                containerColor = MaxSurface
+                containerColor = MaxSemanticColors.surface
             ) {
                 Column(
                     modifier = Modifier
@@ -127,9 +122,9 @@ fun RoutinesScreen(
                 ) {
                     Text(
                         text = "New Custom Routine",
-                        fontSize = 18.sp,
+                        style = MaxType.Headline,
                         fontWeight = FontWeight.Bold,
-                        color = MaxTextPrimary
+                        color = MaxSemanticColors.textPrimary
                     )
 
                     MaxTextField(
@@ -198,21 +193,21 @@ private fun RoutineCard(
                 ) {
                     Text(
                         text = routine.name.replaceFirstChar { it.uppercase() },
-                        fontSize = 16.sp,
+                        style = MaxType.Headline,
                         fontWeight = FontWeight.Bold,
-                        color = MaxTextPrimary
+                        color = MaxSemanticColors.textPrimary
                     )
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-                            .background(if (routine.isBuiltIn) MaxPrimary.copy(alpha = 0.2f) else MaxSecondary.copy(alpha = 0.2f))
+                            .background(if (routine.isBuiltIn) MaxSemanticColors.accentCyan.copy(alpha = 0.2f) else MaxSemanticColors.primaryRoyal.copy(alpha = 0.2f))
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = if (routine.isBuiltIn) "BUILT-IN" else "CUSTOM",
-                            fontSize = 10.sp,
+                            style = MaxType.Caption,
                             fontWeight = FontWeight.Bold,
-                            color = if (routine.isBuiltIn) MaxPrimary else MaxSecondary
+                            color = if (routine.isBuiltIn) MaxSemanticColors.accentCyan else MaxSemanticColors.primaryRoyal
                         )
                     }
                 }
@@ -230,7 +225,7 @@ private fun RoutineCard(
                             Icon(
                                 imageVector = Icons.Default.Delete,
                                 contentDescription = "Delete",
-                                tint = MaxError.copy(alpha = 0.7f),
+                                tint = MaxSemanticColors.destructive.copy(alpha = 0.7f),
                                 modifier = Modifier.size(18.dp)
                             )
                         }
@@ -249,14 +244,14 @@ private fun RoutineCard(
                     ) {
                         Text(
                             text = "${index + 1}.",
-                            fontSize = 11.sp,
+                            style = MaxType.Caption,
                             fontWeight = FontWeight.Bold,
-                            color = MaxTextMuted
+                            color = MaxSemanticColors.textMuted
                         )
                         Text(
                             text = step.description,
-                            fontSize = 12.sp,
-                            color = MaxTextSecondary
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textSecondary
                         )
                     }
                 }

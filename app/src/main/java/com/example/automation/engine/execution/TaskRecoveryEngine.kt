@@ -4,6 +4,7 @@ import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import com.example.automation.engine.state.TaskContext
 import com.example.automation.engine.state.TaskStep
 import com.example.automation.models.UiStep
@@ -66,8 +67,8 @@ class TaskRecoveryEngine {
         val service = JarvisAccessibilityService.instance
 
         // Strategy 1: Dismiss soft-keyboard if obscuring target
-        if (isKeyboardLikelyObstructing(uiStep)) {
-            Log.d(TAG, "Recovery Strategy 1: Attempting to dismiss keyboard via GLOBAL_ACTION_BACK")
+        if (isKeyboardLikelyObstructing(service, uiStep)) {
+            Log.d(TAG, "Recovery Strategy 1: Soft-keyboard detected. Attempting to dismiss via GLOBAL_ACTION_BACK")
             val backDismissed = service?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK) ?: false
             if (backDismissed) {
                 delay(300L) // Wait for IME collapse animation
@@ -98,7 +99,13 @@ class TaskRecoveryEngine {
         return true
     }
 
-    private fun isKeyboardLikelyObstructing(step: UiStep): Boolean {
+    private fun isKeyboardLikelyObstructing(service: JarvisAccessibilityService?, step: UiStep): Boolean {
+        if (service == null) return false
+        val windows = try { service.windows } catch (_: Throwable) { null }
+        val hasImeWindow = windows?.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD } == true
+        if (!hasImeWindow) {
+            return false
+        }
         return when (step) {
             is UiStep.Tap, is UiStep.Scroll, is UiStep.Swipe, is UiStep.PressKey -> true
             else -> false

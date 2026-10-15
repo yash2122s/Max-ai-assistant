@@ -23,6 +23,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val events: Flow<SettingsUiEvent> = _events.receiveAsFlow()
 
     init {
+        if (!settingsManager.modelRoutingMode.equals("AUTO", ignoreCase = true)) {
+            settingsManager.modelRoutingMode = "AUTO"
+        }
         viewModelScope.launch(Dispatchers.IO) {
             ragEngine.diagnosticsFlow.collect { diag ->
                 _uiState.update {
@@ -43,7 +46,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             uiAgentProvider = settingsManager.uiAgentProvider,
             uiAgentModel = settingsManager.uiAgentModel,
             liveVoiceModelName = settingsManager.liveVoiceModelName,
-            modelRoutingMode = settingsManager.modelRoutingMode,
+            modelRoutingMode = "AUTO",
             liveVoiceName = settingsManager.liveVoiceName,
             isLiveVoiceMode = settingsManager.isLiveVoiceMode,
             isThinkingObservabilityEnabled = settingsManager.isThinkingObservabilityEnabled,

@@ -53,6 +53,8 @@ MAX
 │   ├── ToolDispatcher           app/src/main/java/com/example/network/ToolDispatcher.kt
 │   │     — Maps Gemini tool-call function names to action JSON
 │   ├── MessageModels            app/src/main/java/com/example/network/MessageModels.kt
+│   ├── LiveSessionState         app/src/main/java/com/example/network/LiveSessionState.kt
+│   │     — In-memory resumption token and bounded tool-call duplicate ledger
 │   ├── GeminiPlanningClient     app/src/main/java/com/example/network/GeminiPlanningClient.kt
 │   └── GeminiPlanningProvider   app/src/main/java/com/example/network/provider/GeminiPlanningProvider.kt
 │         — Injected into GoalPlanner for LLM-based multi-step planning
@@ -100,9 +102,9 @@ MAX
 │   ├── ActionQueue              app/src/main/java/com/example/automation/engine/ActionQueue.kt
 │   └── WorldStateManager        app/src/main/java/com/example/automation/state/WorldStateManager.kt
 │
-├── Automation / Tools (45 registered)
-│   └── app/src/main/java/com/example/automation/tools/  [45 *Tool.kt files]
-│       Key: Tool.kt, ToolRegistry.kt, ToolResult.kt
+├── Automation / Tools (48 registered)
+│   └── app/src/main/java/com/example/automation/tools/  [48 *Tool.kt files]
+│       Key: Tool.kt, ToolRegistry.kt, ToolResult.kt, InspectScreenTool.kt, SpotifySearchTool.kt, InstagramBulkUnlikeTool.kt
 │
 ├── Automation / Actions (27 action classes)
 │   └── app/src/main/java/com/example/automation/actions/
@@ -119,22 +121,38 @@ MAX
 │   └── app/src/main/java/com/example/automation/activity/
 │       Key: AgentActivityTracker, AgentActivityState
 │
-├── WhatsApp
-│   ├── WhatsAppController       app/src/main/java/com/example/automation/WhatsAppController.kt
-│   ├── WhatsAppTool             app/src/main/java/com/example/automation/tools/WhatsAppTool.kt
-│   ├── WhatsAppVerifier         app/src/main/java/com/example/automation/verification/WhatsAppVerifier.kt
-│   ├── WhatsAppNotificationService app/src/main/java/com/example/service/WhatsAppNotificationService.kt
-│   └── AutoReplyController      app/src/main/java/com/example/automation/AutoReplyController.kt
-│
-├── Telegram
-│   ├── TelegramBotService       app/src/main/java/com/example/service/TelegramBotService.kt
-│   ├── TelegramController       app/src/main/java/com/example/automation/TelegramController.kt
-│   └── CloudSocketManager       app/src/main/java/com/example/telegram/CloudSocketManager.kt
-│
-├── Incoming Calls
-│   ├── IncomingCallReceiver     app/src/main/java/com/example/receiver/IncomingCallReceiver.kt
-│   ├── IncomingCallManager      app/src/main/java/com/example/automation/IncomingCallManager.kt
-│   └── CallController           app/src/main/java/com/example/automation/CallController.kt
+├── Features (Package-by-Feature Architecture)
+│   ├── YouTube (`com.example.features.youtube`)
+│   │   ├── YoutubeTool              app/src/main/java/com/example/features/youtube/YoutubeTool.kt
+│   │   ├── YoutubeAutomation        app/src/main/java/com/example/features/youtube/YoutubeAutomation.kt
+│   │   └── YoutubeVerifier          app/src/main/java/com/example/features/youtube/YoutubeVerifier.kt
+│   │
+│   ├── WhatsApp (`com.example.features.whatsapp`)
+│   │   ├── WhatsAppTool             app/src/main/java/com/example/features/whatsapp/WhatsAppTool.kt
+│   │   ├── WhatsAppController       app/src/main/java/com/example/features/whatsapp/WhatsAppController.kt
+│   │   ├── WhatsAppVerifier         app/src/main/java/com/example/features/whatsapp/WhatsAppVerifier.kt
+│   │   ├── WhatsAppContactResolver  app/src/main/java/com/example/features/whatsapp/WhatsAppContactResolver.kt
+│   │   ├── AutoReplyController      app/src/main/java/com/example/features/whatsapp/AutoReplyController.kt
+│   │   ├── WhatsAppNotificationService app/src/main/java/com/example/features/whatsapp/WhatsAppNotificationService.kt
+│   │   ├── AutoReplyActionReceiver  app/src/main/java/com/example/features/whatsapp/AutoReplyActionReceiver.kt
+│   │   └── RemoteInputSender        app/src/main/java/com/example/features/whatsapp/RemoteInputSender.kt
+│   │
+│   ├── Telegram (`com.example.features.telegram`)
+│   │   ├── TelegramController       app/src/main/java/com/example/features/telegram/TelegramController.kt
+│   │   ├── TelegramBotService       app/src/main/java/com/example/features/telegram/TelegramBotService.kt
+│   │   └── CloudSocketManager       app/src/main/java/com/example/features/telegram/CloudSocketManager.kt
+│   │
+│   └── Calls (`com.example.features.calls`)
+│       ├── CallTool                 app/src/main/java/com/example/features/calls/CallTool.kt
+│       ├── AnswerCallTool           app/src/main/java/com/example/features/calls/AnswerCallTool.kt
+│       ├── RejectCallTool           app/src/main/java/com/example/features/calls/RejectCallTool.kt
+│       ├── CallController           app/src/main/java/com/example/features/calls/CallController.kt
+│       ├── IncomingCallManager      app/src/main/java/com/example/features/calls/IncomingCallManager.kt
+│       ├── CallVerifier             app/src/main/java/com/example/features/calls/CallVerifier.kt
+│       ├── IncomingCallReceiver     app/src/main/java/com/example/features/calls/IncomingCallReceiver.kt
+│       ├── CallPhoneAction          app/src/main/java/com/example/features/calls/actions/CallPhoneAction.kt
+│       ├── AnswerCallAction         app/src/main/java/com/example/features/calls/actions/AnswerCallAction.kt
+│       └── RejectCallAction         app/src/main/java/com/example/features/calls/actions/RejectCallAction.kt
 │
 ├── Memory
 │   ├── MemoryRepository         app/src/main/java/com/example/memory/data/MemoryRepository.kt
@@ -212,10 +230,11 @@ MAX
 | Tool call routing | `network/ToolDispatcher.kt` |
 | Tool execution | `automation/engine/ActionDispatcher.kt` + `ExecutionEngine.kt` |
 | Tool registration | `MyApplication.kt` |
-| WhatsApp send | `automation/WhatsAppController.kt` |
+| WhatsApp send | `features/whatsapp/WhatsAppController.kt` |
 | WhatsApp accessibility | `service/JarvisAccessibilityService.kt` |
-| Incoming calls | `receiver/IncomingCallReceiver.kt` + `telephony/IncomingCallFlowState.kt` |
-| Telegram bot | `service/TelegramBotService.kt` |
+| YouTube play/pause/search | `features/youtube/YoutubeAutomation.kt` |
+| Incoming calls | `features/calls/IncomingCallReceiver.kt` + `features/calls/IncomingCallManager.kt` |
+| Telegram bot | `features/telegram/TelegramBotService.kt` + `features/telegram/TelegramController.kt` |
 | Memory save | `automation/tools/SaveMemoryTool.kt` + `memory/data/MemoryRepository.kt` |
 | Memory vectors | `memory/data/GeminiEmbeddingClient.kt` |
 | All settings | `data/preferences/SettingsManager.kt` |
@@ -227,6 +246,6 @@ MAX
 | Windows companion | `network/agent/CompanionConnectionService.kt` |
 | Overlay capsule | `service/MaxCapsuleOverlayService.kt` + `ui/overlay/DynamicCapsuleView.kt` |
 | Multi-step planning | `automation/engine/GoalPlanner.kt` |
-| Auto-reply | `automation/AutoReplyController.kt` |
+| Auto-reply | `features/whatsapp/AutoReplyController.kt` |
 | Theme colors | `ui/theme/Color.kt` & `ui/theme/Theme.kt` |
 | Security/Unlock | `security/MaxLockAutomationEngine.kt` |

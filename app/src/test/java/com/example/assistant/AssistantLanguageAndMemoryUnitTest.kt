@@ -35,7 +35,8 @@ class AssistantLanguageAndMemoryUnitTest {
     @Before
     fun setUp() = runBlocking {
         context = ApplicationProvider.getApplicationContext()
-        memoryRepo = MemoryRepository(context)
+        com.example.core.lifecycle.MaxRuntimeManager.enableMax(context)
+        memoryRepo = MemoryRepository.getInstance(context)
         memoryRepo.deleteAll()
         ragEngine = RagEngine.getInstance(context)
         ragEngine.clearIndex()
@@ -137,13 +138,15 @@ class AssistantLanguageAndMemoryUnitTest {
     @Test
     fun testMultilingualMemoryRetrieval() = runBlocking {
         // Save user name memory
+        val session = com.example.memory.account.MemoryAccountScope.capture()
         val memory = PermanentMemory(
             title = "User Name",
             content = "User name is Yash",
             category = MemoryCategory.PERSONAL.displayName,
             type = MemoryType.FACT,
             source = MemorySource.AUTO,
-            tags = "name,identity"
+            tags = "name,identity",
+            ownerKey = session.ownerKey
         )
         memoryRepo.addMemory(memory)
         ragEngine.indexMemory(memory)

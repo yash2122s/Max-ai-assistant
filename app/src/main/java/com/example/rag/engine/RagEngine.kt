@@ -4,6 +4,8 @@ import android.content.Context
 import com.example.core.lifecycle.MaxRuntimeManager
 import com.example.data.preferences.SettingsManager
 import com.example.memory.data.PermanentMemory
+import com.example.memory.account.MemoryAccountScope
+import com.example.memory.account.MemorySession
 import com.example.rag.context.RagContextBuilder
 import com.example.rag.embedding.GeminiEmbeddingProvider
 import com.example.rag.embedding.LocalEmbeddingProvider
@@ -36,11 +38,21 @@ class RagEngine private constructor(private val context: Context) {
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val lastRetrievalDuration = AtomicLong(0L)
+    private val accountGeneration = AtomicLong(0L)
+    @Volatile private var cacheReset: Deferred<Unit>? = null
+
+    private fun invalidateAccountContext() {
+        accountGeneration.incrementAndGet()
+        cacheReset = scope.async { repository.invalidateCache() }
+    }
 
     private val _diagnosticsFlow = MutableStateFlow(RagDiagnostics())
     val diagnosticsFlow: StateFlow<RagDiagnostics> = _diagnosticsFlow.asStateFlow()
 
     init {
+        scope.launch {
+            MemoryAccountScope.sessions.collect { invalidateAccountContext() }
+        }
         // Observe MAX runtime lifecycle state
         scope.launch {
             MaxRuntimeManager.isMaxEnabledFlow.collect { enabled ->
@@ -113,8 +125,12 @@ class RagEngine private constructor(private val context: Context) {
      */
     suspend fun retrieve(
         query: String,
-        filters: RagFilters? = null
+        filters: RagFilters? = null,
+        session: MemorySession = MemoryAccountScope.capture()
     ): List<RagSearchResult> = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
+        val generation = accountGeneration.get()
+        cacheReset?.await()
         val startTime = System.currentTimeMillis()
         val config = getConfig()
         if (!settingsManager.isMaxEnabled || !config.isRagEnabled || query.isBlank()) {
@@ -134,14 +150,15 @@ class RagEngine private constructor(private val context: Context) {
             query = query,
             config = config,
             filters = filters,
-            queryEmbedding = queryEmbedding
+            queryEmbedding = queryEmbedding,
+            session = session
         )
 
         val duration = System.currentTimeMillis() - startTime
         lastRetrievalDuration.set(duration)
         updateDiagnostics()
 
-        return@withContext results
+        return@withContext if (generation == accountGeneration.get() && MemoryAccountScope.isCurrent(session)) results else emptyList()
     }
 
     /**
@@ -149,63 +166,81 @@ class RagEngine private constructor(private val context: Context) {
      */
     suspend fun buildContextForQuery(
         query: String,
-        filters: RagFilters? = null
+        filters: RagFilters? = null,
+        session: MemorySession = MemoryAccountScope.capture()
     ): String = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         if (!shouldRetrieveForQuery(query)) {
             return@withContext ""
         }
 
-        val results = retrieve(query, filters)
+        val results = retrieve(query, filters, session)
         if (results.isEmpty()) {
             return@withContext ""
         }
 
         val config = getConfig()
-        return@withContext RagContextBuilder.buildContext(results, config.maxContextCharacters)
+        return@withContext if (MemoryAccountScope.isCurrent(session)) RagContextBuilder.buildContext(results, config.maxContextCharacters) else ""
     }
 
-    suspend fun indexMemory(memory: PermanentMemory): Boolean = withContext(Dispatchers.IO) {
+    suspend fun indexMemory(memory: PermanentMemory, session: MemorySession = MemoryAccountScope.capture()): Boolean = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
+        if (memory.ownerKey != MemoryAccountScope.LEGACY && memory.ownerKey != session.ownerKey) return@withContext false
+        val scopedMemory = if (memory.ownerKey == MemoryAccountScope.LEGACY) memory.copy(ownerKey = session.ownerKey) else memory
         if (!MaxRuntimeManager.isMaxEnabled(appContext) || !settingsManager.isMaxEnabled || !settingsManager.isRagEnabled) {
             return@withContext false
         }
-        val success = indexer.indexMemory(memory, getActiveProvider())
+        val success = indexer.indexMemory(scopedMemory, getActiveProvider(), session)
+        MemoryAccountScope.requireCurrent(session)
         settingsManager.ragLastIndexedTimestamp = System.currentTimeMillis()
         updateDiagnostics()
         success
     }
 
-    suspend fun indexMemories(memories: List<PermanentMemory>): Int = withContext(Dispatchers.IO) {
+    suspend fun indexMemories(memories: List<PermanentMemory>, session: MemorySession = MemoryAccountScope.capture()): Int = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         if (!MaxRuntimeManager.isMaxEnabled(appContext) || !settingsManager.isMaxEnabled || !settingsManager.isRagEnabled) {
             return@withContext 0
         }
-        val count = indexer.indexMemories(memories, getActiveProvider())
+        val scopedMemories = memories.map {
+            if (it.ownerKey == MemoryAccountScope.LEGACY) it.copy(ownerKey = session.ownerKey) else it
+        }
+        val count = indexer.indexMemories(scopedMemories, getActiveProvider(), session)
+        MemoryAccountScope.requireCurrent(session)
         settingsManager.ragLastIndexedTimestamp = System.currentTimeMillis()
         updateDiagnostics()
         count
     }
 
-    suspend fun deleteMemory(memoryId: String): Int = withContext(Dispatchers.IO) {
-        val count = indexer.deleteMemory(memoryId)
+    suspend fun deleteMemory(memoryId: String, session: MemorySession = MemoryAccountScope.capture()): Int = withContext(Dispatchers.IO) {
+        val count = indexer.deleteMemory(memoryId, session)
         updateDiagnostics()
         count
     }
 
-    suspend fun rebuildIndex(allMemories: List<PermanentMemory>): Int = withContext(Dispatchers.IO) {
-        val count = indexer.rebuildIndex(allMemories, getActiveProvider())
+    suspend fun rebuildIndex(allMemories: List<PermanentMemory>, session: MemorySession = MemoryAccountScope.capture()): Int = withContext(Dispatchers.IO) {
+        val scopedMemories = allMemories.map {
+            if (it.ownerKey == MemoryAccountScope.LEGACY) it.copy(ownerKey = session.ownerKey) else it
+        }
+        val count = indexer.rebuildIndex(scopedMemories, getActiveProvider(), session)
+        MemoryAccountScope.requireCurrent(session)
         settingsManager.ragLastIndexedTimestamp = System.currentTimeMillis()
         updateDiagnostics()
         count
     }
 
-    suspend fun clearIndex() = withContext(Dispatchers.IO) {
-        repository.clearAll()
+    suspend fun clearIndex(session: MemorySession = MemoryAccountScope.capture()) = withContext(Dispatchers.IO) {
+        repository.clearAll(session)
         updateDiagnostics()
     }
 
     fun updateDiagnostics() {
         scope.launch {
-            val totalChunks = repository.getChunkCount()
-            val totalMemories = repository.getIndexedMemoryCount()
+            val session = MemoryAccountScope.capture()
+            if (!MemoryAccountScope.isCurrent(session) || session.ownerKey == MemoryAccountScope.UNAVAILABLE) return@launch
+            val totalChunks = repository.getChunkCount(session)
+            val totalMemories = repository.getIndexedMemoryCount(session)
+            if (!MemoryAccountScope.isCurrent(session)) return@launch
             val provider = getActiveProvider()
 
             _diagnosticsFlow.value = RagDiagnostics(
@@ -226,6 +261,8 @@ class RagEngine private constructor(private val context: Context) {
     companion object {
         @Volatile
         private var instance: RagEngine? = null
+
+        fun invalidateCachedContextIfInitialized() { instance?.invalidateAccountContext() }
 
         fun getInstance(context: Context): RagEngine {
             return instance ?: synchronized(this) {

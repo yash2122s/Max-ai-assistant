@@ -2,6 +2,7 @@ package com.example.automation.tools
 
 import android.content.Context
 import com.example.automation.agent.UiTask
+import com.example.automation.agent.UiTaskResult
 import com.example.automation.agent.UiVerificationLoop
 import com.example.automation.engine.ExecutionRequest
 import com.example.automation.verification.RetryPolicy
@@ -30,6 +31,7 @@ class UiAgentTool : Tool {
     )
 
     override fun validate(request: ExecutionRequest): Boolean {
+        if (request.cancellationToken.isCancelled) return false
         val args = request.arguments
         val goal = args.get("goal")?.asString
             ?: args.get("task")?.asString
@@ -39,13 +41,23 @@ class UiAgentTool : Tool {
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
+        if (request.cancellationToken.isCancelled) {
+            return ToolResult(
+                success = false,
+                toolName = name,
+                errorCode = "CANCELLED",
+                message = "Task cancelled before UI Agent execution",
+                verificationRequired = true
+            )
+        }
+
         if (!com.example.core.lifecycle.MaxRuntimeManager.isMaxEnabled(context)) {
             return ToolResult(
                 success = false,
                 toolName = name,
                 message = "MAX is currently OFF.",
                 errorCode = "MAX_DISABLED",
-                verificationRequired = false
+                verificationRequired = true
             )
         }
 
@@ -59,30 +71,59 @@ class UiAgentTool : Tool {
         val maxSteps = args.get("max_steps")?.asInt ?: 8
 
         val task = UiTask(
+            id = request.taskId ?: java.util.UUID.randomUUID().toString(),
             goal = goal,
             targetPackage = targetPackage,
             maxSteps = maxSteps
         )
 
         val loop = UiVerificationLoop(context)
-        val result = loop.executeTask(task)
+        val result = loop.executeTask(task, request.cancellationToken)
 
-        val meta = JSONObject().apply {
-            put("steps", result.stepsExecuted)
-            put("provider", result.providerUsed)
-            put("model", result.modelUsed)
-            if (result.error != null) {
-                put("error", result.error)
-            }
+        return mapUiTaskResult(context, result)
+    }
+}
+
+internal fun mapUiTaskResult(context: Context, result: UiTaskResult): ToolResult {
+    val locallyVerifiedSuccess = result.success && result.completionVerified
+    val failureCode = when {
+        !result.success -> result.error ?: "EXECUTION_FAILED"
+        !result.completionVerified -> "UNVERIFIED_COMPLETION"
+        else -> null
+    }
+    val meta = JSONObject().apply {
+        put("steps", result.stepsExecuted)
+        put("provider", result.providerUsed)
+        put("model", result.modelUsed)
+        if (result.error != null) {
+            put("error", result.error)
         }
+    }
 
-        return ToolResult(
-            success = result.success,
-            toolName = name,
-            message = result.message,
-            errorCode = if (!result.success) (result.error ?: "EXECUTION_FAILED") else null,
-            metadata = meta,
-            verificationRequired = false
+    val verification = if (locallyVerifiedSuccess) {
+        com.example.automation.verification.VerificationResult(
+            success = true,
+            reason = result.message,
+            retryRecommended = false,
+            snapshot = com.example.automation.verification.DeviceContext.capture(context)
+        )
+    } else {
+        com.example.automation.verification.VerificationResult(
+            success = false,
+            reason = result.error ?: result.message,
+            retryRecommended = false,
+            snapshot = com.example.automation.verification.DeviceContext.capture(context)
         )
     }
+
+    return ToolResult(
+        success = locallyVerifiedSuccess,
+        toolName = "UI_AGENT_AUTOMATION",
+        message = result.message,
+        errorCode = failureCode,
+        metadata = meta,
+        verification = verification,
+        verificationRequired = true,
+        verified = locallyVerifiedSuccess
+    )
 }

@@ -16,8 +16,8 @@ object OfflineCommandEngine {
         Log.d(TAG, "Evaluating query for offline command match: '$query'")
 
         // 0. Pending Auto-Reply Confirmation Check
-        if (com.example.automation.AutoReplyController.hasPendingConfirmation()) {
-            val response = com.example.automation.AutoReplyController.handleVoiceConfirmationCommand(context, rawText)
+        if (com.example.features.whatsapp.AutoReplyController.hasPendingConfirmation()) {
+            val response = com.example.features.whatsapp.AutoReplyController.handleVoiceConfirmationCommand(context, rawText)
             if (response != null) {
                 Log.d(TAG, "Processed pending auto-reply voice response: '$response'")
                 return ToolResult(
@@ -231,6 +231,12 @@ object OfflineCommandEngine {
             }
         }
 
+        // 8.5. WhatsApp Screen Navigation (English, Telugu, Tanglish)
+        val waNavResult = parseAndExecuteWhatsAppNavigation(context, cleanedText)
+        if (waNavResult != null) {
+            return waNavResult
+        }
+
         // 9. WhatsApp Send Message & Chat Open Commands (English, Telugu, Tanglish) - Must precede Phone Call matching
         val waSendResult = parseAndExecuteWhatsApp(context, rawText, cleanedText)
         if (waSendResult != null) {
@@ -240,11 +246,17 @@ object OfflineCommandEngine {
         val waChatPattern1 = Regex("(.+?)\\s+(?:chat\\s+open\\s+chey|chat\\s+open\\s+cheyyi|chat\\s+open|chat\\s+chudu)")
         val waChatPattern2 = Regex("open\\s+(?:whatsapp\\s+)?chat\\s+(?:for|with|of)?\\s*(.+?)(?:\\s+on\\s+whatsapp)?$")
         val waChatPattern3 = Regex("open\\s+(.+?)\\s+chat(?:\\s+on\\s+whatsapp)?$")
+        val waChatPattern4 = Regex("^(?:whatsapp\\s+lo|వాట్సాప్‌లో|వాట్సాప్\\s+లో)\\s+(.+?)\\s*(?:ki)?\\s+(?:chat\\s+open\\s+chey|conversation\\s+open\\s+chey|చాట్\\s+ఓపెన్\\s+చెయ్)$", RegexOption.IGNORE_CASE)
         
-        val matchWaChat = waChatPattern1.find(cleanedText) ?: waChatPattern2.find(cleanedText) ?: waChatPattern3.find(cleanedText)
+        val matchWaChat = waChatPattern1.find(cleanedText) ?: waChatPattern2.find(cleanedText) ?: waChatPattern3.find(cleanedText) ?: waChatPattern4.find(cleanedText)
         if (matchWaChat != null) {
-            val contactName = matchWaChat.groupValues[1].trim()
-            if (contactName.isNotBlank() && contactName !in listOf("whatsapp", "telegram", "instagram", "app", "settings")) {
+            val rawContact = matchWaChat.groupValues[1].trim()
+            val contactName = rawContact
+                .replace(Regex("^(?:whatsapp\\s+lo|వాట్సాప్‌లో|whatsapp\\s+లో)\\s*", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\s+ki$", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("^(?:the|to|chat\\s+with|chat\\s+of)\\s+", RegexOption.IGNORE_CASE), "")
+                .trim()
+            if (contactName.isNotBlank() && contactName !in listOf("whatsapp", "telegram", "instagram", "app", "settings", "status", "calls", "chats", "communities")) {
                 Log.d(TAG, "Matched Offline Action: OPEN_WHATSAPP_CHAT ($contactName)")
                 val args = JsonObject().apply { addProperty("contact", contactName) }
                 val res = ExecutionEngine.execute(context, ExecutionRequest(action = "OPEN_WHATSAPP_CHAT", arguments = args))
@@ -263,6 +275,18 @@ object OfflineCommandEngine {
         val isExplicitWhatsAppCall = cleanedText.contains("on whatsapp") || cleanedText.contains("whatsapp call")
 
         if (!isMessagingUtterance || isExplicitWhatsAppCall) {
+            // Check for bare phone number input (e.g. "9640461271" or "49640461271")
+            val bareDigits = cleanedText.replace(Regex("[\\s()+\\-]"), "")
+            if (bareDigits.matches(Regex("^\\d{7,15}$"))) {
+                val args = JsonObject().apply {
+                    addProperty("contact", bareDigits)
+                    addProperty("phoneNumber", bareDigits)
+                }
+                Log.d(TAG, "Matched Bare Number Offline Action: CALL_PHONE ($bareDigits)")
+                val res = ExecutionEngine.execute(context, ExecutionRequest(action = "CALL_PHONE", arguments = args))
+                return if (res.message.isNullOrEmpty()) res.copy(message = "Calling $bareDigits...") else res
+            }
+
             val callPattern1 = Regex("^(?:call|dial|make\\s+a\\s+call\\s+to|phone)\\s+(.+)$", RegexOption.IGNORE_CASE)
             val callPattern2 = Regex("^(.+?)\\s*(?:ki\\s+)?(?:call\\s+chey|call\\s+cheyyi|phone\\s+chey|phone\\s+cheyyi)$", RegexOption.IGNORE_CASE)
             val callMatch1 = callPattern1.find(cleanedText)
@@ -427,14 +451,53 @@ object OfflineCommandEngine {
         return null
     }
 
+    private suspend fun parseAndExecuteWhatsAppNavigation(context: Context, cleanedText: String): ToolResult? {
+        val lower = cleanedText.trim()
+        val isWa = lower.contains("whatsapp") || lower.contains("వాట్సాప్")
+        if (!isWa) return null
+
+        val targetScreen = when {
+            lower.contains("status") || lower.contains("updates") || lower.contains("స్టేటస్") || lower.contains("అప్‌డేట్స్") -> "status"
+            lower.contains("calls") || lower.contains("call screen") || lower.contains("కాల్స్") -> "calls"
+            lower.contains("settings") || lower.contains("setting") || lower.contains("సెట్టింగ్స్") -> "settings"
+            lower.contains("communities") || lower.contains("community") || lower.contains("కమ్యూనిటీ") -> "communities"
+            lower.contains("new chat") || lower.contains("newchat") || lower.contains("న్యూ చాట్") -> "new_chat"
+            lower.contains("starred") || lower.contains("స్టార్డ్") -> "starred_messages"
+            lower.contains("linked") || lower.contains("లింక్డ్") -> "linked_devices"
+            lower.contains("chats") || lower.contains("chat list") || lower.contains("చాట్స్") -> "chats"
+            else -> null
+        } ?: return null
+
+        val isNavCommand = lower.contains("open") || lower.contains("ఓపెన్") ||
+            lower.contains("vellu") || lower.contains("వెళ్ళు") || lower.contains("వెళ్లు") ||
+            lower.contains("go to") || lower.contains("show") || lower.contains("చూపు") ||
+            lower.endsWith("ki") || lower.endsWith("screen") ||
+            lower.matches(Regex("^(?:open\\s+)?(?:whatsapp|వాట్సాప్)\\s+(?:status|updates|calls|settings|communities|new\\s+chat|starred\\s+messages|linked\\s+devices|chats|స్టేటస్|కాల్స్|సెట్టింగ్స్)$", RegexOption.IGNORE_CASE))
+
+        if (isNavCommand) {
+            Log.d(TAG, "Matched Offline Action: NAVIGATE_WHATSAPP ($targetScreen)")
+            val args = JsonObject().apply { addProperty("screen", targetScreen) }
+            val res = ExecutionEngine.execute(context, ExecutionRequest(action = "NAVIGATE_WHATSAPP", arguments = args))
+            return if (res.message.isNullOrEmpty()) res.copy(message = "Navigating to WhatsApp $targetScreen...") else res
+        }
+        return null
+    }
+
     private suspend fun parseAndExecuteWhatsApp(context: Context, rawText: String, cleanedText: String): ToolResult? {
         val lower = cleanedText.trim()
 
-        // 1. Tanglish / Telugu: "whatsapp lo <contact> ki <msg> ani (message) pettu" / "<contact> ki whatsapp lo <msg> ani (message) pettu"
-        val tanglishWa1 = Regex("^(?:whatsapp\\s+lo|వాట్సాప్‌లో)\\s+(.+?)\\s+ki\\s+(.+?)\\s*(?:ani|ane|అని|అనే)?\\s*(?:message|msg|మెసేజ్)?\\s*(?:pettu|pettandi|chey|cheyyi|పెట్టు|పంపు)$", RegexOption.IGNORE_CASE)
-        val tanglishWa2 = Regex("^(.+?)\\s+ki\\s+(?:whatsapp\\s+lo|వాట్సాప్‌లో|whatsapp\\s+message|వాట్సాప్)\\s+(.+?)\\s*(?:ani|ane|అని|అనే)?\\s*(?:message|msg|మెసేజ్)?\\s*(?:pettu|pettandi|chey|cheyyi|పెట్టు|పంపు)$", RegexOption.IGNORE_CASE)
-        val tanglishWa3 = Regex("^(?:whatsapp\\s+lo|వాట్సాప్‌లో)\\s+(.+?)\\s*(?:ki)?\\s+(?:message|msg|మెసేజ్)\\s*(?:pettu|chey):?\\s*(.+)$", RegexOption.IGNORE_CASE)
-        val tanglishWa4 = Regex("^(.+?)\\s+ki\\s+(?:message|msg|మెసేజ్)\\s*(?:pettu|chey):?\\s*(.+)$", RegexOption.IGNORE_CASE)
+        // 1. Tanglish / Telugu:
+        // "whatsapp lo <contact> ki <msg> ani (message) (pettu|chey|pampu|rayi)"
+        // "<contact> ki whatsapp lo <msg> ani (message) (pettu|chey|pampu|rayi)"
+        val verbGroup = "(?:pettu|pettandi|chey|cheyyi|pampu|pampinchu|rayi|rayandi|cheppu|పెట్టు|పంపు|రాయి|రాయండి|చెప్పు)"
+        val msgSuffix = "(?:message|msg|మెసేజ్|text|టెక్స్ట్)?"
+        val markerGroup = "(?:ani|ane|అని|అనే)?"
+
+        val tanglishWa1 = Regex("^(?:whatsapp\\s+lo|వాట్సాప్‌లో|వాట్సాప్\\s+లో)\\s+(.+?)\\s+ki\\s+(.+?)\\s*$markerGroup\\s*$msgSuffix\\s*$verbGroup$", RegexOption.IGNORE_CASE)
+        val tanglishWa2 = Regex("^(.+?)\\s+ki\\s+(?:whatsapp\\s+lo|వాట్సాప్‌లో|వాట్సాప్\\s+లో|whatsapp\\s+message|వాట్సాప్)\\s+(.+?)\\s*$markerGroup\\s*$msgSuffix\\s*$verbGroup$", RegexOption.IGNORE_CASE)
+        val tanglishWa3 = Regex("^(?:whatsapp\\s+lo|వాట్సాప్‌లో|వాట్సాప్\\s+లో)\\s+(.+?)\\s*(?:ki)?\\s+(?:message|msg|మెసేజ్|text|cheppu|pampu|pettu|chey)\\s*(?:pettu|chey|pampu)?:?\\s+(.+)$", RegexOption.IGNORE_CASE)
+        val tanglishWa4 = Regex("^(.+?)\\s+ki\\s+(?:message|msg|మెసేజ్|whatsapp|వాట్సాప్)\\s*(?:pettu|chey|pampu)?:?\\s+(.+)$", RegexOption.IGNORE_CASE)
+        val tanglishWa5 = Regex("^(?:whatsapp\\s+lo|వాట్సాప్‌లో|వాట్సాప్\\s+లో)\\s+(.+?)\\s+ki\\s+(.+?)\\s+$verbGroup$", RegexOption.IGNORE_CASE)
 
         // 2. English: "send (a) whatsapp message to <contact> saying <msg>" / "send message to <contact> on whatsapp: <msg>"
         val engWa1 = Regex("^(?:send\\s+(?:a\\s+)?(?:whatsapp\\s+)?message\\s+to|send\\s+whatsapp\\s+to|message|text)\\s+(.+?)\\s+(?:saying|that|as|with\\s+text|message|msg|:)\\s+(.+)$", RegexOption.IGNORE_CASE)
@@ -444,15 +507,27 @@ object OfflineCommandEngine {
         val match = tanglishWa1.find(lower)
             ?: tanglishWa2.find(lower)
             ?: tanglishWa3.find(lower)
+            ?: tanglishWa5.find(lower)
             ?: tanglishWa4.find(lower)
             ?: engWa1.find(lower)
             ?: engWa2.find(lower)
             ?: engWa3.find(lower)
 
         if (match != null) {
-            val contact = match.groupValues[1].replace(Regex("^(?:the|to)\\s+", RegexOption.IGNORE_CASE), "").trim()
-            val message = match.groupValues[2].replace(Regex("^(?:saying|that|text|as)\\s+", RegexOption.IGNORE_CASE), "").trim()
-            if (contact.isNotBlank() && message.isNotBlank() && contact !in listOf("chat", "open", "message", "msg", "app")) {
+            val rawContact = match.groupValues[1]
+            val rawMsg = match.groupValues[2]
+
+            val contact = rawContact
+                .replace(Regex("^(?:the|to|whatsapp\\s+lo|వాట్సాప్‌లో|whatsapp\\s+లో)\\s*", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\s+ki$", RegexOption.IGNORE_CASE), "")
+                .trim()
+            val message = rawMsg
+                .replace(Regex("^(?:saying|that|text|as|ani|ane)\\s+", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("\\s*(?:ani|ane|అని|అనే)\\s*$", RegexOption.IGNORE_CASE), "")
+                .trim()
+
+            val reserved = listOf("chat", "open", "message", "msg", "app", "status", "calls", "settings", "communities")
+            if (contact.isNotBlank() && message.isNotBlank() && contact !in reserved) {
                 Log.d(TAG, "Matched Offline Action: SEND_WHATSAPP ($contact, '$message')")
                 val args = JsonObject().apply {
                     addProperty("contact", contact)

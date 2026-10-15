@@ -5,6 +5,8 @@ import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
 import com.example.automation.core.actions.GenericAction
 import com.example.automation.core.actions.GenericActionType
+import com.example.automation.models.TargetResolutionMethod
+import com.example.automation.models.UiTarget
 import com.example.service.AccessibilityTreePruner
 import com.example.service.IndexedUiElement
 import com.example.service.JarvisAccessibilityService
@@ -373,6 +375,51 @@ object ScreenGroundingEngine {
             }
         }
 
+        // 8. Priority 8: Dual-Anchor Proximity Fallback (Jarvis pattern)
+        // If an informative label matches the target text but is NOT clickable,
+        // find the closest interactive sibling/neighbor (checkbox, switch, or button) within 250px.
+        val nonInteractiveMatches = allNodes.filter { node ->
+            val label = (node.text?.toString() ?: node.contentDescription?.toString() ?: "").trim()
+            label.contains(trimmedTarget, ignoreCase = true) || trimmedTarget.contains(label, ignoreCase = true)
+        }
+        if (nonInteractiveMatches.isNotEmpty()) {
+            val anchorNode = nonInteractiveMatches.first()
+            val anchorBounds = android.graphics.Rect().also {
+                try { anchorNode.getBoundsInScreen(it) } catch (_: Exception) {}
+            }
+            val interactiveNodes = allNodes.filter { it.isClickable || it.isCheckable || it.isFocusable }
+            val nearestInteractive = interactiveNodes.filter { candidate ->
+                candidate != anchorNode && candidate.isVisibleToUser && candidate.isEnabled
+            }.minByOrNull { candidate ->
+                val candBounds = android.graphics.Rect().also {
+                    try { candidate.getBoundsInScreen(it) } catch (_: Exception) {}
+                }
+                val dy = kotlin.math.abs(candBounds.centerY() - anchorBounds.centerY())
+                val dx = kotlin.math.abs(candBounds.centerX() - anchorBounds.centerX())
+                dy * 2 + dx
+            }
+
+            if (nearestInteractive != null) {
+                val candBounds = android.graphics.Rect().also {
+                    try { nearestInteractive.getBoundsInScreen(it) } catch (_: Exception) {}
+                }
+                val dy = kotlin.math.abs(candBounds.centerY() - anchorBounds.centerY())
+                if (dy <= 250) {
+                    Log.d("UI_MATCH", "[UI_MATCH] dual_anchor_interactive near=\"${anchorNode.text}\" priority=8 confidence=0.85")
+                    return ScreenGroundingResult(
+                        status = GroundingStatus.FOUND,
+                        matchedNode = nearestInteractive,
+                        metadata = extractMetadata(nearestInteractive),
+                        confidence = 0.85f,
+                        matchPriority = 8,
+                        reason = "Dual-anchor interactive element near label '${anchorNode.text ?: anchorNode.contentDescription}'",
+                        candidateCount = 1,
+                        target = target
+                    )
+                }
+            }
+        }
+
         Log.w(TAG, "[UI_GROUND] Target \"$target\" NOT FOUND in current accessibility tree.")
         return ScreenGroundingResult(
             status = GroundingStatus.NOT_FOUND,
@@ -456,9 +503,27 @@ object ScreenGroundingEngine {
             val hasText = !node.text.isNullOrBlank()
             val hasDesc = !node.contentDescription.isNullOrBlank()
             val hasResId = !node.viewIdResourceName.isNullOrBlank()
-            val isInteractive = node.isClickable || node.isFocusable || node.isEditable || node.isScrollable || node.isCheckable
 
-            if (hasText || hasDesc || hasResId || isInteractive) {
+            // JARVIS migration: Parent-child clickable inheritance
+            var p = node.parent
+            var parentClickable = false
+            var pDepth = 0
+            while (p != null && pDepth < 3) {
+                if (p.isClickable) {
+                    parentClickable = true
+                    break
+                }
+                p = p.parent
+                pDepth++
+            }
+            val isInteractive = node.isClickable || parentClickable || node.isFocusable || node.isEditable || node.isScrollable || node.isCheckable
+
+            // JARVIS migration: coalesce descendant text for clickable rows
+            val coalescedText = if (!hasText && !hasDesc && (node.isClickable || parentClickable) && node.childCount > 0) {
+                collectNodeText(node).joinToString(" • ").takeIf { it.isNotBlank() }
+            } else null
+
+            if (hasText || hasDesc || hasResId || isInteractive || coalescedText != null) {
                 result.add(node)
             }
         }
@@ -466,6 +531,72 @@ object ScreenGroundingEngine {
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             collectActiveNodes(child, result, depth + 1)
+        }
+    }
+
+    /** JARVIS migration — coalesce descendant text for clickable rows. */
+    fun collectNodeText(node: AccessibilityNodeInfo, depth: Int = 0): List<String> {
+        if (depth > 3) return emptyList()
+        val list = mutableListOf<String>()
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val ct = child.text?.toString()?.trim()
+                ?: child.contentDescription?.toString()?.trim()
+                ?: ""
+            if (ct.isNotBlank() && !list.contains(ct)) list.add(ct)
+            if (child.childCount > 0) list.addAll(collectNodeText(child, depth + 1))
+        }
+        return list
+    }
+
+    /**
+     * JARVIS migration — scanTargets converts active nodes to rich UiTarget models.
+     */
+    fun scanTargets(root: AccessibilityNodeInfo?): List<UiTarget> {
+        if (root == null) return emptyList()
+        val nodes = mutableListOf<AccessibilityNodeInfo>()
+        collectActiveNodes(root, nodes)
+        return nodes.mapNotNull { node ->
+            val bounds = Rect().also { node.getBoundsInScreen(it) }
+            if (bounds.width() <= 0 || bounds.height() <= 0) return@mapNotNull null
+            var text = node.text?.toString()?.trim()
+            val desc = node.contentDescription?.toString()?.trim()
+
+            var p = node.parent
+            var parentClickable = false
+            var pDepth = 0
+            while (p != null && pDepth < 3) {
+                if (p.isClickable) {
+                    parentClickable = true
+                    break
+                }
+                p = p.parent
+                pDepth++
+            }
+            val effectiveClickable = node.isClickable || parentClickable
+
+            if (text.isNullOrBlank() && desc.isNullOrBlank() && effectiveClickable && node.childCount > 0) {
+                val childTexts = collectNodeText(node)
+                if (childTexts.isNotEmpty()) {
+                    text = childTexts.joinToString(" • ")
+                }
+            }
+            UiTarget(
+                resourceId = node.viewIdResourceName,
+                text = text,
+                contentDescription = desc,
+                role = node.className?.toString(),
+                bounds = bounds,
+                confidence = 1.0f,
+                method = TargetResolutionMethod.RESOURCE_ID,
+                className = node.className?.toString() ?: "",
+                viewId = node.viewIdResourceName ?: "",
+                isClickable = effectiveClickable,
+                isCheckable = node.isCheckable,
+                isChecked = node.isChecked,
+                isEditable = node.isEditable,
+                isScrollable = node.isScrollable
+            )
         }
     }
 

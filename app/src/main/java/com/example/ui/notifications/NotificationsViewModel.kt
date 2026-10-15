@@ -20,6 +20,11 @@ class NotificationsViewModel(application: Application) : AndroidViewModel(applic
     private val _isWhatsAppAutoReplyEnabled = MutableStateFlow(settingsManager.isWhatsAppAutoReplyEnabled)
     private val _isAiFallbackEnabled = MutableStateFlow(settingsManager.isAiFallbackEnabled)
     private val _quickReplies = MutableStateFlow(settingsManager.quickReplies)
+    private val _whatsappAutoReplyScope = MutableStateFlow(settingsManager.whatsappAutoReplyScope)
+    private val _selectedContacts = MutableStateFlow(settingsManager.whatsappSelectedContacts)
+    private val _availableDeviceContacts = MutableStateFlow<List<com.example.automation.contact.Contact>>(emptyList())
+    private val _isContactPickerOpen = MutableStateFlow(false)
+    private val _contactSearchQuery = MutableStateFlow("")
     private val _isCreatingRule = MutableStateFlow(false)
     private val _selectedRuleForEdit = MutableStateFlow<AutoReplyRule?>(null)
 
@@ -30,29 +35,71 @@ class NotificationsViewModel(application: Application) : AndroidViewModel(applic
         val isAutoReplyEnabled: Boolean,
         val isWhatsAppAutoReplyEnabled: Boolean,
         val isAiFallbackEnabled: Boolean,
-        val quickReplies: String
+        val quickReplies: String,
+        val whatsappAutoReplyScope: String,
+        val selectedContacts: Set<String>
     )
+
+    private data class WhatsAppScopeTuple(
+        val scope: String,
+        val contacts: Set<String>
+    )
+
+    private val _whatsAppScopeFlow = combine(
+        _whatsappAutoReplyScope,
+        _selectedContacts
+    ) { scope, contacts ->
+        WhatsAppScopeTuple(scope, contacts)
+    }
 
     private val _settingsFlow = combine(
         _isAutoReplyEnabled,
         _isWhatsAppAutoReplyEnabled,
         _isAiFallbackEnabled,
-        _quickReplies
-    ) { autoReply, waAutoReply, aiFallback, replies ->
-        NotificationSettingsTuple(autoReply, waAutoReply, aiFallback, replies)
+        _quickReplies,
+        _whatsAppScopeFlow
+    ) { autoReply, waAutoReply, aiFallback, replies, waScope ->
+        NotificationSettingsTuple(
+            isAutoReplyEnabled = autoReply,
+            isWhatsAppAutoReplyEnabled = waAutoReply,
+            isAiFallbackEnabled = aiFallback,
+            quickReplies = replies,
+            whatsappAutoReplyScope = waScope.scope,
+            selectedContacts = waScope.contacts
+        )
+    }
+
+    private data class PickerUiTuple(
+        val availableDeviceContacts: List<com.example.automation.contact.Contact>,
+        val isContactPickerOpen: Boolean,
+        val contactSearchQuery: String
+    )
+
+    private val _pickerFlow = combine(
+        _availableDeviceContacts,
+        _isContactPickerOpen,
+        _contactSearchQuery
+    ) { contacts, isOpen, query ->
+        PickerUiTuple(contacts, isOpen, query)
     }
 
     val uiState: StateFlow<NotificationsUiState> = combine(
         _settingsFlow,
+        _pickerFlow,
         dao.getAllRulesFlow(),
         _isCreatingRule,
         _selectedRuleForEdit
-    ) { settings, rules, creating, editRule ->
+    ) { settings, picker, rules, creating, editRule ->
         NotificationsUiState(
             isAutoReplyEnabled = settings.isAutoReplyEnabled,
             isWhatsAppAutoReplyEnabled = settings.isWhatsAppAutoReplyEnabled,
             isAiFallbackEnabled = settings.isAiFallbackEnabled,
             quickReplies = settings.quickReplies,
+            whatsappAutoReplyScope = settings.whatsappAutoReplyScope,
+            selectedContacts = settings.selectedContacts,
+            availableDeviceContacts = picker.availableDeviceContacts,
+            isContactPickerOpen = picker.isContactPickerOpen,
+            contactSearchQuery = picker.contactSearchQuery,
             rules = rules,
             isCreatingRule = creating,
             selectedRuleForEdit = editRule,
@@ -72,6 +119,47 @@ class NotificationsViewModel(application: Application) : AndroidViewModel(applic
     fun toggleWhatsAppAutoReply(enabled: Boolean) {
         _isWhatsAppAutoReplyEnabled.value = enabled
         settingsManager.isWhatsAppAutoReplyEnabled = enabled
+    }
+
+    fun setWhatsAppAutoReplyScope(scope: String) {
+        _whatsappAutoReplyScope.value = scope
+        settingsManager.whatsappAutoReplyScope = scope
+    }
+
+    fun addSelectedContact(contact: String) {
+        val trimmed = contact.trim()
+        if (trimmed.isBlank()) return
+        val current = _selectedContacts.value.toMutableSet()
+        if (current.add(trimmed)) {
+            _selectedContacts.value = current
+            settingsManager.whatsappSelectedContacts = current
+        }
+    }
+
+    fun removeSelectedContact(contact: String) {
+        val current = _selectedContacts.value.toMutableSet()
+        if (current.remove(contact.trim())) {
+            _selectedContacts.value = current
+            settingsManager.whatsappSelectedContacts = current
+        }
+    }
+
+    fun openContactPicker() {
+        _isContactPickerOpen.value = true
+        _contactSearchQuery.value = ""
+        viewModelScope.launch(Dispatchers.IO) {
+            val contacts = com.example.automation.contact.ContactResolver.getDeviceContacts(getApplication())
+            _availableDeviceContacts.value = contacts
+        }
+    }
+
+    fun closeContactPicker() {
+        _isContactPickerOpen.value = false
+        _contactSearchQuery.value = ""
+    }
+
+    fun updateContactSearchQuery(query: String) {
+        _contactSearchQuery.value = query
     }
 
     fun toggleAiFallback(enabled: Boolean) {

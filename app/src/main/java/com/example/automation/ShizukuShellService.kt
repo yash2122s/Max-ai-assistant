@@ -7,6 +7,10 @@ import java.io.OutputStream
 
 class ShizukuShellService : IShizukuShell.Stub() {
     override fun runCommand(command: String): String {
+        if (!com.example.automation.computeruse.ShellCommandPolicy.isCommandAllowed(command)) {
+            android.util.Log.w("ShizukuShellService", "[SHELL_POLICY_BLOCKED] Command blocked by security policy: '$command'")
+            return "Error: Command blocked by security policy"
+        }
         android.util.Log.d("ShizukuShellService", "Executing command: $command")
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
@@ -32,12 +36,16 @@ class ShizukuShellService : IShizukuShell.Stub() {
     }
 
     override fun runCommandBytes(command: String): ByteArray {
+        if (!com.example.automation.computeruse.ShellCommandPolicy.isCommandAllowed(command)) {
+            android.util.Log.w("ShizukuShellService", "[SHELL_POLICY_BLOCKED] Byte command blocked by security policy: '$command'")
+            return ByteArray(0)
+        }
         android.util.Log.d("ShizukuShellService", "Executing byte command: $command")
         return try {
             val process = Runtime.getRuntime().exec(arrayOf("sh", "-c", command))
             val bytes = process.inputStream.readBytes()
-            process.waitFor()
-            bytes
+            val exitCode = process.waitFor()
+            if (exitCode == 0) bytes else ByteArray(0)
         } catch (e: Exception) {
             android.util.Log.e("ShizukuShellService", "Error reading bytes from command: $command", e)
             ByteArray(0)

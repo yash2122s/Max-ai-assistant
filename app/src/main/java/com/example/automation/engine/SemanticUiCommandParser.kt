@@ -66,8 +66,8 @@ data class SemanticUiCommand(
 object SemanticUiCommandParser {
 
     private val ACTION_VERBS = setOf(
-        "tap", "click", "press", "select", "hit", "touch", "find", "search", "type", "write", "enter", "input", "wait", "pause", "stay", "verify",
-        "నొక్కు", "ట్యాప్", "వెతుకు", "రాయి", "టైప్", "శోధించు", "ఆగు"
+        "tap", "click", "press", "select", "hit", "touch", "find", "search", "type", "write", "enter", "input", "wait", "pause", "stay", "verify", "sleep", "delay",
+        "నొక్కు", "ట్యాప్", "వెతుకు", "రాయి", "టైప్", "శోధించు", "ఆగు", "వెయిట్", "aagu", "aagali"
     )
 
     // 1. Tanglish / Telugu Compound App Search ("Google maps open chesi Palakollu ane search chey", "YouTube open chesi songs search chey")
@@ -290,7 +290,7 @@ object SemanticUiCommandParser {
      * Preserves exact sequence and duplicate actions.
      */
     private fun parseMultiClauseSequence(input: String): SemanticUiCommand? {
-        val rawClauses = input.split(Regex("(?:,|\\s+(?:then|and then|తర్వాత)\\s+|\\s+(?:and|మరియు|అలాగే)\\s+(?=(?:tap|click|press|select|hit|touch|type|write|enter|input|find|search|play|watch|open|directions|wait|pause|stay|verify|నొక్కు|ట్యాప్|రాయి|టైప్|ఆగు)\\b))", RegexOption.IGNORE_CASE))
+        val rawClauses = input.split(Regex("(?:,|\\s+(?:then|and then|తర్వాత)\\s+|\\s+(?:and|మరియు|అలాగే)\\s+(?=(?:tap|click|press|select|hit|touch|type|write|enter|input|find|search|play|watch|open|directions|wait|pause|stay|verify|నొక్కు|ట్యాప్|రాయి|టైప్|ఆగు)\\b)|\\s+(?:chesi|చేసి|cheyyi|చేయి|chey|చేయ్)\\s+(?=(?:tap|click|press|select|hit|touch|type|write|enter|input|find|search|play|watch|open|directions|wait|pause|stay|verify|search bar|నొక్కు|ట్యాప్|రాయి|టైప్|ఆగు|సెర్చ్)\\b|(?:[a-zA-Z0-9_\\u0C00-\\u0C7F]+(?:\\s+[a-zA-Z0-9_\\u0C00-\\u0C7F]+)?\\s*(?:meeda|పై|మీద|లో|lo|కి|ki|ane|ani|అని|అనే)?\\s*(?:tap|click|press|type|write|రాయి|టైప్|నొక్కు|ట్యాప్|క్లిక్)\\b)))", RegexOption.IGNORE_CASE))
             .map { it.trim() }
             .filter { it.isNotBlank() }
 
@@ -300,8 +300,8 @@ object SemanticUiCommandParser {
         var appName: String? = null
 
         for (clause in rawClauses) {
-            // Strip leading "and " or filler
-            val cleanClause = clause.replace(Regex("^(?:and|మరియు|అలాగే)\\s+", RegexOption.IGNORE_CASE), "").trim()
+            // Strip leading "and ", "then ", "chesi ", etc.
+            val cleanClause = clause.replace(Regex("^(?:and then|then|and|తర్వాత|మరియు|అలాగే|chesi|చేసి)\\s+", RegexOption.IGNORE_CASE), "").trim()
             val single = parseSingleClause(cleanClause)
             if (single != null) {
                 if (single.action == "OPEN_APP" && appName == null) {
@@ -336,11 +336,22 @@ object SemanticUiCommandParser {
         val trimmed = clause.trim()
         if (trimmed.isBlank()) return null
 
-        // Pattern 0c: Wait action ("wait", "wait for ui", "wait for composer", "pause", "stay")
-        val waitMatch = Regex("^(?:wait|stay|pause)(?:\\s+for\\s+(?:the\\s+)?(.+))?$", RegexOption.IGNORE_CASE).find(trimmed)
+        // Pattern 0c: Wait action ("wait", "wait for ui", "wait 10 seconds", "pause", "stay")
+        val waitMatch = Regex("^(?:wait|stay|pause)(?:\\s+(?:for\\s+)?(?:the\\s+)?(.+))?$", RegexOption.IGNORE_CASE).find(trimmed)
         if (waitMatch != null) {
             val waitTarget = waitMatch.groupValues[1].trim().ifBlank { "composer" }
             return ParsedAction("WAIT", target = waitTarget)
+        }
+
+        // Pattern 0d: Flashlight actions
+        val flashlightOnMatch = Regex("^(?:turn\\s+on|switch\\s+on)\\s+(?:the\\s+)?(?:flashlight|torch)|(?:flashlight|torch)\\s+on|(?:ఫ్లాష్‌లైట్|టార్చ్)\\s+ఆన్(?:\\s*చేయి)?$", RegexOption.IGNORE_CASE).matches(trimmed)
+        if (flashlightOnMatch) {
+            return ParsedAction("FLASHLIGHT_ON")
+        }
+
+        val flashlightOffMatch = Regex("^(?:turn\\s+off|switch\\s+off)\\s+(?:the\\s+)?(?:flashlight|torch)|(?:flashlight|torch)\\s+off|(?:ఫ్లాష్‌లైట్|టార్చ్)\\s+ఆఫ్(?:\\s*చేయి)?$", RegexOption.IGNORE_CASE).matches(trimmed)
+        if (flashlightOffMatch) {
+            return ParsedAction("FLASHLIGHT_OFF")
         }
 
         // Pattern 0a: Play action ("play the video", "play it", "play", "watch the video")
@@ -355,7 +366,24 @@ object SemanticUiCommandParser {
             return ParsedAction("CLICK", target = "Directions")
         }
 
-        // Pattern 1: App launch or UI Element open ("Open Calculator", "Launch Settings", "open the first result", "open first video", "open Message")
+        // Pattern 1: System actions (Back / Home)
+        val backSet = setOf(
+            "back", "go back", "press back", "then go back", "back vellu", "venakki vellu", "venakki po", "venakki",
+            "వెనక్కి", "వెనక్కి వెళ్ళు", "వెనక్కి పో", "వెనుకకు వెళ్ళు", "గో బ్యాక్", "బ్యాక్"
+        )
+        if (trimmed.lowercase() in backSet) {
+            return ParsedAction("SYSTEM", target = "back")
+        }
+
+        val homeSet = setOf(
+            "home", "go home", "go to home", "go to homescreen", "go to home screen", "home screen", "homescreen",
+            "హోమ్", "హోం", "హోమ్ స్క్రీన్"
+        )
+        if (trimmed.lowercase() in homeSet) {
+            return ParsedAction("SYSTEM", target = "home")
+        }
+
+        // Pattern 2: App launch or UI Element open ("Open Calculator", "Launch Settings", "open the first result", "open first video", "open Message")
         val openMatch = Regex("^(?:open|launch|start|go to|ఓపెన్|స్టార్ట్|తెరువు)\\s+(?:the\\s+)?(.+)$", RegexOption.IGNORE_CASE).find(trimmed)
         if (openMatch != null) {
             val raw = openMatch.groupValues[1].trim()
@@ -371,23 +399,6 @@ object SemanticUiCommandParser {
             if (app.isNotBlank() && !containsActionVerb(app)) {
                 return ParsedAction("OPEN_APP", target = app)
             }
-        }
-
-        // Pattern 2: System actions (Back: "go back", "back", "press back", "venakki vellu", "venakki po", "venakki", "వెనక్కి", "గో బ్యాక్", "వెనుకకు వెళ్ళు")
-        val backSet = setOf(
-            "back", "go back", "press back", "then go back", "back vellu", "venakki vellu", "venakki po", "venakki",
-            "వెనక్కి", "వెనక్కి వెళ్ళు", "వెనక్కి పో", "వెనుకకు వెళ్ళు", "గో బ్యాక్", "బ్యాక్"
-        )
-        if (trimmed.lowercase() in backSet) {
-            return ParsedAction("SYSTEM", target = "back")
-        }
-
-        val homeSet = setOf(
-            "home", "go home", "go to home", "go to homescreen", "go to home screen", "home screen", "homescreen",
-            "హోమ్", "హోం", "హోమ్ స్క్రీన్"
-        )
-        if (trimmed.lowercase() in homeSet) {
-            return ParsedAction("SYSTEM", target = "home")
         }
 
         // Pattern 3: Press Enter ("press enter", "hit enter", "press done", "enter", "submit", "enter chey", "enter kottu", "enter press chey", "ఎంటర్ కొట్టు", "ఎంటర్ చేయి")
@@ -650,17 +661,27 @@ object SemanticUiCommandParser {
     }
 
     private fun cleanElementTarget(rawTarget: String): String {
-        return rawTarget
+        val clean = rawTarget
             .replace(Regex("^(?:on|for|the|an|a|button|icon|tab|option|meeda|పై|మీద|లో)\\s+", RegexOption.IGNORE_CASE), "")
             .replace(Regex("\\s*(?:button|icon|tab|option|meeda|పై|మీద|లో|lo|ni|nu|ని|ను)$", RegexOption.IGNORE_CASE), "")
             .trim()
+        if (clean.equals("search bar", ignoreCase = true) ||
+            clean.equals("search box", ignoreCase = true) ||
+            clean.equals("search icon", ignoreCase = true) ||
+            clean.equals("సెర్చ్ బార్", ignoreCase = true) ||
+            clean.equals("సెర్చ్ ఐకాన్", ignoreCase = true)) {
+            return "Search"
+        }
+        return clean
     }
 
     private fun cleanSearchQuery(rawQuery: String): String {
         return rawQuery
+            .replace(Regex("^(?:search bar|search icon|search button|సెర్చ్ బార్|సెర్చ్ ఐకాన్|సెర్చ్ బటన్|సెర్చ్|search)\\s*(?:lo|loki|meeda|పై|మీద|లో|లోకి|ని|ను|ni|nu)?\\s*(?:click|tap|open|క్లిక్|ట్యాప్|ఓపెన్)?\\s*(?:chesi|చేసి|cheyyi|చేయి|chey|చేయ్)?\\s*", RegexOption.IGNORE_CASE), "")
             .replace(Regex("^(?:in|on|into|inside|in the|on the|సెర్చ్ బార్ లో|సెర్చ్ బార్ లోకి|సెర్చ్ లో|search bar lo|search bar loki|search lo)\\s+", RegexOption.IGNORE_CASE), "")
             .replace(Regex("^(?:for|the|a|an|text|query)\\s+", RegexOption.IGNORE_CASE), "")
             .replace(Regex("\\s*(?:ane|ani|ni|nu|kosam|gurinchi|lo|అని|అనే|ని|ను|కోసం|గురించి|లో)$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s*(?:ane|ani|ni|nu|అని|అనే)?\\s*(?:type|write|రాయి|రాయండి|టైప్)(?:\\s*(?:chey|cheyi|cheyyi|cheyandi|cheyyandi|చేయి|చేయ్|చేయండి))?$", RegexOption.IGNORE_CASE), "")
             .trim()
     }
 }

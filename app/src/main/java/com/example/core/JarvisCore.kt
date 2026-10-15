@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.data.local.AppDatabase
 import com.example.data.local.ChatMessage
+import com.example.memory.account.MemoryAccountScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -29,13 +30,15 @@ object JarvisCore {
     val responses = _responses.asSharedFlow()
 
     fun processCommand(context: Context, text: String, source: InputSource) {
+        val session = MemoryAccountScope.capture()
         scope.launch {
             try {
-                Log.d(TAG, "Processing command from $source: $text")
+                MemoryAccountScope.requireCurrent(session)
                 
                 // Save user message to UI database locally
                 val db = AppDatabase.getDatabase(context)
-                db.chatMessageDao().insertMessage(ChatMessage(sender = "user", text = text))
+                db.chatMessageDao().insertMessage(ChatMessage(sender = "user", text = text, ownerKey = session.ownerKey))
+                MemoryAccountScope.requireCurrent(session)
                 
                 val settings = com.example.data.preferences.SettingsManager(context)
                 if (settings.isLocalAiMode) {
@@ -52,8 +55,10 @@ object JarvisCore {
                         }
                         put("payload", payloadObj)
                     }
-                    com.example.telegram.CloudSocketManager.sendMessage(payload.toString())
+                    com.example.features.telegram.CloudSocketManager.sendMessage(payload.toString())
                 }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing command", e)
                 emitResponse(JarvisResponse("Sorry, I encountered an error processing that request.", source, false))
@@ -62,12 +67,14 @@ object JarvisCore {
     }
     
     fun processServerResponse(context: Context, text: String) {
+        val session = MemoryAccountScope.capture()
         scope.launch {
+            MemoryAccountScope.requireCurrent(session)
             // Save Jarvis response to UI database locally
             val db = AppDatabase.getDatabase(context)
-            db.chatMessageDao().insertMessage(ChatMessage(sender = "jarvis", text = text))
+            db.chatMessageDao().insertMessage(ChatMessage(sender = "jarvis", text = text, ownerKey = session.ownerKey))
             
-            emitResponse(JarvisResponse(text, InputSource.CHAT, false))
+            if (MemoryAccountScope.isCurrent(session)) emitResponse(JarvisResponse(text, InputSource.CHAT, false))
         }
     }
 
@@ -76,7 +83,7 @@ object JarvisCore {
         if (response.source == InputSource.VOICE || response.source == InputSource.HUD || response.source == InputSource.CHAT) {
             Log.d(TAG, "Speak placeholder for: ${response.text}")
         } else if (response.source == InputSource.TELEGRAM) {
-            com.example.telegram.CloudSocketManager.sendReply(response.text)
+            com.example.features.telegram.CloudSocketManager.sendReply(response.text)
         }
     }
 }

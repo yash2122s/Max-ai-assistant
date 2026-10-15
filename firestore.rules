@@ -11,6 +11,32 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
+    // License timestamps are Firestore timestamps. A trial lasts at most three
+    // server-relative days; lifetime activation references a 64-char key hash.
+    function validLicenseIdentity(data, userId) {
+      return data.userId == userId
+        && data.plan is string && data.status is string
+        && data.updatedAt == request.time;
+    }
+
+    function validInitialTrial(data) {
+      return data.trialStartedAt == request.time
+        && data.issuedAt == request.time
+        && data.trialExpiresAt is timestamp
+        && data.trialExpiresAt > request.time
+        && data.trialExpiresAt <= request.time + duration.value(3, 'd')
+        && data.expiresAt == data.trialExpiresAt;
+    }
+
+    function ownsClaimedLifetimeKey(data, userId) {
+      return data.licenseId is string
+        && data.licenseId.matches('^[a-f0-9]{64}$')
+        && getAfter(/databases/$(database)/documents/licenseKeys/$(data.licenseId)).data.status == 'CLAIMED'
+        && getAfter(/databases/$(database)/documents/licenseKeys/$(data.licenseId)).data.claimedBy == userId
+        && getAfter(/databases/$(database)/documents/licenseKeys/$(data.licenseId)).data.type == 'LIFETIME'
+        && data.expiresAt == null;
+    }
+
     // 1. Users collection:
     // Each user can read and update their own user profile document.
     // They cannot delete user profiles or access other users' profiles.
@@ -30,6 +56,26 @@ service cloud.firestore {
           && request.resource.data.deviceId == deviceId;
         allow delete: if isOwner(userId);
       }
+
+      // Cloud memory is opt-in at the client, but always owner-scoped here.
+      match /memories/{memoryId} {
+        allow read: if isOwner(userId);
+        allow create, update: if isOwner(userId)
+          && request.resource.data.memoryId == memoryId
+          && request.resource.data.revision is int
+          && request.resource.data.revision >= 0
+          && request.resource.data.deleted is bool
+          && request.resource.data.keys().hasOnly(['memoryId','revision','deleted','title','content','category','tags','enabled','pinned','createdAt','updatedAt','contentHash'])
+          && (request.resource.data.deleted == true ||
+              (request.resource.data.title is string && request.resource.data.title.size() <= 200
+               && request.resource.data.content is string && request.resource.data.content.size() <= 20000
+               && request.resource.data.category is string && request.resource.data.category.size() <= 100
+               && request.resource.data.tags is string && request.resource.data.tags.size() <= 2000
+               && request.resource.data.enabled is bool && request.resource.data.pinned is bool
+               && request.resource.data.createdAt is int && request.resource.data.updatedAt is int
+               && request.resource.data.contentHash is string));
+        allow delete: if false;
+      }
     }
 
     // 2. Licenses collection:
@@ -44,45 +90,34 @@ service cloud.firestore {
 
       // Initial trial creation or direct LIFETIME activation
       allow create: if isOwner(userId)
-        && request.resource.data.userId == userId
+        && validLicenseIdentity(request.resource.data, userId)
         && (
           (
             request.resource.data.plan == 'TRIAL'
             && request.resource.data.status == 'TRIAL'
+            && validInitialTrial(request.resource.data)
             && (!('licenseId' in request.resource.data) || request.resource.data.licenseId == null)
           ) || (
             request.resource.data.plan == 'LIFETIME'
             && request.resource.data.status == 'ACTIVE'
-            && request.resource.data.licenseId != null
-            && exists(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId))
-            && (
-              get(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId)).data.status == 'UNUSED'
-              || get(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId)).data.claimedBy == userId
-            )
+            && ownsClaimedLifetimeKey(request.resource.data, userId)
           )
         );
 
       // Upgrading to LIFETIME or non-privilege metadata update
       allow update: if isOwner(userId)
-        && request.resource.data.userId == userId
+        && validLicenseIdentity(request.resource.data, userId)
+        && resource.data.status != 'REVOKED'
         && (
           // Case A: Upgrading to LIFETIME via claimed/claiming license key
           (
             request.resource.data.plan == 'LIFETIME'
             && request.resource.data.status == 'ACTIVE'
-            && request.resource.data.licenseId != null
-            && exists(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId))
-            && (
-              get(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId)).data.status == 'UNUSED'
-              || get(/databases/$(database)/documents/licenseKeys/$(request.resource.data.licenseId)).data.claimedBy == userId
-            )
+            && ownsClaimedLifetimeKey(request.resource.data, userId)
           )
           // Case B: Safe metadata update (cannot modify plan, status, or trial dates)
           || (
-            request.resource.data.plan == resource.data.plan
-            && request.resource.data.status == resource.data.status
-            && request.resource.data.trialStartedAt == resource.data.trialStartedAt
-            && request.resource.data.trialExpiresAt == resource.data.trialExpiresAt
+            request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt'])
           )
         );
 
@@ -90,7 +125,7 @@ service cloud.firestore {
 
       // Daily usage subcollection:
       // Track AI message consumption per 24h period.
-      // - Max 10 messages for trial users.
+      // - Max 20 messages for trial users.
       // - Client cannot decrease counter or reset early.
       match /dailyUsage/{period} {
         allow read: if isOwner(userId);
@@ -120,6 +155,7 @@ service cloud.firestore {
 
       // Only allow transitioning an UNUSED key to CLAIMED by the current user
       allow update: if isAuthenticated()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'claimedBy', 'claimedAt'])
         && resource.data.status == 'UNUSED'
         && request.resource.data.status == 'CLAIMED'
         && request.resource.data.claimedBy == request.auth.uid

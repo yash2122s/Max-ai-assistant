@@ -8,7 +8,7 @@ import android.util.Log
 import com.example.data.preferences.SettingsManager
 import com.example.service.JarvisAccessibilityService
 import com.example.service.MaxCapsuleOverlayService
-import com.example.service.TelegramBotService
+import com.example.features.telegram.TelegramBotService
 import com.example.service.VoiceForegroundService
 import com.example.viewmodel.ChatViewModel
 import com.example.voice.assistant.AssistantLifecycleManager
@@ -39,6 +39,9 @@ object MaxRuntimeManager {
 
     @Volatile
     private var initialized = false
+
+    @Volatile
+    var useComputerUseForMessaging: Boolean = true
 
     /**
      * Initializes the runtime state from persistent settings.

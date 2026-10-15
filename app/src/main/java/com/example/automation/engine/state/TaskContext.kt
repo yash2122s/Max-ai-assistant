@@ -14,8 +14,8 @@ data class TaskContext(
     val variables: MutableMap<String, String> = mutableMapOf()
 ) {
     fun updateState(app: String?, screen: String?, stepId: String?) {
-        app?.let { currentApp = it }
-        screen?.let { currentScreen = it }
-        stepId?.let { currentStep = it }
+        app?.takeIf { it.isNotBlank() }?.let { currentApp = it }
+        screen?.takeIf { it.isNotBlank() }?.let { currentScreen = it }
+        stepId?.takeIf { it.isNotBlank() }?.let { currentStep = it }
     }
 }

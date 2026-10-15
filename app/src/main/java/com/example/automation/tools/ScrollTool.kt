@@ -23,7 +23,7 @@ class ScrollTool : Tool {
         supportsPlanner = true,
         requiresAccessibility = true,
         requiresNetwork = false,
-        cancellable = false
+        cancellable = true
     )
 
     companion object {
@@ -31,9 +31,22 @@ class ScrollTool : Tool {
         const val ABSOLUTE_MAX_SCROLL_STEPS = 10
     }
 
-    override fun validate(request: ExecutionRequest): Boolean = true
+    override fun validate(request: ExecutionRequest): Boolean {
+        if (request.cancellationToken.isCancelled) return false
+        return true
+    }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
+        if (request.cancellationToken.isCancelled) {
+            return ToolResult(
+                success = false,
+                toolName = name,
+                errorCode = "CANCELLED",
+                message = "Scroll action cancelled before execution",
+                verificationRequired = true
+            )
+        }
+
         val args = request.arguments
         val action = request.action.uppercase()
         val directionParam = args.get("direction")?.asString?.lowercase()
@@ -85,6 +98,16 @@ class ScrollTool : Tool {
         var stepCount = 0
 
         while (stepCount < maxSteps) {
+            if (request.cancellationToken.isCancelled) {
+                Log.w(TAG, "Scroll action cancelled at step $stepCount")
+                return ToolResult(
+                    success = false,
+                    toolName = name,
+                    errorCode = "CANCELLED",
+                    message = "Scroll action cancelled by caller",
+                    verificationRequired = true
+                )
+            }
             val root = service.rootInActiveWindow
             if (root != null) {
                 // 1. Check if target is already grounded on screen

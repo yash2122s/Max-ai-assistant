@@ -4,10 +4,10 @@ import android.app.Notification
 import android.content.Context
 import android.service.notification.StatusBarNotification
 import android.util.Log
-import com.example.automation.RemoteInputSender
+import com.example.features.whatsapp.RemoteInputSender
 import com.example.automation.engine.ExecutionRequest
 import com.example.automation.verification.RetryPolicy
-import com.example.service.WhatsAppNotificationService
+import com.example.features.whatsapp.WhatsAppNotificationService
 import org.json.JSONArray
 import org.json.JSONObject
 

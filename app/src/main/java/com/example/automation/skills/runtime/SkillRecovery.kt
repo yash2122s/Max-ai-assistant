@@ -50,13 +50,15 @@ object SkillRecovery {
             return RecoveryResult(true, "RE_GROUNDED", "Successfully re-grounded target on refreshed hierarchy")
         }
 
-        // 3. If multiple failures on search/input, attempt gentle back button to reset sub-state
-        if (attemptNumber >= 2 && step.canonicalAction == "ui.click") {
+        // 3. If multiple failures on search/input, dismiss soft keyboard if active
+        if (attemptNumber >= 2 && (step.canonicalAction == "ui.type" || step.canonicalAction == "ui.search")) {
             val service = JarvisAccessibilityService.instance
-            if (service != null) {
+            val windows = try { service?.windows } catch (_: Throwable) { null }
+            val hasImeWindow = windows?.any { it.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD } == true
+            if (service != null && hasImeWindow) {
                 service.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-                delay(800L)
-                return RecoveryResult(true, "BACK_NAVIGATED", "Sent back navigation to exit stale screen state")
+                delay(500L)
+                return RecoveryResult(true, "BACK_NAVIGATED", "Dismissed soft keyboard via back navigation")
             }
         }
 

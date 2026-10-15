@@ -3,6 +3,7 @@ package com.example.automation
 import com.example.automation.engine.planning.TaskIntent
 import com.example.automation.engine.planning.TaskPlanner
 import com.example.automation.engine.state.ExpectedOutcome
+import com.example.automation.engine.state.TaskStatus
 import com.example.automation.models.UiStep
 import org.junit.Assert.*
 import org.junit.Before
@@ -136,5 +137,21 @@ class TaskPlannerTest {
         val explicitTask = planner.createPlan(explicitUtterance, explicitIntent)
         assertTrue(explicitTask.steps.any { (it.action as? UiStep.Tap)?.target == "Send" })
         assertTrue(explicitTask.steps.any { (it.action as? UiStep.TypeText)?.text == "Hello!" })
+    }
+
+    @Test
+    fun missingExternalCommunicationInputsNeverUseDefaults() {
+        val whatsapp = planner.createPlan("Send a WhatsApp message", TaskIntent(goal = "Send a WhatsApp message"))
+        assertEquals(TaskStatus.WAITING_FOR_INPUT, whatsapp.status)
+        assertTrue(whatsapp.steps.isEmpty())
+        assertTrue(whatsapp.context.variables["needs_input"]!!.contains("Who should receive"))
+
+        val maps = planner.createPlan("Navigate with Maps", TaskIntent(goal = "Navigate with Maps"))
+        assertEquals(TaskStatus.WAITING_FOR_INPUT, maps.status)
+        assertTrue(maps.steps.isEmpty())
+
+        val chrome = planner.createPlan("Search in Chrome", TaskIntent(goal = "Search in Chrome"))
+        assertEquals(TaskStatus.WAITING_FOR_INPUT, chrome.status)
+        assertTrue(chrome.steps.isEmpty())
     }
 }

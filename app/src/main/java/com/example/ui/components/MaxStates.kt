@@ -12,7 +12,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ui.theme.*
 
 @Composable
@@ -28,15 +27,16 @@ fun MaxLoadingState(
         verticalArrangement = Arrangement.Center
     ) {
         CircularProgressIndicator(
-            color = MaxPrimary,
+            color = MaxSemanticColors.accentCyan,
             modifier = Modifier.size(36.dp),
-            strokeWidth = 3.dp
+            strokeWidth = 3.dp,
+            trackColor = MaxSemanticColors.surfaceElevated
         )
         Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
         Text(
             text = message,
-            fontSize = 14.sp,
-            color = MaxTextMuted
+            style = MaxType.Body,
+            color = MaxSemanticColors.textSecondary
         )
     }
 }
@@ -57,21 +57,21 @@ fun MaxErrorState(
         Icon(
             imageVector = Icons.Default.Warning,
             contentDescription = null,
-            tint = MaxError,
+            tint = MaxSemanticColors.error,
             modifier = Modifier.size(44.dp)
         )
         Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
         Text(
             text = "Error Encountered",
-            fontSize = 16.sp,
+            style = MaxType.Headline,
             fontWeight = FontWeight.Bold,
-            color = MaxTextPrimary
+            color = MaxSemanticColors.textPrimary
         )
         Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
         Text(
             text = message,
-            fontSize = 13.sp,
-            color = MaxTextMuted,
+            style = MaxType.Caption,
+            color = MaxSemanticColors.textSecondary,
             textAlign = TextAlign.Center
         )
         if (onRetry != null) {

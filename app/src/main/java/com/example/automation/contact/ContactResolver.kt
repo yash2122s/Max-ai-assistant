@@ -289,4 +289,42 @@ object ContactResolver {
 
         return contacts
     }
+
+    /**
+     * Checks if an incoming sender (e.g. from a WhatsApp notification) matches a selected contact entry.
+     * Compares case-insensitive name matching, as well as normalized phone number digits (min 7 digits).
+     * Fails closed on blank/empty parameters.
+     */
+    fun matchesSelectedContact(incomingSender: String, selectedContact: String): Boolean {
+        val s1 = incomingSender.trim()
+        val s2 = selectedContact.trim()
+        if (s1.isEmpty() || s2.isEmpty()) return false
+
+        if (s1.equals(s2, ignoreCase = true)) return true
+
+        val digits1 = s1.filter { it.isDigit() }
+        val digits2 = s2.filter { it.isDigit() }
+        if (digits1.length >= 7 && digits2.length >= 7) {
+            if (digits1 == digits2 || digits1.endsWith(digits2) || digits2.endsWith(digits1)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /**
+     * Fail-closed check verifying if an incoming sender matches any contact in a selected whitelist set.
+     */
+    fun isSenderInSelectedContacts(sender: String, selectedContacts: Set<String>): Boolean {
+        if (sender.isBlank() || selectedContacts.isEmpty()) return false
+        return selectedContacts.any { matchesSelectedContact(sender, it) }
+    }
+
+    /**
+     * Public accessor to load sorted contacts from the device phonebook.
+     */
+    fun getDeviceContacts(context: Context): List<Contact> {
+        return loadAllContacts(context)
+    }
 }
+

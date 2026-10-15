@@ -13,11 +13,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.local.PeriodLog
@@ -62,28 +60,25 @@ fun PeriodScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            MaxTopBar(
-                title = "Period & Cycle Tracker",
-                onBackClick = onNavigateBack,
-                actions = {
-                    IconButton(onClick = { viewModel.startCreate() }) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "Add Log",
-                            tint = MaxPrimary
-                        )
-                    }
-                }
-            )
-        },
-        containerColor = MaxBgDark
-    ) { padding ->
+    MaxScreen(
+        title = "Period & Cycle Tracker",
+        eyebrow = "HEALTH & CYCLE",
+        auroraMode = AuroraMode.SUBTLE,
+        scrollable = false,
+        onBack = onNavigateBack,
+        topBarActions = {
+            IconButton(onClick = { viewModel.startCreate() }) {
+                Icon(
+                    imageVector = Icons.Default.Add,
+                    contentDescription = "Add Log",
+                    tint = MaxSemanticColors.accentCyan
+                )
+            }
+        }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .padding(horizontal = MaxDimensions.spaceMd)
         ) {
             Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
@@ -100,30 +95,30 @@ fun PeriodScreen(
                         Column {
                             Text(
                                 text = prediction.currentPhase,
-                                fontSize = 16.sp,
+                                style = MaxType.Headline,
                                 fontWeight = FontWeight.Bold,
-                                color = if (prediction.isBleeding) Color(0xFFFF5252) else MaxPrimary
+                                color = if (prediction.isBleeding) MaxSemanticColors.accentRed else MaxSemanticColors.accentCyan
                             )
                             Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = prediction.phaseDescription,
-                                fontSize = 12.sp,
-                                color = MaxTextMuted
+                                style = MaxType.Caption,
+                                color = MaxSemanticColors.textMuted
                             )
                         }
                         if (prediction.daysUntilNext != null && prediction.daysUntilNext >= 0) {
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(MaxDimensions.radiusMd))
-                                    .background(MaxPrimary.copy(alpha = 0.15f))
+                                    .background(MaxSemanticColors.accentCyan.copy(alpha = 0.15f))
                                     .padding(horizontal = 10.dp, vertical = 6.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = "in ${prediction.daysUntilNext} days",
-                                    fontSize = 12.sp,
+                                    style = MaxType.Caption,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaxPrimary
+                                    color = MaxSemanticColors.accentCyan
                                 )
                             }
                         }
@@ -152,13 +147,13 @@ fun PeriodScreen(
                             Icon(
                                 imageVector = Icons.Default.Favorite,
                                 contentDescription = null,
-                                tint = Color(0xFFFF4081),
+                                tint = MaxSemanticColors.accentPink,
                                 modifier = Modifier.size(16.dp)
                             )
                             Text(
                                 text = "Fertile Window: ${prediction.fertileWindowStr}",
-                                fontSize = 11.sp,
-                                color = MaxTextSecondary
+                                style = MaxType.Caption,
+                                color = MaxSemanticColors.textSecondary
                             )
                         }
                     }
@@ -190,9 +185,9 @@ fun PeriodScreen(
 
             Text(
                 text = "Cycle History",
-                fontSize = 15.sp,
+                style = MaxType.Headline,
                 fontWeight = FontWeight.Bold,
-                color = MaxTextPrimary
+                color = MaxSemanticColors.textPrimary
             )
 
             Spacer(modifier = Modifier.height(MaxDimensions.spaceXs))
@@ -226,7 +221,7 @@ fun PeriodScreen(
         if (showEditorSheet) {
             ModalBottomSheet(
                 onDismissRequest = { viewModel.dismissEditor() },
-                containerColor = MaxSurface
+                containerColor = MaxSemanticColors.surface
             ) {
                 Column(
                     modifier = Modifier
@@ -236,9 +231,9 @@ fun PeriodScreen(
                 ) {
                     Text(
                         text = if (uiState.selectedLogForEdit != null) "Edit Cycle Log" else "Add Cycle Log",
-                        fontSize = 18.sp,
+                        style = MaxType.Headline,
                         fontWeight = FontWeight.Bold,
-                        color = MaxTextPrimary
+                        color = MaxSemanticColors.textPrimary
                     )
 
                     MaxTextField(
@@ -288,22 +283,22 @@ private fun StatTile(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-            .background(MaxSurfaceVariant)
+            .background(MaxSemanticColors.surfaceVariant)
             .padding(MaxDimensions.spaceSm),
         contentAlignment = Alignment.Center
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = value,
-                fontSize = 13.sp,
+                style = MaxType.Body,
                 fontWeight = FontWeight.Bold,
-                color = MaxTextPrimary
+                color = MaxSemanticColors.textPrimary
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = label,
-                fontSize = 10.sp,
-                color = MaxTextMuted
+                style = MaxType.Caption,
+                color = MaxSemanticColors.textMuted
             )
         }
     }
@@ -335,22 +330,22 @@ private fun PeriodLogItemCard(
                 ) {
                     Text(
                         text = "$startStr - $endStr",
-                        fontSize = 14.sp,
+                        style = MaxType.Body,
                         fontWeight = FontWeight.Bold,
-                        color = MaxTextPrimary
+                        color = MaxSemanticColors.textPrimary
                     )
                     if (log.durationDays > 0) {
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(MaxDimensions.radiusSm))
-                                .background(MaxPrimary.copy(alpha = 0.2f))
+                                .background(MaxSemanticColors.accentCyan.copy(alpha = 0.2f))
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
                             Text(
                                 text = "${log.durationDays} days",
-                                fontSize = 10.sp,
+                                style = MaxType.Caption,
                                 fontWeight = FontWeight.Bold,
-                                color = MaxPrimary
+                                color = MaxSemanticColors.accentCyan
                             )
                         }
                     }
@@ -360,8 +355,8 @@ private fun PeriodLogItemCard(
                     Spacer(modifier = Modifier.height(MaxDimensions.space2xs))
                     Text(
                         text = log.notes,
-                        fontSize = 12.sp,
-                        color = MaxTextSecondary
+                        style = MaxType.Caption,
+                        color = MaxSemanticColors.textSecondary
                     )
                 }
             }
@@ -371,7 +366,7 @@ private fun PeriodLogItemCard(
                     Icon(
                         imageVector = Icons.Default.Edit,
                         contentDescription = "Edit",
-                        tint = MaxTextMuted,
+                        tint = MaxSemanticColors.textMuted,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -379,7 +374,7 @@ private fun PeriodLogItemCard(
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Delete",
-                        tint = MaxError.copy(alpha = 0.7f),
+                        tint = MaxSemanticColors.destructive.copy(alpha = 0.7f),
                         modifier = Modifier.size(18.dp)
                     )
                 }

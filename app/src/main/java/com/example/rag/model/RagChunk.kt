@@ -19,7 +19,8 @@ data class RagChunk(
     val provider: String? = null,
     val sourceRecordId: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val ownerKey: String = "legacy"
 ) {
     companion object {
         fun computeChunkId(memoryId: String, contentHash: String, chunkIndex: Int): String {
@@ -38,6 +39,7 @@ data class RagChunk(
 
         if (chunkId != other.chunkId) return false
         if (memoryId != other.memoryId) return false
+        if (ownerKey != other.ownerKey) return false
         if (chunkIndex != other.chunkIndex) return false
         if (content != other.content) return false
         if (contentHash != other.contentHash) return false
@@ -61,6 +63,7 @@ data class RagChunk(
     override fun hashCode(): Int {
         var result = chunkId.hashCode()
         result = 31 * result + memoryId.hashCode()
+        result = 31 * result + ownerKey.hashCode()
         result = 31 * result + chunkIndex
         result = 31 * result + content.hashCode()
         result = 31 * result + contentHash.hashCode()

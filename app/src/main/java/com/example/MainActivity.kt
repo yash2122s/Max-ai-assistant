@@ -8,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import com.example.ui.MaxApp
 import com.example.ui.home.HomeViewModel
+import com.example.ui.theme.MaxAppTheme
 import com.example.ui.theme.MaxHaptics
 
 /**
@@ -26,7 +27,9 @@ class MainActivity : ComponentActivity() {
         handleTriggerIntent(intent)
 
         setContent {
-            MaxApp(homeViewModel = homeViewModel)
+            MaxAppTheme {
+                MaxApp(homeViewModel = homeViewModel)
+            }
         }
     }
 

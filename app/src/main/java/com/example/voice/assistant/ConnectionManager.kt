@@ -22,18 +22,22 @@ class ConnectionManager(
     private val onConnectionStateChanged: (ConnectionState) -> Unit,
     private val onExecuteAutomation: suspend (String) -> String,
     private val onUserTranscription: ((String) -> Unit)? = null,
+    private val onInterimTranscription: ((String) -> Unit)? = null,
     private val onTurnComplete: (() -> Unit)? = null,
     private val onThoughtSummaryDelta: ((String, String) -> Unit)? = null,
     private val onInteractionStatusChanged: ((String) -> Unit)? = null,
     private val emotionEngine: com.example.emotion.engine.EmotionEngine? = null
 ) {
     private var webSocketClient: GeminiWebSocketClient? = null
+    private val liveSessionState = com.example.network.LiveSessionState()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var reconnectJob: Job? = null
     private var reconnectDelayMs = 1000L
     private val MAX_RECONNECT_DELAY_MS = 30000L
     private val memoryRepository = MemoryRepository.getInstance(context)
-    private var currentMemoriesMarkdown: String = ""
+    @Volatile private var currentMemoriesMarkdown: String = ""
+    private var memoryJob: Job? = null
+    private var accountGeneration = 0L
 
     var connectionState: ConnectionState = ConnectionState.DISCONNECTED
         private set
@@ -64,11 +68,29 @@ class ConnectionManager(
     }
 
     init {
-        scope.launch {
+        observeMemory()
+    }
+
+    private fun observeMemory() {
+        val generation = accountGeneration
+        memoryJob?.cancel()
+        memoryJob = scope.launch {
             memoryRepository.memoriesMarkdownFlow.collect { freshMarkdown ->
-                currentMemoriesMarkdown = freshMarkdown
+                synchronized(this@ConnectionManager) {
+                    if (generation == accountGeneration) currentMemoriesMarkdown = freshMarkdown
+                }
             }
         }
+    }
+
+    @Synchronized
+    fun resetAccountContext() {
+        accountGeneration++
+        disconnect()
+        currentMemoriesMarkdown = ""
+        activeHandoffContext = null
+        liveSessionState.reset()
+        observeMemory()
     }
 
     private var isNewSession = true
@@ -84,6 +106,7 @@ class ConnectionManager(
         private set
 
     fun connect() {
+        liveSessionState.reset()
         ServiceRegistry.register(ServiceType.VOICE, this)
         isExplicitlyDisconnected = false
         isNewSession = true
@@ -109,6 +132,7 @@ class ConnectionManager(
         handoff: com.example.network.model.ModelHandoffContext? = null
     ) {
         destroyOldConnection()
+        val currentGen = connectionGeneration
 
         val settings = com.example.data.preferences.SettingsManager(context)
         val savedKey = settings.geminiApiKey.trim()
@@ -131,20 +155,21 @@ class ConnectionManager(
         handleConnectionStateChange(ConnectionState.CONNECTING)
 
         scope.launch {
-            val markdown = memoryRepository.getMemoriesMarkdown()
-            currentMemoriesMarkdown = markdown
+            // Memory refresh is independent of the connection/audio startup critical path.
+            val markdown = currentMemoriesMarkdown
 
             synchronized(this@ConnectionManager) {
                 // Ensure we only proceed if another connection wasn't started in the meantime
-                if (webSocketClient != null) return@launch
+                if (webSocketClient != null || currentGen != connectionGeneration || isExplicitlyDisconnected) return@launch
 
-                val currentGen = ++connectionGeneration
                 val currentEmotion = emotionEngine?.getCurrentState()
                 webSocketClient = GeminiWebSocketClient(
                     apiKey = apiKey,
                     voiceName = savedVoice,
                     responseLanguage = savedLanguage,
                     preferredModel = resolvedModel,
+                    thinkingLevel = settings.liveThinkingLevel,
+                    sessionState = liveSessionState,
                     memoriesMarkdown = markdown,
                     isNewSession = isNew,
                     emotionState = currentEmotion,
@@ -174,6 +199,13 @@ class ConnectionManager(
                         }
                     },
                     onExecuteAutomation = onExecuteAutomation,
+                    onInterimTranscription = { interim ->
+                        synchronized(this@ConnectionManager) {
+                            if (currentGen == connectionGeneration) {
+                                onInterimTranscription?.invoke(interim)
+                            }
+                        }
+                    },
                     onUserTranscription = { transcription ->
                         synchronized(this@ConnectionManager) {
                             if (currentGen == connectionGeneration) {
@@ -225,6 +257,8 @@ class ConnectionManager(
 
     @Synchronized
     private fun destroyOldConnection() {
+        // Invalidate callbacks before closing; close callbacks can be synchronous.
+        connectionGeneration++
         webSocketClient?.disconnect()
         webSocketClient = null
     }
@@ -254,6 +288,7 @@ class ConnectionManager(
 
         val settings = com.example.data.preferences.SettingsManager(context)
         if (!settings.hasValidGeminiApiKey()) {
+            reconnectInProgress = false
             Log.d("ConnectionManager", "[SECURITY_GATE] Reconnect aborted: No Gemini API Key configured.")
             handleConnectionStateChange(ConnectionState.DISCONNECTED)
             return
@@ -281,7 +316,7 @@ class ConnectionManager(
 
     @Synchronized
     fun sendText(text: String) {
-        if (webSocketClient == null || !isConnected()) {
+        if (webSocketClient == null) {
             Log.d("ConnectionManager", "WebSocket not connected. Initiating connection for sendText...")
             connect()
         }
@@ -291,6 +326,11 @@ class ConnectionManager(
     @Synchronized
     fun sendAudio(audio: ByteArray) {
         webSocketClient?.sendAudio(audio)
+    }
+
+    @Synchronized
+    fun sendAudioStreamEnd() {
+        webSocketClient?.sendAudioStreamEnd()
     }
 
     @Synchronized

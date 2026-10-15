@@ -5,6 +5,8 @@ import com.example.rag.model.RagConfig
 import com.example.rag.model.RagFilters
 import com.example.rag.model.RagSearchResult
 import com.example.rag.repository.RagRepository
+import com.example.memory.account.MemoryAccountScope
+import com.example.memory.account.MemorySession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -19,14 +21,16 @@ class RagRetriever(
         query: String,
         config: RagConfig = RagConfig(),
         filters: RagFilters? = null,
-        queryEmbedding: FloatArray? = null
+        queryEmbedding: FloatArray? = null,
+        session: MemorySession = MemoryAccountScope.capture()
     ): List<RagSearchResult> = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         val cleanQuery = query.trim()
         if (cleanQuery.isEmpty()) {
             return@withContext emptyList()
         }
 
-        val allChunks = repository.getAllChunks()
+        val allChunks = repository.getAllChunks(session)
         if (allChunks.isEmpty()) {
             return@withContext emptyList()
         }
@@ -37,6 +41,7 @@ class RagRetriever(
         val candidateResults = mutableListOf<RagSearchResult>()
 
         for (chunk in allChunks) {
+            if (chunk.ownerKey != session.ownerKey) continue
             // Apply metadata filters
             if (filters != null) {
                 if (filters.excludeMemoryIds != null && chunk.memoryId in filters.excludeMemoryIds) continue
@@ -103,6 +108,7 @@ class RagRetriever(
             .sortedByDescending { it.score }
             .take(config.topK)
 
+        MemoryAccountScope.requireCurrent(session)
         return@withContext deduplicated
     }
 

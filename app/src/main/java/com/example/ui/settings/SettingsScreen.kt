@@ -7,11 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,7 +22,6 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.*
@@ -32,7 +30,7 @@ import com.example.ui.theme.*
 /**
  * Flagship MAX Settings Screen — Apple Inset Grouped Redesign.
  * Reorganizes all assistant, AI model, voice, automation, and privacy controls
- * into beautiful iOS-style grouped cards with rounded colored square icons.
+ * into beautiful unified Max design cards.
  */
 @Composable
 fun SettingsScreen(
@@ -43,7 +41,6 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val scrollState = rememberScrollState()
 
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
@@ -68,90 +65,41 @@ fun SettingsScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .background(MaxIOSColors.DarkBase)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp)
-                        .padding(horizontal = 16.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    IconButton(
-                        onClick = onNavigateBack,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(MaxIOSShapes.ShapeSmall)
-                            .background(MaxIOSColors.DarkSurfaceElevated)
-                            .border(0.5.dp, MaxIOSColors.HairlineDark, MaxIOSShapes.ShapeSmall)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ArrowBack,
-                            contentDescription = "Back",
-                            tint = MaxIOSColors.TextPrimaryDark,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-
-                    Text(
-                        text = "Settings",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaxIOSColors.TextPrimaryDark,
-                        letterSpacing = (-0.41).sp
-                    )
-
-                    Button(
-                        onClick = {
-                            MaxHaptics.successPattern(context)
-                            viewModel.saveAll()
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaxIOSColors.SystemBlue,
-                            contentColor = Color.White
-                        ),
-                        shape = MaxIOSShapes.ShapePill,
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                        modifier = Modifier.height(32.dp)
-                    ) {
-                        Text("Save", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                }
-            }
-        },
-        containerColor = MaxIOSColors.DarkBase
-    ) { padding ->
+    MaxScreen(
+        title = "Settings",
+        eyebrow = "PREFERENCES",
+        auroraMode = AuroraMode.NONE,
+        onBack = onNavigateBack,
+        topBarActions = {
+            MaxButton(
+                text = "Save",
+                variant = MaxButtonVariant.PRIMARY,
+                onClick = { viewModel.saveAll() },
+                height = 36.dp,
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+            )
+        }
+    ) {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(scrollState)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceLg)
         ) {
             // ================================================================
             // SECTION: MASTER SYSTEM CONTROL
             // ================================================================
-            MaxIOSSettingsSection(title = "System Master State") {
-                MaxIOSSettingsRow(
+            SettingsSection(title = "System Master State") {
+                SettingsRow(
                     title = "MAX Master State",
                     subtitle = "Controls all voice, automation, and background services",
                     icon = Icons.Default.PowerSettingsNew,
-                    iconBg = if (uiState.isMaxEnabled) MaxIOSColors.SystemGreen else MaxIOSColors.SystemRed,
+                    iconBg = if (uiState.isMaxEnabled) MaxSemanticColors.success else MaxSemanticColors.destructive,
                     trailingContent = {
                         Switch(
                             checked = uiState.isMaxEnabled,
                             onCheckedChange = { viewModel.updateIsMaxEnabled(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = MaxIOSColors.SystemGreen
+                                checkedTrackColor = MaxSemanticColors.success
                             )
                         )
                     },
@@ -160,15 +108,15 @@ fun SettingsScreen(
             }
 
             // ================================================================
-            // SECTION: AI ENGINE & MODEL ROUTING
+            // SECTION: AI ENGINE
             // ================================================================
-            MaxIOSSettingsSection(
-                title = "AI Engine & Model Routing",
-                footer = "Auto mode dynamically selects Fast for quick voice queries and Deep for complex multi-step planning."
+            SettingsSection(
+                title = "Gemini Live AI Engine",
+                footer = "Real-time AI model mode is set to Auto by default, dynamically selecting Fast for low-latency voice (<500ms) and Deep for multi-step reasoning."
             ) {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    modifier = Modifier.padding(MaxDimensions.spaceMd),
+                    verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                 ) {
                     MaxTextField(
                         value = uiState.geminiApiKey,
@@ -177,16 +125,16 @@ fun SettingsScreen(
                         placeholder = "AIzaSy...",
                         isPassword = true,
                         leadingIcon = {
-                            Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaxIOSColors.SystemTeal, modifier = Modifier.size(18.dp))
+                            Icon(Icons.Default.VpnKey, contentDescription = null, tint = MaxSemanticColors.accentCyan, modifier = Modifier.size(MaxIconTokens.Medium))
                         }
                     )
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(MaxIOSShapes.ShapeSmall)
-                            .background(MaxIOSColors.SystemBlue.copy(alpha = 0.12f))
-                            .border(0.5.dp, MaxIOSColors.SystemBlue.copy(alpha = 0.3f), MaxIOSShapes.ShapeSmall)
+                            .clip(RoundedCornerShape(MaxDimensions.radiusSm))
+                            .background(MaxSemanticColors.primaryRoyal.copy(alpha = 0.12f))
+                            .border(MaxDimensions.borderHairline, MaxSemanticColors.primaryRoyal.copy(alpha = 0.3f), RoundedCornerShape(MaxDimensions.radiusSm))
                             .clickable {
                                 try {
                                     val intent = Intent(
@@ -207,84 +155,84 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.OpenInNew,
+                                imageVector = Icons.AutoMirrored.Filled.OpenInNew,
                                 contentDescription = null,
-                                tint = MaxIOSColors.SystemBlue,
-                                modifier = Modifier.size(16.dp)
+                                tint = MaxSemanticColors.accentCyan,
+                                modifier = Modifier.size(MaxIconTokens.Small)
                             )
                             Text(
                                 text = "Get Free Key from Google AI Studio",
-                                fontSize = 12.5.sp,
+                                style = MaxType.Caption,
                                 fontWeight = FontWeight.SemiBold,
-                                color = MaxIOSColors.SystemBlue
+                                color = MaxSemanticColors.accentCyan
                             )
                         }
                         Icon(
                             imageVector = Icons.Default.ChevronRight,
                             contentDescription = null,
-                            tint = MaxIOSColors.SystemBlue.copy(alpha = 0.7f),
-                            modifier = Modifier.size(16.dp)
+                            tint = MaxSemanticColors.accentCyan.copy(alpha = 0.7f),
+                            modifier = Modifier.size(MaxIconTokens.Small)
                         )
                     }
                 }
 
-                HorizontalDivider(color = MaxIOSColors.HairlineDark, thickness = 0.5.dp, modifier = Modifier.padding(horizontal = 16.dp))
+                HorizontalDivider(color = MaxSemanticColors.border, thickness = MaxDimensions.borderHairline, modifier = Modifier.padding(horizontal = MaxDimensions.spaceMd))
 
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = "Real-Time AI Model Mode",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaxIOSColors.TextPrimaryDark
-                    )
-
-                    IOSModelModeOption(
-                        title = "Auto (Recommended)",
-                        subtitle = "Dynamically routes between Fast and Deep thinking",
-                        badge = "SMART",
-                        isSelected = uiState.modelRoutingMode.equals("AUTO", ignoreCase = true),
-                        onClick = { viewModel.updateModelRoutingMode("AUTO") }
-                    )
-
-                    IOSModelModeOption(
-                        title = "Fast Mode (gemini-3.8-live)",
-                        subtitle = "Low latency real-time voice streaming (<500ms)",
-                        badge = "FAST",
-                        isSelected = uiState.modelRoutingMode.equals("FAST", ignoreCase = true),
-                        onClick = { viewModel.updateModelRoutingMode("FAST") }
-                    )
-
-                    IOSModelModeOption(
-                        title = "Deep Mode (Extended Thinking)",
-                        subtitle = "Multi-step reasoning & complex device automation",
-                        badge = "REASONING",
-                        isSelected = uiState.modelRoutingMode.equals("DEEP", ignoreCase = true),
-                        onClick = { viewModel.updateModelRoutingMode("DEEP") }
-                    )
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    MaxIOSSettingsRow(
-                        title = "Thinking Observability",
-                        subtitle = "Stream live AI reasoning thought summaries in UI",
-                        icon = Icons.Default.Psychology,
-                        iconBg = MaxIOSColors.SystemPurple,
-                        trailingContent = {
-                            Switch(
-                                checked = uiState.isThinkingObservabilityEnabled,
-                                onCheckedChange = { viewModel.updateIsThinkingObservabilityEnabled(it) },
-                                colors = SwitchDefaults.colors(
-                                    checkedThumbColor = Color.White,
-                                    checkedTrackColor = MaxIOSColors.SystemPurple,
-                                    uncheckedThumbColor = Color.LightGray,
-                                    uncheckedTrackColor = Color(0xFF333842)
-                                )
+                SettingsRow(
+                    title = "Thinking Observability",
+                    subtitle = "Stream live AI reasoning thought summaries in UI",
+                    icon = Icons.Default.Psychology,
+                    iconBg = MaxSemanticColors.primaryRoyal,
+                    trailingContent = {
+                        Switch(
+                            checked = uiState.isThinkingObservabilityEnabled,
+                            onCheckedChange = { viewModel.updateIsThinkingObservabilityEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaxSemanticColors.primaryRoyal,
+                                uncheckedThumbColor = Color.LightGray,
+                                uncheckedTrackColor = MaxSemanticColors.surfaceVariant
                             )
-                        },
-                        showDivider = false
+                        )
+                    },
+                    showDivider = false
+                )
+            }
+
+            // ================================================================
+            // SECTION: ASSISTANT VOICE & PERSONA (MALE / FEMALE)
+            // ================================================================
+            SettingsSection(
+                title = "Assistant Voice & Persona",
+                footer = "Select your preferred assistant voice and personality. Female speaks warmly and caringly, while Male speaks confidently with brotherly energy."
+            ) {
+                Column(
+                    modifier = Modifier.padding(MaxDimensions.spaceMd),
+                    verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+                ) {
+                    val isMale = uiState.liveVoiceName.equals("Puck", ignoreCase = true) ||
+                            uiState.liveVoiceName.equals("Charon", ignoreCase = true) ||
+                            uiState.liveVoiceName.equals("Fenrir", ignoreCase = true) ||
+                            uiState.liveVoiceName.equals("Orus", ignoreCase = true)
+
+                    SettingsVoiceOption(
+                        title = "Female Voice (Aoede)",
+                        subtitle = "Caring, sweet, warm & affectionate persona (ప్రేమగా & కేరింగ్ గా మాట్లాడుతుంది)",
+                        badge = "CARING",
+                        badgeColor = MaxSemanticColors.accentPink,
+                        icon = Icons.Default.Face,
+                        isSelected = !isMale,
+                        onClick = { viewModel.updateLiveVoiceName("Aoede") }
+                    )
+
+                    SettingsVoiceOption(
+                        title = "Male Voice (Puck)",
+                        subtitle = "Confident, sharp & brotherly persona (మగవాడిలా & కాన్ఫిడెంట్ గా మాట్లాడుతుంది)",
+                        badge = "CONFIDENT",
+                        badgeColor = MaxSemanticColors.accentCyan,
+                        icon = Icons.Default.RecordVoiceOver,
+                        isSelected = isMale,
+                        onClick = { viewModel.updateLiveVoiceName("Puck") }
                     )
                 }
             }
@@ -292,51 +240,46 @@ fun SettingsScreen(
             // ================================================================
             // SECTION: SYSTEM ASSISTANT & WAKE WORD
             // ================================================================
-            MaxIOSSettingsSection(title = "System Assistant") {
-                MaxIOSSettingsRow(
+            SettingsSection(title = "System Assistant") {
+                SettingsRow(
                     title = "Default Digital Assistant",
                     subtitle = if (uiState.isDefaultAssistant) "MAX is active system assistant" else "Set MAX as system default assistant",
                     icon = Icons.Default.RecordVoiceOver,
-                    iconBg = MaxIOSColors.SystemBlue,
+                    iconBg = MaxSemanticColors.primaryRoyal,
                     trailingContent = {
                         if (uiState.isDefaultAssistant) {
                             Text(
                                 text = "ACTIVE",
-                                color = MaxIOSColors.SystemGreen,
-                                fontSize = 12.sp,
+                                color = MaxSemanticColors.success,
+                                style = MaxType.Caption,
                                 fontWeight = FontWeight.Bold
                             )
                         } else {
-                            Button(
+                            MaxButton(
+                                text = "Set Default",
                                 onClick = {
                                     val intent = com.example.voice.assistant.SystemAssistantManager.createSetDefaultAssistantIntent(context)
                                     context.startActivity(intent)
                                 },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = MaxIOSColors.SystemBlue,
-                                    contentColor = Color.White
-                                ),
-                                shape = MaxIOSShapes.ShapePill,
-                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                                modifier = Modifier.height(28.dp)
-                            ) {
-                                Text("Set Default", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                            }
+                                variant = MaxButtonVariant.PRIMARY,
+                                height = 32.dp,
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
+                            )
                         }
                     },
                     showDivider = true
                 )
 
-                MaxIOSSettingsRow(
+                SettingsRow(
                     title = "Voice Assist Gesture",
                     subtitle = "Power-button long press & digital assist trigger",
                     icon = Icons.Default.Hearing,
-                    iconBg = MaxIOSColors.SystemIndigo,
+                    iconBg = MaxSemanticColors.primaryRoyal,
                     trailingContent = {
                         Text(
                             text = uiState.wakeWordStatus,
-                            color = MaxIOSColors.TextSecondaryDark,
-                            fontSize = 12.sp
+                            color = MaxSemanticColors.textSecondary,
+                            style = MaxType.Caption
                         )
                     },
                     showDivider = false
@@ -346,28 +289,28 @@ fun SettingsScreen(
             // ================================================================
             // SECTION: AUTOMATION & SKILLS
             // ================================================================
-            MaxIOSSettingsSection(title = "Automation & Workflows") {
-                MaxIOSSettingsRow(
+            SettingsSection(title = "Automation & Workflows") {
+                SettingsRow(
                     title = "Automation Skills Index",
                     subtitle = "Inspect installed skills & automation triggers",
                     icon = Icons.Default.Extension,
-                    iconBg = MaxIOSColors.SystemPurple,
+                    iconBg = MaxSemanticColors.primaryRoyal,
                     onClick = onNavigateToSkills,
                     showDivider = true
                 )
 
-                MaxIOSSettingsRow(
+                SettingsRow(
                     title = "Agentic Autonomous Mode",
                     subtitle = "Allow multi-step planning & autonomous UI navigation",
                     icon = Icons.Default.AutoMode,
-                    iconBg = MaxIOSColors.SystemTeal,
+                    iconBg = MaxSemanticColors.accentCyan,
                     trailingContent = {
                         Switch(
                             checked = uiState.isAgenticModeEnabled,
                             onCheckedChange = { viewModel.updateIsAgenticModeEnabled(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = MaxIOSColors.SystemBlue
+                                checkedTrackColor = MaxSemanticColors.accentCyan
                             )
                         )
                     },
@@ -376,15 +319,15 @@ fun SettingsScreen(
 
                 if (uiState.isAgenticModeEnabled) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                        modifier = Modifier.padding(MaxDimensions.spaceMd),
+                        verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                     ) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(text = "Max Iterations per Goal", fontSize = 13.sp, color = MaxIOSColors.TextSecondaryDark)
-                            Text(text = "${uiState.agenticMaxIterations}", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaxIOSColors.SystemBlue)
+                            Text(text = "Max Iterations per Goal", style = MaxType.Caption, color = MaxSemanticColors.textSecondary)
+                            Text(text = "${uiState.agenticMaxIterations}", style = MaxType.Caption, fontWeight = FontWeight.Bold, color = MaxSemanticColors.accentCyan)
                         }
                         Slider(
                             value = uiState.agenticMaxIterations.toFloat(),
@@ -393,8 +336,8 @@ fun SettingsScreen(
                             steps = 13,
                             colors = SliderDefaults.colors(
                                 thumbColor = Color.White,
-                                activeTrackColor = MaxIOSColors.SystemBlue,
-                                inactiveTrackColor = MaxIOSColors.DarkSurfaceElevated
+                                activeTrackColor = MaxSemanticColors.accentCyan,
+                                inactiveTrackColor = MaxSemanticColors.surfaceVariant
                             )
                         )
 
@@ -402,8 +345,8 @@ fun SettingsScreen(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text(text = "Daily Iteration Budget", fontSize = 13.sp, color = MaxIOSColors.TextSecondaryDark)
-                            Text(text = "${uiState.agenticDailyBudget} (Used: ${uiState.agenticIterationsUsedToday})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = MaxIOSColors.SystemTeal)
+                            Text(text = "Daily Iteration Budget", style = MaxType.Caption, color = MaxSemanticColors.textSecondary)
+                            Text(text = "${uiState.agenticDailyBudget} (Used: ${uiState.agenticIterationsUsedToday})", style = MaxType.Caption, fontWeight = FontWeight.Bold, color = MaxSemanticColors.primaryRoyal)
                         }
                         Slider(
                             value = uiState.agenticDailyBudget.toFloat(),
@@ -411,8 +354,8 @@ fun SettingsScreen(
                             valueRange = 5f..200f,
                             colors = SliderDefaults.colors(
                                 thumbColor = Color.White,
-                                activeTrackColor = MaxIOSColors.SystemTeal,
-                                inactiveTrackColor = MaxIOSColors.DarkSurfaceElevated
+                                activeTrackColor = MaxSemanticColors.primaryRoyal,
+                                inactiveTrackColor = MaxSemanticColors.surfaceVariant
                             )
                         )
                     }
@@ -422,31 +365,31 @@ fun SettingsScreen(
             // ================================================================
             // SECTION: PERSONALIZATION & IDENTITY
             // ================================================================
-            MaxIOSSettingsSection(title = "Identity & Persona") {
+            SettingsSection(title = "Identity & Persona") {
                 Column(
-                    modifier = Modifier.padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier.padding(MaxDimensions.spaceMd),
+                    verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                 ) {
                     MaxTextField(
                         value = uiState.userName,
                         onValueChange = { viewModel.updateUserName(it) },
                         label = "Your Name / Call Sign",
                         placeholder = "e.g., Yash",
-                        leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null, tint = MaxIOSColors.SystemBlue, modifier = Modifier.size(18.dp)) }
+                        leadingIcon = { Icon(Icons.Default.Badge, contentDescription = null, tint = MaxSemanticColors.accentCyan, modifier = Modifier.size(MaxIconTokens.Medium)) }
                     )
                     MaxTextField(
                         value = uiState.botPersona,
                         onValueChange = { viewModel.updateBotPersona(it) },
                         label = "Assistant Persona",
                         placeholder = "Autonomous High-Intelligence Companion",
-                        leadingIcon = { Icon(Icons.Default.Psychology, contentDescription = null, tint = MaxIOSColors.SystemPurple, modifier = Modifier.size(18.dp)) }
+                        leadingIcon = { Icon(Icons.Default.Psychology, contentDescription = null, tint = MaxSemanticColors.primaryRoyal, modifier = Modifier.size(MaxIconTokens.Medium)) }
                     )
                     MaxTextField(
                         value = uiState.languagePreference,
                         onValueChange = { viewModel.updateLanguagePreference(it) },
                         label = "Language Policy",
                         placeholder = "English / Telugu",
-                        leadingIcon = { Icon(Icons.Default.Translate, contentDescription = null, tint = MaxIOSColors.SystemTeal, modifier = Modifier.size(18.dp)) }
+                        leadingIcon = { Icon(Icons.Default.Translate, contentDescription = null, tint = MaxSemanticColors.accentCyan, modifier = Modifier.size(MaxIconTokens.Medium)) }
                     )
                 }
             }
@@ -454,19 +397,19 @@ fun SettingsScreen(
             // ================================================================
             // SECTION: MEMORY RAG ENGINE
             // ================================================================
-            MaxIOSSettingsSection(title = "Memory & Knowledge") {
-                MaxIOSSettingsRow(
+            SettingsSection(title = "Memory & Knowledge") {
+                SettingsRow(
                     title = "Memory Knowledge RAG",
                     subtitle = "Augment prompts with episodic & semantic memory",
                     icon = Icons.Default.Search,
-                    iconBg = MaxIOSColors.SystemPurple,
+                    iconBg = MaxSemanticColors.primaryRoyal,
                     trailingContent = {
                         Switch(
                             checked = uiState.isRagEnabled,
                             onCheckedChange = { viewModel.updateIsRagEnabled(it) },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = Color.White,
-                                checkedTrackColor = MaxIOSColors.SystemBlue
+                                checkedTrackColor = MaxSemanticColors.primaryRoyal
                             )
                         )
                     },
@@ -474,69 +417,65 @@ fun SettingsScreen(
                 )
 
                 if (uiState.isRagEnabled) {
-                    MaxIOSSettingsRow(
+                    SettingsRow(
                         title = "Semantic Vector Search",
                         subtitle = "Conceptual embeddings retrieval",
                         icon = Icons.Default.BlurOn,
-                        iconBg = MaxIOSColors.SystemTeal,
+                        iconBg = MaxSemanticColors.accentCyan,
                         trailingContent = {
                             Switch(
                                 checked = uiState.isSemanticSearchEnabled,
                                 onCheckedChange = { viewModel.updateIsSemanticSearchEnabled(it) },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = Color.White,
-                                    checkedTrackColor = MaxIOSColors.SystemBlue
+                                    checkedTrackColor = MaxSemanticColors.accentCyan
                                 )
                             )
                         },
                         showDivider = true
                     )
 
-                    MaxIOSSettingsRow(
+                    SettingsRow(
                         title = "Hybrid Rank Fusion",
                         subtitle = "Combine keyword + cosine similarity",
                         icon = Icons.Default.Hub,
-                        iconBg = MaxIOSColors.SystemAmber,
+                        iconBg = MaxSemanticColors.royalGold,
                         trailingContent = {
                             Switch(
                                 checked = uiState.isHybridSearchEnabled,
                                 onCheckedChange = { viewModel.updateIsHybridSearchEnabled(it) },
                                 colors = SwitchDefaults.colors(
                                     checkedThumbColor = Color.White,
-                                    checkedTrackColor = MaxIOSColors.SystemBlue
+                                    checkedTrackColor = MaxSemanticColors.royalGold
                                 )
                             )
                         },
                         showDivider = true
                     )
 
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(modifier = Modifier.padding(MaxDimensions.spaceMd)) {
                         Text(
                             text = "Status: ${uiState.ragStatus} • ${uiState.ragMemoriesIndexed} memories indexed",
-                            fontSize = 12.sp,
-                            color = MaxIOSColors.TextSecondaryDark
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textSecondary
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                         ) {
-                            Button(
+                            MaxButton(
+                                text = "Rebuild Index",
                                 onClick = { viewModel.rebuildRagIndex() },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaxIOSColors.DarkSurfaceElevated, contentColor = MaxIOSColors.SystemBlue),
-                                shape = MaxIOSShapes.ShapeMedium,
+                                variant = MaxButtonVariant.SECONDARY,
                                 modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Rebuild Index", fontSize = 13.sp)
-                            }
-                            Button(
+                            )
+                            MaxButton(
+                                text = "Clear Index",
                                 onClick = { viewModel.clearRagIndex() },
-                                colors = ButtonDefaults.buttonColors(containerColor = MaxIOSColors.SystemRed.copy(alpha = 0.15f), contentColor = MaxIOSColors.SystemRed),
-                                shape = MaxIOSShapes.ShapeMedium,
+                                variant = MaxButtonVariant.DANGER,
                                 modifier = Modifier.weight(1f)
-                            ) {
-                                Text("Clear Index", fontSize = 13.sp)
-                            }
+                            )
                         }
                     }
                 }
@@ -545,56 +484,181 @@ fun SettingsScreen(
             // ================================================================
             // SECTION: LICENSE & ENTITLEMENTS
             // ================================================================
-            MaxIOSSettingsSection(title = "License & Entitlements") {
-                MaxIOSSettingsRow(
+            SettingsSection(title = "License & Entitlements") {
+                SettingsRow(
                     title = "License & Subscription",
                     subtitle = "Manage cloud license & premium status",
                     icon = Icons.Default.Verified,
-                    iconBg = MaxIOSColors.SystemGreen,
+                    iconBg = MaxSemanticColors.accentPink,
                     onClick = onNavigateToLicense,
                     showDivider = false
                 )
             }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(MaxDimensions.spaceXl))
         }
     }
 }
 
 @Composable
-private fun IOSModelModeOption(
+private fun SettingsSection(
+    title: String? = null,
+    footer: String? = null,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceXs)
+    ) {
+        if (title != null) {
+            Text(
+                text = title.uppercase(),
+                style = MaxType.Eyebrow,
+                color = MaxSemanticColors.textMuted,
+                modifier = Modifier.padding(horizontal = MaxDimensions.spaceMd)
+            )
+        }
+
+        MaxCard(
+            modifier = Modifier.fillMaxWidth(),
+            cornerRadius = MaxDimensions.radiusLg,
+            content = content
+        )
+
+        if (footer != null) {
+            Text(
+                text = footer,
+                style = MaxType.Caption,
+                color = MaxSemanticColors.textMuted,
+                modifier = Modifier.padding(horizontal = MaxDimensions.spaceMd)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsRow(
+    title: String,
+    subtitle: String? = null,
+    icon: ImageVector? = null,
+    iconBg: Color = MaxSemanticColors.primaryRoyal,
+    trailingContent: @Composable (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+    showDivider: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (onClick != null) Modifier.clickable(onClick = onClick)
+                    else Modifier
+                )
+                .padding(horizontal = MaxDimensions.spaceMd, vertical = MaxDimensions.spaceSm),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+            ) {
+                if (icon != null) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(MaxDimensions.radiusSm))
+                            .background(iconBg),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(MaxIconTokens.Medium)
+                        )
+                    }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(
+                        text = title,
+                        style = MaxType.Body,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaxSemanticColors.textPrimary
+                    )
+                    if (subtitle != null) {
+                        Text(
+                            text = subtitle,
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textSecondary
+                        )
+                    }
+                }
+            }
+
+            if (trailingContent != null) {
+                Box(modifier = Modifier.padding(start = MaxDimensions.spaceSm)) {
+                    trailingContent()
+                }
+            }
+        }
+
+        if (showDivider) {
+            HorizontalDivider(
+                color = MaxSemanticColors.border,
+                thickness = MaxDimensions.borderHairline,
+                modifier = Modifier.padding(start = if (icon != null) 58.dp else MaxDimensions.spaceMd)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SettingsVoiceOption(
     title: String,
     subtitle: String,
     badge: String,
+    badgeColor: Color,
+    icon: ImageVector,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
+    val isDark = LocalIsDarkMode.current
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(MaxIOSShapes.ShapeMedium)
-            .background(if (isSelected) MaxIOSColors.SystemBlue.copy(alpha = 0.12f) else MaxIOSColors.DarkBase.copy(alpha = 0.5f))
+            .clip(RoundedCornerShape(MaxDimensions.radiusMd))
+            .background(if (isSelected) badgeColor.copy(alpha = 0.12f) else if (isDark) MaxSemanticColors.surfaceVariant.copy(alpha = 0.5f) else LuminousCanvas)
             .border(
-                0.5.dp,
-                if (isSelected) MaxIOSColors.SystemBlue else MaxIOSColors.HairlineDark,
-                MaxIOSShapes.ShapeMedium
+                MaxDimensions.borderHairline,
+                if (isSelected) badgeColor else MaxSemanticColors.border,
+                RoundedCornerShape(MaxDimensions.radiusMd)
             )
             .clickable(onClick = onClick)
-            .padding(12.dp)
+            .padding(MaxDimensions.spaceMd)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
+            horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
         ) {
-            RadioButton(
-                selected = isSelected,
-                onClick = onClick,
-                colors = RadioButtonDefaults.colors(
-                    selectedColor = MaxIOSColors.SystemBlue,
-                    unselectedColor = MaxIOSColors.TextTertiaryDark
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) badgeColor.copy(alpha = 0.2f) else if (isDark) Color.White.copy(alpha = 0.08f) else com.example.ui.theme.SoftRoseTint),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (isSelected) badgeColor else MaxSemanticColors.textSecondary,
+                    modifier = Modifier.size(20.dp)
                 )
-            )
+            }
             Column(modifier = Modifier.weight(1f)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -602,31 +666,38 @@ private fun IOSModelModeOption(
                 ) {
                     Text(
                         text = title,
-                        fontSize = 14.sp,
+                        style = MaxType.Body,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isSelected) MaxIOSColors.SystemBlue else MaxIOSColors.TextPrimaryDark
+                        color = if (isSelected) badgeColor else MaxSemanticColors.textPrimary
                     )
                     Box(
                         modifier = Modifier
-                            .clip(MaxIOSShapes.ShapePill)
-                            .background(if (isSelected) MaxIOSColors.SystemBlue.copy(alpha = 0.2f) else Color.White.copy(alpha = 0.08f))
+                            .clip(RoundedCornerShape(MaxDimensions.radiusSm))
+                            .background(if (isSelected) badgeColor.copy(alpha = 0.2f) else if (isDark) Color.White.copy(alpha = 0.08f) else com.example.ui.theme.SoftRoseTint)
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
                         Text(
                             text = badge,
-                            fontSize = 10.sp,
+                            style = MaxType.Eyebrow,
                             fontWeight = FontWeight.Bold,
-                            color = if (isSelected) MaxIOSColors.SystemBlue else MaxIOSColors.TextSecondaryDark
+                            color = if (isSelected) badgeColor else MaxSemanticColors.textSecondary
                         )
                     }
                 }
                 Text(
                     text = subtitle,
-                    fontSize = 12.sp,
-                    color = MaxIOSColors.TextSecondaryDark,
-                    lineHeight = 16.sp
+                    style = MaxType.Caption,
+                    color = MaxSemanticColors.textSecondary
                 )
             }
+            RadioButton(
+                selected = isSelected,
+                onClick = onClick,
+                colors = RadioButtonDefaults.colors(
+                    selectedColor = badgeColor,
+                    unselectedColor = MaxSemanticColors.textMuted
+                )
+            )
         }
     }
 }

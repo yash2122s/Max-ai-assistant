@@ -8,6 +8,7 @@ import com.example.data.local.AppDatabase
 import com.example.data.preferences.SettingsManager
 import com.example.firebase.appcheck.MaxAppCheckManager
 import com.example.firebase.auth.FirebaseAuthManager
+import com.example.firebase.auth.AuthSession
 import com.example.firebase.cache.FirebaseLicenseCacheDao
 import com.example.firebase.cache.FirebaseLicenseCacheEntity
 import com.example.firebase.cache.LicenseIntegrityVerifier
@@ -27,9 +28,14 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
 import kotlin.time.Duration.Companion.milliseconds
 
 class MaxLicenseManager(
@@ -38,9 +44,14 @@ class MaxLicenseManager(
     val firestoreRepo: FirestoreLicenseRepository = FirestoreLicenseRepository(),
     private val cacheDao: FirebaseLicenseCacheDao = AppDatabase.getDatabase(context).firebaseLicenseCacheDao(),
     private val integrityVerifier: LicenseIntegrityVerifier = LicenseIntegrityVerifier(context),
-    private val appCheckManager: MaxAppCheckManager = MaxAppCheckManager(context)
+    private val appCheckManager: MaxAppCheckManager = MaxAppCheckManager(context),
+    private val initializeAppCheck: () -> Unit = { appCheckManager.initialize() }
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private var authSubscription: Job? = null
+    private var sessionJobs: Job? = null
+    private val sessionInvalidationListener: () -> Unit = { invalidateSession() }
+    private val usagePrefs by lazy { context.getSharedPreferences("max_license_usage", Context.MODE_PRIVATE) }
 
     private val settingsManager = SettingsManager(context)
     val deviceId: String
@@ -49,7 +60,8 @@ class MaxLicenseManager(
     private val _currentLicense = MutableStateFlow<CloudLicense>(CloudLicense.createFree("anonymous"))
     val currentLicense: StateFlow<CloudLicense> = _currentLicense.asStateFlow()
 
-    private val _dailyUsageCount = MutableStateFlow<Long>(settingsManager.localDailyUsageCount)
+    // Usage is keyed by authenticated UID; never bootstrap account B from the legacy device-wide value.
+    private val _dailyUsageCount = MutableStateFlow<Long>(0L)
     val dailyUsageCount: StateFlow<Long> = _dailyUsageCount.asStateFlow()
 
     private val _syncState = MutableStateFlow<LicenseSyncState>(LicenseSyncState.Idle)
@@ -61,36 +73,38 @@ class MaxLicenseManager(
     val currentDevice: StateFlow<DeviceRegistration?> = _currentDevice.asStateFlow()
 
     fun initialize() {
+        if (authSubscription != null) return
         Log.i(TAG, "Initializing MaxLicenseManager...")
         // 1. Initialize Firebase App Check
-        appCheckManager.initialize()
-
-        // 2. Load cached license immediately for zero startup latency
-        loadInitialCache()
+        initializeAppCheck()
 
         // 3. React to Firebase Authentication changes
-        scope.launch {
-            authManager.userState.collect { user ->
-                if (user != null) {
+        authManager.addSessionInvalidationListener(this, sessionInvalidationListener)
+        authSubscription = scope.launch {
+            authManager.sessionState.collectLatest { session ->
+                sessionJobs?.cancel()
+                val user = authManager.userState.value
+                if (user != null && session.uid == user.uid && authManager.isCurrentSession(session)) {
                     Log.d(TAG, "[License] authUser=${user.uid.take(6)}... Authenticated user detected. Starting cloud sync...")
-                    syncWithCloud(user.uid)
-
-                    // Real-time daily usage listener
-                    launch {
-                        firestoreRepo.listenToDailyUsage(user.uid).collect { count ->
-                            val maxCount = maxOf(count, settingsManager.localDailyUsageCount)
-                            settingsManager.localDailyUsageCount = maxCount
-                            _dailyUsageCount.value = maxCount
-                        }
-                    }
-
-                    // Real-time cloud license listener
-                    launch {
-                        firestoreRepo.listenToLicense(user.uid).collect { cloudLicense ->
-                            if (cloudLicense.plan != LicensePlan.FREE) {
-                                persistLicenseToCache(cloudLicense)
-                                _currentLicense.value = cloudLicense
+                    sessionJobs = launch {
+                        kotlinx.coroutines.supervisorScope {
+                        launch { loadInitialCache(session); syncWithCloud(user.uid) }
+                        launch {
+                            firestoreRepo.listenToLicense(user.uid).collect { cloudLicense ->
+                                if (authManager.isCurrentSession(session) && cloudLicense.userId == session.uid && cloudLicense.plan != LicensePlan.FREE) {
+                                    persistLicenseToCache(cloudLicense)
+                                    if (!authManager.isCurrentSession(session)) return@collect
+                                    _currentLicense.value = cloudLicense
+                                }
                             }
+                        }
+                        firestoreRepo.listenToDailyUsage(user.uid).collect { count ->
+                            if (authManager.isCurrentSession(session)) {
+                                val maxCount = maxOf(count, localUsage(user.uid))
+                                saveLocalUsage(user.uid, maxCount)
+                                _dailyUsageCount.value = maxCount
+                            }
+                        }
                         }
                     }
                 } else {
@@ -104,11 +118,29 @@ class MaxLicenseManager(
         }
     }
 
-    private fun loadInitialCache() {
+    private fun invalidateSession() {
+        sessionJobs?.cancel()
+        sessionJobs = null
+        _currentLicense.value = CloudLicense.createFree("anonymous")
+        _dailyUsageCount.value = 0L
+        _syncState.value = LicenseSyncState.Idle
+        _currentDevice.value = null
+    }
+
+    internal fun close() {
+        authManager.removeSessionInvalidationListener(this)
+        authSubscription?.cancel()
+        sessionJobs?.cancel()
+    }
+
+    private suspend fun loadInitialCache(session: AuthSession) {
         try {
-            val cached = cacheDao.getLatestLicense()
+            val uid = authManager.currentUid
+            if (uid == null || !authManager.isCurrentSession(session)) return
+            val cached = withContext(Dispatchers.IO) { cacheDao.getLicense(uid) }
+            if (!authManager.isCurrentSession(session)) return
             if (cached != null) {
-                if (integrityVerifier.verifyIntegrity(cached)) {
+                if (cached.userId == uid && integrityVerifier.verifyIntegrity(cached)) {
                     val isStale = integrityVerifier.isCacheStale(cached.cachedAtEpochMillis)
                     val license = cached.toCloudLicense()
                     _currentLicense.value = license
@@ -134,20 +166,15 @@ class MaxLicenseManager(
         activity: Activity,
         customServerClientId: String? = null
     ): Result<FirebaseUserAccount> {
-        val result = authManager.signInWithGoogle(activity, customServerClientId)
-        if (result.isSuccess) {
-            val account = result.getOrNull()!!
-            // Launch cloud sync asynchronously so Google sign-in UI returns immediately!
-            scope.launch {
-                syncWithCloud(account.uid)
-            }
-        }
-        return result
+        return authManager.signInWithGoogle(activity, customServerClientId)
     }
+
+    suspend fun switchAccount(activity: Activity): Result<FirebaseUserAccount> =
+        authManager.switchAccount(activity)
 
     suspend fun signOut(): Result<Unit> {
         val result = authManager.signOut()
-        if (result.isSuccess) {
+        if (result.isSuccess && authManager.currentUid == null) {
             _currentLicense.value = CloudLicense.createFree("anonymous")
             _dailyUsageCount.value = 0L
             _syncState.value = LicenseSyncState.Idle
@@ -156,27 +183,35 @@ class MaxLicenseManager(
         return result
     }
 
-    suspend fun syncWithCloud(userId: String): Result<CloudLicense> = withContext(Dispatchers.IO) {
+    suspend fun syncWithCloud(userId: String): Result<CloudLicense> = withContext(Dispatchers.Main.immediate) {
+        val session = authManager.sessionState.value
+        if (!isValidSession(userId, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
         _syncState.value = LicenseSyncState.Syncing
 
         // 1. Sync User Profile in Firestore
-        val userAccount = authManager.userState.value ?: FirebaseUserAccount(uid = userId)
+        val userAccount = authManager.userState.value
+            ?: return@withContext Result.failure(IllegalStateException("No authenticated account"))
         val userSyncResult = firestoreRepo.syncUserProfile(userAccount, deviceId)
+        if (!isValidSession(userId, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
         if (userSyncResult.isFailure) {
             Log.w(TAG, "User profile sync warning: ${userSyncResult.exceptionOrNull()?.message}")
         }
 
         // 2. Register Device
         val deviceResult = firestoreRepo.registerDevice(userId, deviceId)
-        if (deviceResult.isSuccess) {
+        if (!isValidSession(userId, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
+        if (deviceResult.isSuccess && isValidSession(userId, session)) {
             _currentDevice.value = deviceResult.getOrNull()
         }
 
         // 3. Fetch or Create License in Firestore
         val licenseResult = firestoreRepo.getOrCreateLicense(userId)
-        if (licenseResult.isSuccess) {
+        if (licenseResult.isSuccess && isValidSession(userId, session)) {
             val cloudLicense = licenseResult.getOrNull()!!
+            if (cloudLicense.userId != userId) return@withContext Result.failure(IllegalStateException("License response account mismatch"))
+            if (!isValidSession(userId, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
             persistLicenseToCache(cloudLicense)
+            if (!isValidSession(userId, session)) return@withContext Result.failure(com.example.firebase.auth.AuthException.SessionChanged)
             _currentLicense.value = cloudLicense
             _syncState.value = LicenseSyncState.Synced(
                 license = cloudLicense,
@@ -187,7 +222,10 @@ class MaxLicenseManager(
 
             // Also load initial daily usage count
             val usageCount = firestoreRepo.getDailyUsage(userId)
-            _dailyUsageCount.value = usageCount
+            if (!isValidSession(userId, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
+            val safeUsage = maxOf(usageCount, localUsage(userId))
+            saveLocalUsage(userId, safeUsage)
+            _dailyUsageCount.value = safeUsage
 
             Log.i(TAG, "[License] Cloud license successfully synced: Plan=${cloudLicense.plan}, Status=${cloudLicense.status}")
             Result.success(cloudLicense)
@@ -196,10 +234,13 @@ class MaxLicenseManager(
             Log.w(TAG, "Cloud sync failed (${error?.message}). Falling back to cached license...")
 
             // Graceful fallback to verified Room cache
-            val cached = cacheDao.getLicense(userId) ?: cacheDao.getLatestLicense()
-            if (cached != null && integrityVerifier.verifyIntegrity(cached)) {
+            if (!isValidSession(userId, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
+            val cached = withContext(Dispatchers.IO) { cacheDao.getLicense(userId) }
+            if (!isValidSession(userId, session)) return@withContext Result.failure(com.example.firebase.auth.AuthException.SessionChanged)
+            if (cached != null && cached.userId == userId && integrityVerifier.verifyIntegrity(cached)) {
                 val isStale = integrityVerifier.isCacheStale(cached.cachedAtEpochMillis)
                 val license = cached.toCloudLicense()
+                if (!isValidSession(userId, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
                 _currentLicense.value = license
                 _syncState.value = LicenseSyncState.Synced(
                     license = license,
@@ -210,6 +251,7 @@ class MaxLicenseManager(
                 Result.success(license)
             } else {
                 val freeFallback = CloudLicense.createFree(userId)
+                if (!isValidSession(userId, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
                 _currentLicense.value = freeFallback
                 _syncState.value = LicenseSyncState.Error(
                     message = error?.message ?: "Network unreachable and no valid cache found",
@@ -224,14 +266,20 @@ class MaxLicenseManager(
     /**
      * Atomically claims a one-time license key for the authenticated user.
      */
-    suspend fun claimLicenseKey(rawKey: String): Result<CloudLicense> = withContext(Dispatchers.IO) {
+    suspend fun claimLicenseKey(rawKey: String): Result<CloudLicense> = withContext(Dispatchers.Main.immediate) {
         val user = authManager.userState.value
             ?: return@withContext Result.failure(IllegalStateException("Please sign in with Google first."))
 
+        val session = authManager.sessionState.value
+        if (!isValidSession(user.uid, session)) return@withContext Result.failure(com.example.firebase.auth.AuthException.SessionChanged)
         val result = firestoreRepo.claimLicenseKey(user.uid, rawKey)
+        if (!isValidSession(user.uid, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
         if (result.isSuccess) {
             val license = result.getOrNull()!!
+            if (license.userId != user.uid) return@withContext Result.failure(IllegalStateException("License response belongs to another account"))
+            if (!isValidSession(user.uid, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
             persistLicenseToCache(license)
+            if (!isValidSession(user.uid, session)) return@withContext Result.failure(com.example.firebase.auth.AuthException.SessionChanged)
             _currentLicense.value = license
             _syncState.value = LicenseSyncState.Synced(license, isFromCache = false)
             Log.i(TAG, "[License] License successfully claimed and activated: Plan=${license.plan}")
@@ -242,32 +290,49 @@ class MaxLicenseManager(
     /**
      * Consumes 1 daily message for the current user (locally persisted and synced to cloud).
      */
-    suspend fun consumeDailyMessage(): Result<Pair<Long, Boolean>> = withContext(Dispatchers.IO) {
-        val currentLocal = settingsManager.localDailyUsageCount
+    suspend fun consumeDailyMessage(): Result<Pair<Long, Boolean>> = withContext(Dispatchers.Main.immediate) {
+        val user = authManager.userState.value
+        val session = authManager.sessionState.value
+        val uid = user?.uid ?: "__guest__"
+        if (!authManager.isCurrentSession(session)) return@withContext Result.failure(com.example.firebase.auth.AuthException.SessionChanged)
+        val knownUsage = user == null || usagePrefs.contains(usageKey(uid))
+        val currentLocal = if (user == null) settingsManager.localDailyUsageCount else localUsage(uid)
         val newLocal = currentLocal + 1L
-        settingsManager.localDailyUsageCount = newLocal
+        if (user == null) settingsManager.localDailyUsageCount = newLocal
+        else if (knownUsage) saveLocalUsage(uid, newLocal)
         _dailyUsageCount.value = newLocal
 
-        val user = authManager.userState.value
         if (user == null) {
-            val allowed = newLocal <= 10L
+            val allowed = newLocal <= 20L
             return@withContext Result.success(Pair(newLocal, allowed))
         }
 
         val cloudResult = firestoreRepo.consumeDailyMessage(user.uid)
+        if (!isValidSession(user.uid, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
         if (cloudResult.isSuccess) {
             val (cloudCount, allowed) = cloudResult.getOrNull()!!
             val maxCount = maxOf(newLocal, cloudCount)
-            settingsManager.localDailyUsageCount = maxCount
+            saveLocalUsage(user.uid, maxCount)
             _dailyUsageCount.value = maxCount
             Result.success(Pair(maxCount, allowed))
         } else {
-            val allowed = newLocal <= 10L
+            // An unbound legacy device counter cannot be assigned to this UID.
+            // Without a known account counter, fail closed until cloud refresh.
+            val allowed = knownUsage && newLocal <= 20L
             Result.success(Pair(newLocal, allowed))
         }
     }
 
-    private fun persistLicenseToCache(cloudLicense: CloudLicense) {
+    private fun isValidSession(uid: String, session: AuthSession): Boolean =
+        session.uid == uid && authManager.isCurrentSession(session) && authManager.currentUid == uid
+
+    private fun usageKey(uid: String): String = "${LocalDate.now(ZoneOffset.UTC)}:$uid"
+    private fun localUsage(uid: String): Long = usagePrefs.getLong(usageKey(uid), 0L)
+    private fun saveLocalUsage(uid: String, value: Long) {
+        usagePrefs.edit().putLong(usageKey(uid), value).apply()
+    }
+
+    private suspend fun persistLicenseToCache(cloudLicense: CloudLicense) = withContext(Dispatchers.IO) {
         try {
             val now = System.currentTimeMillis()
             val hash = integrityVerifier.computeIntegrityHash(

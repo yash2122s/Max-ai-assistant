@@ -38,15 +38,15 @@ class AppDatabaseMigrationTest {
         )
 
         ragDao.insert(chunk)
-        val fetched = ragDao.getByMemoryId("mem-test-1")
+        val fetched = ragDao.getByMemoryId("mem-test-1", "legacy")
         assertEquals(1, fetched.size)
         assertEquals("Migration test content", fetched[0].content)
         assertEquals("hash123", fetched[0].contentHash)
         assertNotNull(fetched[0].embedding)
 
         // Cleanup
-        ragDao.deleteByMemoryId("mem-test-1")
-        val remaining = ragDao.getByMemoryId("mem-test-1")
+        ragDao.deleteByMemoryId("mem-test-1", "legacy")
+        val remaining = ragDao.getByMemoryId("mem-test-1", "legacy")
         assertTrue(remaining.isEmpty())
     }
 

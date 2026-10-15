@@ -372,4 +372,41 @@ class SemanticUiCommandParserUnitTest {
         assertEquals(1, battery?.size)
         assertEquals("GET_BATTERY_STATUS", battery?.get(0)?.actionType)
     }
+
+    @Test
+    fun testParseOpenYouTubeThenGoToHomeScreen() {
+        val parsed = SemanticUiCommandParser.parse("Open YouTube, then go to home screen")
+        assertNotNull(parsed)
+        assertEquals(2, parsed?.actions?.size)
+        assertEquals("OPEN_APP", parsed?.actions?.get(0)?.action)
+        assertEquals("YouTube", parsed?.actions?.get(0)?.target)
+        assertEquals("SYSTEM", parsed?.actions?.get(1)?.action)
+        assertEquals("home", parsed?.actions?.get(1)?.target)
+
+        val plan = GoalPlanner.resolveFastPathPlan("Open YouTube, then go to home screen", context)
+        assertNotNull(plan)
+        assertEquals(2, plan?.size)
+        assertEquals("OPEN_APP", plan?.get(0)?.actionType)
+        assertEquals("com.google.android.youtube", plan?.get(0)?.targetText)
+        assertEquals("SYSTEM_ACTION", plan?.get(1)?.actionType)
+        assertEquals("home", plan?.get(1)?.targetText)
+    }
+
+    @Test
+    fun testParseTurnOnFlashlightWaitThenTurnOff() {
+        val parsed = SemanticUiCommandParser.parse("Turn on flashlight, wait 10 seconds, then turn off flashlight")
+        assertNotNull(parsed)
+        assertEquals(3, parsed?.actions?.size)
+        assertEquals("FLASHLIGHT_ON", parsed?.actions?.get(0)?.action)
+        assertEquals("WAIT", parsed?.actions?.get(1)?.action)
+        assertEquals("10 seconds", parsed?.actions?.get(1)?.target)
+        assertEquals("FLASHLIGHT_OFF", parsed?.actions?.get(2)?.action)
+
+        val plan = GoalPlanner.resolveFastPathPlan("Turn on flashlight, wait 10 seconds, then turn off flashlight", context)
+        assertNotNull(plan)
+        assertEquals(3, plan?.size)
+        assertEquals("FLASHLIGHT_ON", plan?.get(0)?.actionType)
+        assertEquals("WAIT", plan?.get(1)?.actionType)
+        assertEquals("FLASHLIGHT_OFF", plan?.get(2)?.actionType)
+    }
 }

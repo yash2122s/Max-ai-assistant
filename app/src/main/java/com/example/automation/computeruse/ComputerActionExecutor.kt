@@ -30,16 +30,6 @@ object ComputerActionExecutor {
         val result = withTimeoutOrNull(6000L) {
             when (action) {
                 is ComputerAction.LaunchApp -> executeLaunchApp(context, action)
-                is ComputerAction.TapCoordinate -> executeTapCoordinate(action)
-                is ComputerAction.LongPress -> executeLongPress(action)
-                is ComputerAction.Swipe -> executeSwipe(action)
-                is ComputerAction.Drag -> executeDrag(action)
-                is ComputerAction.TapElement -> executeTapElement(action)
-                is ComputerAction.TypeText -> executeTypeText(context, action)
-                is ComputerAction.PressKey -> executePressKey(context, action)
-                is ComputerAction.PressEnter -> executePressEnter(context)
-                is ComputerAction.PressBack -> executePressBack()
-                is ComputerAction.Scroll -> executeScroll(action)
                 is ComputerAction.Wait -> executeWait(action)
                 is ComputerAction.ObserveMore -> ActionResult(
                     success = true,
@@ -53,6 +43,21 @@ object ComputerActionExecutor {
                     message = action.message,
                     methodUsed = "NOOP"
                 )
+                else -> {
+                    // Primary Generic Path: Route all UI interactions through GenericActionExecutor & LiveNodeResolver
+                    val genResult = com.example.automation.engine.GenericActionExecutor.executeComputerAction(action)
+                    if (genResult.success) {
+                        ActionResult(
+                            success = true,
+                            actionType = action.actionName,
+                            message = genResult.message,
+                            methodUsed = genResult.tier.name
+                        )
+                    } else {
+                        // Fallback to legacy implementation if GenericActionExecutor was unable to complete
+                        executeLegacyUiAction(context, action)
+                    }
+                }
             }
         } ?: ActionResult(
             success = false,
@@ -66,6 +71,22 @@ object ComputerActionExecutor {
         val finalResult = result.copy(durationMs = duration)
         Log.i(TAG, "[EXECUTE] action=${action.actionName} method=${finalResult.methodUsed} success=${finalResult.success} duration=${duration}ms")
         finalResult
+    }
+
+    private suspend fun executeLegacyUiAction(context: Context, action: ComputerAction): ActionResult {
+        return when (action) {
+            is ComputerAction.TapCoordinate -> executeTapCoordinate(action)
+            is ComputerAction.LongPress -> executeLongPress(action)
+            is ComputerAction.Swipe -> executeSwipe(action)
+            is ComputerAction.Drag -> executeDrag(action)
+            is ComputerAction.TapElement -> executeTapElement(action)
+            is ComputerAction.TypeText -> executeTypeText(context, action)
+            is ComputerAction.PressKey -> executePressKey(context, action)
+            is ComputerAction.PressEnter -> executePressEnter(context)
+            is ComputerAction.PressBack -> executePressBack()
+            is ComputerAction.Scroll -> executeScroll(action)
+            else -> ActionResult(false, action.actionName, message = "Unsupported legacy action")
+        }
     }
 
     private fun executeLaunchApp(context: Context, action: ComputerAction.LaunchApp): ActionResult {

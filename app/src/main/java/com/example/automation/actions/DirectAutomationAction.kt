@@ -12,10 +12,10 @@ class DirectAutomationAction : BaseAction<JSONObject>() {
         
         if (contact.isNotEmpty() && message.isNotEmpty()) {
             val controller = when (type.lowercase()) {
-                "whatsapp" -> com.example.automation.WhatsAppController(isScheduled = isScheduled)
-                "telegram" -> com.example.automation.TelegramController(isScheduled = isScheduled)
+                "whatsapp" -> com.example.features.whatsapp.WhatsAppController(isScheduled = isScheduled)
+                "telegram" -> com.example.features.telegram.TelegramController(isScheduled = isScheduled)
                 "instagram" -> com.example.automation.InstagramController(isScheduled = isScheduled)
-                else -> com.example.automation.WhatsAppController(isScheduled = isScheduled)
+                else -> com.example.features.whatsapp.WhatsAppController(isScheduled = isScheduled)
             }
             controller.execute(context, contact, message)
         }

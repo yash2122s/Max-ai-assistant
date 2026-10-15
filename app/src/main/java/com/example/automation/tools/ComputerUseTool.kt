@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.automation.computeruse.ComputerUseEngine
 import com.example.automation.engine.ExecutionRequest
 import com.example.automation.verification.RetryPolicy
+import com.example.automation.verification.VerificationResult
 import org.json.JSONObject
 
 class ComputerUseTool : Tool {
@@ -18,6 +19,7 @@ class ComputerUseTool : Tool {
     )
 
     override fun validate(request: ExecutionRequest): Boolean {
+        if (request.cancellationToken.isCancelled) return false
         val args = request.arguments
         val goal = args.get("goal")?.asString
             ?: args.get("task")?.asString
@@ -27,6 +29,16 @@ class ComputerUseTool : Tool {
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
+        if (request.cancellationToken.isCancelled) {
+            return ToolResult(
+                success = false,
+                toolName = name,
+                errorCode = "CANCELLED",
+                message = "Task cancelled before Computer-Use execution",
+                verificationRequired = true
+            )
+        }
+
         val args = request.arguments
         val goal = args.get("goal")?.asString
             ?: args.get("task")?.asString
@@ -39,7 +51,9 @@ class ComputerUseTool : Tool {
         val result = ComputerUseEngine.execute(
             context = context,
             goal = goal,
-            targetApp = targetApp
+            targetApp = targetApp,
+            cancellationToken = request.cancellationToken,
+            taskId = request.taskId
         )
 
         val meta = JSONObject().apply {
@@ -49,13 +63,32 @@ class ComputerUseTool : Tool {
             }
         }
 
+        val verification = if (result.success && result.verifiedOutcome != null) {
+            VerificationResult(
+                success = true,
+                reason = result.verifiedOutcome,
+                retryRecommended = false,
+                snapshot = com.example.automation.verification.DeviceContext.capture(context)
+            )
+        } else if (result.success) {
+            null
+        } else {
+            VerificationResult(
+                success = false,
+                reason = result.message,
+                retryRecommended = false,
+                snapshot = com.example.automation.verification.DeviceContext.capture(context)
+            )
+        }
+
         return ToolResult(
             success = result.success,
             toolName = name,
             message = result.message,
             errorCode = result.error,
             metadata = meta,
-            verificationRequired = false
+            verification = verification,
+            verificationRequired = true
         )
     }
 }

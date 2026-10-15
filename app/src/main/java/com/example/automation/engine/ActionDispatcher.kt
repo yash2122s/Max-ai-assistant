@@ -9,6 +9,8 @@ import com.example.automation.engine.execution.CapabilityRouter
 import com.example.automation.engine.execution.VerificationEngine
 import com.example.automation.engine.execution.TaskRecoveryEngine
 import com.example.automation.engine.execution.LongTaskOrchestrator
+import com.example.core.lifecycle.MaxRuntimeManager
+import com.example.security.UnlockVerifier
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,9 +18,211 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.util.UUID
 
 object ActionDispatcher {
     private const val TAG = "ActionDispatcher"
+
+    private data class InFlightDuplicate(
+        val executionId: UUID,
+        val startedAt: Long
+    )
+
+    private val duplicateLock = Any()
+    private val inFlightDuplicates = mutableMapOf<String, InFlightDuplicate>()
+    private const val DUPLICATE_ACTION_STALE_MS = 35_000L
+
+    private fun duplicateTarget(json: JSONObject): String = listOf(
+        "app", "app_name", "appName", "target", "query", "text"
+    ).asSequence()
+        .map { json.opt(it)?.toString().orEmpty().trim() }
+        .firstOrNull { it.isNotEmpty() }
+        ?.lowercase()
+        ?: ""
+
+    private fun duplicateKey(actionName: String, target: String): String? {
+        if (actionName !in setOf("OPEN_APP", "YOUTUBE_SEARCH")) return null
+        return target.takeIf { it.isNotEmpty() }?.let { "$actionName|$it" }
+    }
+
+    private fun duplicateKey(actionName: String, json: JSONObject): String? =
+        duplicateKey(actionName, duplicateTarget(json))
+
+    private fun beginDuplicateExecution(
+        actionName: String,
+        json: JSONObject,
+        executionId: UUID,
+        now: Long = System.currentTimeMillis()
+    ): InFlightDuplicate? {
+        return beginDuplicateForTarget(actionName, duplicateTarget(json), executionId, now)
+    }
+
+    private fun beginDuplicateForTarget(
+        actionName: String,
+        target: String,
+        executionId: UUID,
+        now: Long
+    ): InFlightDuplicate? {
+        val key = duplicateKey(actionName, target) ?: return null
+        synchronized(duplicateLock) {
+            val existing = inFlightDuplicates[key]
+            if (existing != null && now - existing.startedAt < DUPLICATE_ACTION_STALE_MS) {
+                return existing
+            }
+            // A marker is only a guard for a live execution. Evicting an old
+            // marker prevents an interrupted caller from blocking retries forever.
+            inFlightDuplicates[key] = InFlightDuplicate(executionId, now)
+            return null
+        }
+    }
+
+    private fun endDuplicateExecution(actionName: String, json: JSONObject, executionId: UUID) {
+        val key = duplicateKey(actionName, json) ?: return
+        synchronized(duplicateLock) {
+            if (inFlightDuplicates[key]?.executionId == executionId) {
+                inFlightDuplicates.remove(key)
+            }
+        }
+    }
+
+    internal fun tryReserveDuplicateForTests(
+        actionName: String,
+        target: String,
+        executionId: UUID = UUID.randomUUID(),
+        now: Long = System.currentTimeMillis()
+    ): UUID? {
+        val existing = beginDuplicateForTarget(
+            actionName,
+            target.lowercase().trim(),
+            executionId,
+            now
+        )
+        return existing?.executionId
+    }
+
+    internal fun releaseDuplicateForTests(actionName: String, target: String, executionId: UUID) {
+        endDuplicateForTarget(actionName, target.lowercase().trim(), executionId)
+    }
+
+    private fun endDuplicateForTarget(actionName: String, target: String, executionId: UUID) {
+        val key = duplicateKey(actionName, target) ?: return
+        synchronized(duplicateLock) {
+            if (inFlightDuplicates[key]?.executionId == executionId) {
+                inFlightDuplicates.remove(key)
+            }
+        }
+    }
+
+    private fun duplicateInFlightResult(actionName: String, target: String, executionId: UUID): String =
+        JSONObject().apply {
+            put("status", "in_progress")
+            put("success", false)
+            put("executionState", "RUNNING")
+            put("executionId", executionId.toString())
+            put("actionName", actionName)
+            put("target", target)
+            put("error", JSONObject().apply {
+                put("code", "DUPLICATE_IN_FLIGHT")
+                put("message", "An identical '$actionName' request is already executing.")
+            })
+            put("message", "An identical '$actionName' request is already executing.")
+            put("data", JSONObject())
+        }.toString()
+
+    fun isWhatsAppCallUtterance(text: String): Boolean {
+        val lower = text.trim().lowercase()
+        val hasWhatsApp = lower.contains("whatsapp") || lower.contains("వాట్సాప్")
+        if (!hasWhatsApp) return false
+        if (lower.contains("message") || lower.contains("msg") || lower.contains("text ") || lower.contains("మెసేజ్")) {
+            return false
+        }
+        val hasCall = lower.startsWith("call ") || lower.startsWith("dial ") ||
+            lower.contains("whatsapp call") || lower.contains("call on whatsapp") ||
+            lower.contains("call via whatsapp") || lower.contains("call through whatsapp") ||
+            lower.contains("డయల్") || lower.contains("కాల్") || lower.contains("ఫోన్")
+        return hasCall
+    }
+
+    fun isExplicitCallUtterance(text: String): Boolean {
+        val lower = text.trim().lowercase()
+        if (isWhatsAppCallUtterance(lower)) return false
+        return lower.startsWith("call ") ||
+            lower.startsWith("dial ") ||
+            lower.startsWith("make a call") ||
+            lower.startsWith("phone ") ||
+            lower.startsWith("కాల్ ") ||
+            lower.startsWith("ఫోన్ ") ||
+            lower.startsWith("డయల్ ") ||
+
+
+            lower.contains("phone chey") ||
+            lower.contains("phone cheyyi") ||
+            lower.contains("call chey") ||
+            lower.contains("call cheyyi") ||
+            lower.contains("కాల్ చేయి") ||
+            lower.contains("కాల్ చెయ్") ||
+            lower.contains("కాల్ చేయండి") ||
+            lower.contains("ఫోన్ చేయి") ||
+            lower.contains("ఫోన్ చెయ్") ||
+            lower.contains("ఫోన్ చేయండి")
+    }
+
+    fun isMessagingUtterance(text: String): Boolean {
+        val lower = text.trim().lowercase()
+        return lower.contains("whatsapp") ||
+            lower.contains("message") ||
+            lower.contains("msg") ||
+            lower.contains("text ") ||
+            lower.contains("saying ") ||
+            lower.contains("that i ") ||
+            lower.contains("tell ") ||
+            lower.contains("send ") ||
+            lower.contains("పంపు") ||
+            lower.contains("పంపివ్వు") ||
+            lower.contains("పెట్టు") ||
+            lower.contains("మెసేజ్") ||
+            lower.contains("వాట్సాప్")
+    }
+
+    fun isUiNavigationTask(targetEntity: String?, goal: String): Boolean {
+        val targetLower = targetEntity?.trim()?.lowercase() ?: ""
+        val goalLower = goal.trim().lowercase()
+
+        // Pure native hardware / device settings bypass
+        val isHardwareOrDirectSetting = targetLower in setOf("wifi", "bluetooth", "flashlight", "torch", "volume", "brightness", "dnd", "ringer") ||
+            goalLower.contains("flashlight") ||
+            goalLower.contains("torch") ||
+            goalLower.contains("wifi") ||
+            goalLower.contains("bluetooth") ||
+            goalLower.contains("toggle_setting") ||
+            goalLower.contains("set_volume") ||
+            goalLower.contains("set_brightness") ||
+            goalLower.contains("set_dnd") ||
+            goalLower.contains("set_ringer")
+
+        if (isHardwareOrDirectSetting) {
+            return false
+        }
+
+        // Inverted routing rule: default any app entity or UI interaction to ComputerUseEngine
+        return targetLower.isNotEmpty() ||
+            goalLower.contains("search") ||
+            goalLower.contains("profile") ||
+            goalLower.contains("account") ||
+            goalLower.contains("screen") ||
+            goalLower.contains("inspect") ||
+            goalLower.contains("sticker") ||
+            goalLower.contains("reaction") ||
+            goalLower.contains("click") ||
+            goalLower.contains("tap") ||
+            goalLower.contains("press") ||
+            goalLower.contains("scroll") ||
+            goalLower.contains("navigate") ||
+            goalLower.contains("open") ||
+            goalLower.contains("type") ||
+            goalLower.contains("send") ||
+            goalLower.contains("select")
+    }
 
     fun normalizeJson(json: JSONObject): JSONObject {
         var actionName = json.optString("action", "NONE")
@@ -79,12 +283,48 @@ object ActionDispatcher {
         return json
     }
 
+    private fun assertUnlockedForAction(context: Context, actionName: String): Result<Unit> =
+        UnlockVerifier.assertUnlockedForAction(context, actionName)
+
+    private fun blockedByDeviceLock(actionName: String, failure: Result<Unit>): String {
+        val message = failure.exceptionOrNull()?.message
+            ?: "Device is locked; action '$actionName' was blocked."
+        return JSONObject().apply {
+            put("status", "blocked")
+            put("success", false)
+            put("executionState", "BLOCKED")
+            put("actionName", actionName)
+            put("errorCode", "DEVICE_LOCKED")
+            put("message", message)
+            put("error", JSONObject().apply {
+                put("code", "DEVICE_LOCKED")
+                put("message", message)
+            })
+            put("data", JSONObject())
+        }.toString()
+    }
+
     suspend fun dispatch(context: Context, json: JSONObject): Boolean {
         Log.d(TAG, "[DISPATCH] RECEIVED payload=$json")
         val normalized = normalizeJson(json)
         val actionName = normalized.optString("action", "NONE")
+        // Phase F: Security-Critical Gate - Re-check unlock immediately before sensitive operations
+        val unlockGate = assertUnlockedForAction(context, actionName)
+        if (unlockGate.isFailure) {
+            val failureMsg = unlockGate.exceptionOrNull()?.message ?: "Device is locked with keyguard."
+            Log.w(TAG, failureMsg)
+            return false
+        }
         if (actionName == "NONE") return false
 
+        val dispatchExecutionId = UUID.randomUUID()
+        val duplicateInFlight = beginDuplicateExecution(actionName, normalized, dispatchExecutionId)
+        if (duplicateInFlight != null) {
+            Log.w(TAG, "[DISPATCH_DEBOUNCE] Rejecting duplicate in-flight $actionName for '${duplicateTarget(normalized)}'")
+            return false
+        }
+
+        try {
         if (actionName == "COMPUTER_USE" || actionName == "UI_AGENT") {
             Log.i(TAG, "[DISPATCH] COMPUTER_USE_RECEIVED actionName=$actionName")
             val goal = normalized.optString("goal").ifEmpty {
@@ -104,20 +344,21 @@ object ActionDispatcher {
         }
 
         if (actionName == "TASK_INTENT") {
+            resolveAtomicIntent(context, normalized)?.let { return dispatch(context, it) }
             val goal = normalized.optString("goal", "")
             val targetEntity = normalized.optString("target_entity").ifEmpty { null }
             val requiredOutcome = normalized.optString("required_outcome").ifEmpty { null }
 
-            val isUiNavigationTask = targetEntity?.lowercase() in setOf("instagram", "maps", "google maps", "youtube", "chrome", "twitter", "x", "play store", "settings") ||
-                goal.contains("search", ignoreCase = true) ||
-                goal.contains("profile", ignoreCase = true) ||
-                goal.contains("account", ignoreCase = true) ||
-                goal.contains("screen", ignoreCase = true) ||
-                goal.contains("inspect", ignoreCase = true)
-
-            if (isUiNavigationTask) {
-                val result = ComputerUseEngine.execute(context, goal, targetEntity)
-                return result.success
+            val isUiNav = isUiNavigationTask(targetEntity, goal)
+            if (isUiNav) {
+                val isMessagingApp = targetEntity?.lowercase() in setOf("whatsapp", "telegram")
+                if (!isMessagingApp || MaxRuntimeManager.useComputerUseForMessaging) {
+                    val result = ComputerUseEngine.execute(context, goal, targetEntity)
+                    if (result.success || !isMessagingApp) {
+                        return result.success
+                    }
+                    Log.w(TAG, "ComputerUseEngine failed for $targetEntity, falling back to TaskPlanner")
+                }
             }
 
             val parametersMap = mutableMapOf<String, String>()
@@ -160,21 +401,16 @@ object ActionDispatcher {
 
         if (actionName == "CALL_PHONE") {
             val transcription = normalized.optString("last_input_transcription").trim().lowercase()
-            val isMessagingUtterance = transcription.contains("whatsapp") || 
-                transcription.contains("message") || 
-                transcription.contains("msg") || 
-                transcription.contains("text ") ||
-                transcription.contains("saying ") ||
-                transcription.contains("that i ") ||
-                transcription.contains("tell ")
-            val isExplicitCall = transcription.startsWith("call ") ||
-                transcription.startsWith("dial ") ||
-                transcription.contains("call on whatsapp") ||
-                transcription.contains("whatsapp call")
+            if (isWhatsAppCallUtterance(transcription)) {
+                Log.w(TAG, "Rejecting CALL_PHONE at dispatch boundary because utterance is a WhatsApp call: '$transcription'")
+                return false
+            }
+            val messaging = isMessagingUtterance(transcription)
+            val explicitCall = isExplicitCallUtterance(transcription)
 
-            if (isMessagingUtterance && !isExplicitCall) {
+            if (messaging && !explicitCall) {
                 Log.w(TAG, "Rejecting CALL_PHONE at dispatch boundary because utterance is messaging: '$transcription'")
-                if (transcription.contains("whatsapp")) {
+                if (transcription.contains("whatsapp") || transcription.contains("వాట్సాప్")) {
                     normalized.put("action", "TASK_INTENT")
                     normalized.put("goal", "send_whatsapp_message")
                     normalized.put("target_entity", "WhatsApp")
@@ -186,12 +422,19 @@ object ActionDispatcher {
                     normalized.put("target_entity", "Instagram")
                     normalized.put("required_outcome", "MessageSent")
                     return dispatch(context, normalized)
+                } else if (transcription.contains("telegram") || transcription.contains("టెలిగ్రామ్")) {
+                    normalized.put("action", "TASK_INTENT")
+                    normalized.put("goal", "send_telegram_message")
+                    normalized.put("target_entity", "Telegram")
+                    normalized.put("required_outcome", "MessageSent")
+                    return dispatch(context, normalized)
                 }
                 return false
             }
         }
 
         val request = ExecutionRequest(
+            executionId = dispatchExecutionId,
             action = actionName,
             arguments = JsonParser.parseString(normalized.toString()).asJsonObject,
             source = ExecutionSource.MANUAL
@@ -201,10 +444,16 @@ object ActionDispatcher {
             val result = withContext(Dispatchers.IO) {
                 ExecutionEngine.execute(context, request)
             }
-            result.success
+            result.isVerifiedSuccess
         } catch (e: Exception) {
             Log.e(TAG, "Error in dispatching action: $actionName", e)
             false
+        } finally {
+            endDuplicateExecution(actionName, normalized, dispatchExecutionId)
+        }
+        } finally {
+            // Early-return branches are also executions; release their marker.
+            endDuplicateExecution(actionName, normalized, dispatchExecutionId)
         }
     }
 
@@ -212,6 +461,55 @@ object ActionDispatcher {
         Log.d(TAG, "[DISPATCH] DISPATCH_WITH_RESULT_RECEIVED payload=$json")
         val normalized = normalizeJson(json)
         val actionName = normalized.optString("action", "NONE")
+        val unlockGate = assertUnlockedForAction(context, actionName)
+        if (unlockGate.isFailure) {
+            val failureMsg = unlockGate.exceptionOrNull()?.message ?: "Device is locked with keyguard."
+            Log.w(TAG, failureMsg)
+            return blockedByDeviceLock(actionName, unlockGate)
+        }
+        val targetVal = normalized.optString("app").ifEmpty {
+            normalized.optString("app_name").ifEmpty {
+                normalized.optString("appName").ifEmpty {
+                    normalized.optString("target").ifEmpty { normalized.optString("query") }
+                }
+            }
+        }.lowercase().trim()
+        if (actionName == "TASK_COMPLETED") {
+            val summary = normalized.optString("summary", "Task completed and verified.")
+            val requestedTaskId = normalized.optString("taskId").takeIf { it.isNotBlank() }
+            val decision = if (requestedTaskId == null && TaskCancellationCoordinator.getActiveTaskId() == null) {
+                // In-session autonomous voice task without a durable background job (e.g. SET_VOLUME, FLASHLIGHT)
+                com.example.automation.engine.execution.CompletionVerifier.Decision(
+                    accepted = true,
+                    reason = summary,
+                    taskId = null
+                )
+            } else {
+                runCatching {
+                    com.example.automation.engine.execution.CompletionVerifier.verify(
+                        context = context,
+                        requestedTaskId = requestedTaskId,
+                        goal = normalized.optString("goal").takeIf { it.isNotBlank() },
+                        summary = summary
+                    )
+                }.getOrElse { error ->
+                    com.example.automation.engine.execution.CompletionVerifier.Decision(
+                        accepted = false,
+                        reason = "Completion verification failed: ${error.message ?: "unknown error"}",
+                        taskId = requestedTaskId
+                    )
+                }
+            }
+            return JSONObject().apply {
+                put("status", if (decision.accepted) "success" else "blocked")
+                put("success", decision.accepted)
+                put("completionAccepted", decision.accepted)
+                put("executionState", if (decision.accepted) "COMPLETED" else "BLOCKED")
+                put("taskId", decision.taskId ?: JSONObject.NULL)
+                put("foregroundPackage", decision.foregroundPackage ?: JSONObject.NULL)
+                put("message", if (decision.accepted) decision.reason else "Completion rejected: ${decision.reason}")
+            }.toString()
+        }
         if (actionName == "NONE") {
             return JSONObject().apply {
                 put("success", false)
@@ -226,21 +524,27 @@ object ActionDispatcher {
 
         if (actionName == "CALL_PHONE") {
             val transcription = normalized.optString("last_input_transcription").trim().lowercase()
-            val isMessagingUtterance = transcription.contains("whatsapp") || 
-                transcription.contains("message") || 
-                transcription.contains("msg") || 
-                transcription.contains("text ") ||
-                transcription.contains("saying ") ||
-                transcription.contains("that i ") ||
-                transcription.contains("tell ")
-            val isExplicitCall = transcription.startsWith("call ") ||
-                transcription.startsWith("dial ") ||
-                transcription.contains("call on whatsapp") ||
-                transcription.contains("whatsapp call")
+            if (isWhatsAppCallUtterance(transcription)) {
+                Log.w(TAG, "Rejecting CALL_PHONE at dispatchWithResult boundary because utterance is a WhatsApp call: '$transcription'")
+                return JSONObject().apply {
+                    put("status", "unsupported")
+                    put("success", false)
+                    put("executionState", "UNSUPPORTED")
+                    put("errorCode", "WHATSAPP_CALL_UNSUPPORTED")
+                    put("message", "WhatsApp voice call automation is not supported by the existing runtime.")
+                    put("error", JSONObject().apply {
+                        put("code", "WHATSAPP_CALL_UNSUPPORTED")
+                        put("message", "WhatsApp voice call automation is not supported by the existing runtime.")
+                    })
+                    put("data", JSONObject())
+                }.toString()
+            }
+            val messaging = isMessagingUtterance(transcription)
+            val explicitCall = isExplicitCallUtterance(transcription)
 
-            if (isMessagingUtterance && !isExplicitCall) {
+            if (messaging && !explicitCall) {
                 Log.w(TAG, "Rejecting CALL_PHONE at dispatchWithResult boundary because utterance is messaging: '$transcription'")
-                if (transcription.contains("whatsapp")) {
+                if (transcription.contains("whatsapp") || transcription.contains("వాట్సాప్")) {
                     normalized.put("action", "TASK_INTENT")
                     normalized.put("goal", "send_whatsapp_message")
                     normalized.put("target_entity", "WhatsApp")
@@ -252,7 +556,27 @@ object ActionDispatcher {
                     normalized.put("target_entity", "Instagram")
                     normalized.put("required_outcome", "MessageSent")
                     return dispatchWithResult(context, normalized)
+                } else if (transcription.contains("telegram") || transcription.contains("టెలిగ్రామ్")) {
+                    normalized.put("action", "TASK_INTENT")
+                    normalized.put("goal", "send_telegram_message")
+                    normalized.put("target_entity", "Telegram")
+                    normalized.put("required_outcome", "MessageSent")
+                    return dispatchWithResult(context, normalized)
                 }
+                // Do not fall through to ExecutionEngine. A generic messaging
+                // utterance must never be executed as CALL_PHONE merely because
+                // no supported messaging platform was detected.
+                return JSONObject().apply {
+                    put("status", "error")
+                    put("success", false)
+                    put("executionState", "REJECTED")
+                    put("message", "Phone call rejected: the request is a message, not a phone call")
+                    put("error", JSONObject().apply {
+                        put("code", "CALL_PHONE_MESSAGING_CONFLICT")
+                        put("message", "Phone call rejected: the request is a message, not a phone call")
+                    })
+                    put("data", JSONObject())
+                }.toString()
             }
         }
 
@@ -275,11 +599,11 @@ object ActionDispatcher {
                 put("status", if (result.success) "success" else "error")
                 put("success", result.success)
                 put("executionState", if (result.success) "COMPLETED" else "FAILED")
-                put("message", result.message ?: (if (result.success) "Success" else "Execution failed"))
+                put("message", result.message)
                 if (!result.success) {
                     put("error", JSONObject().apply {
                         put("code", result.error ?: "COMPUTER_USE_FAILED")
-                        put("message", result.message ?: "Execution failed")
+                        put("message", result.message)
                     })
                 } else {
                     put("error", JSONObject.NULL)
@@ -294,39 +618,40 @@ object ActionDispatcher {
         }
 
         if (actionName == "TASK_INTENT") {
+            resolveAtomicIntent(context, normalized)?.let { return dispatchWithResult(context, it) }
             val goal = normalized.optString("goal", "")
             val targetEntity = normalized.optString("target_entity").ifEmpty { null }
             val requiredOutcome = normalized.optString("required_outcome").ifEmpty { null }
 
-            val isUiNavigationTask = targetEntity?.lowercase() in setOf("instagram", "maps", "google maps", "youtube", "chrome", "twitter", "x", "play store", "settings") ||
-                goal.contains("search", ignoreCase = true) ||
-                goal.contains("profile", ignoreCase = true) ||
-                goal.contains("account", ignoreCase = true) ||
-                goal.contains("screen", ignoreCase = true) ||
-                goal.contains("inspect", ignoreCase = true)
-
-            if (isUiNavigationTask) {
-                val result = ComputerUseEngine.execute(context, goal, targetEntity)
-                return JSONObject().apply {
-                    put("status", if (result.success) "success" else "error")
-                    put("success", result.success)
-                    put("executionState", if (result.success) "COMPLETED" else "FAILED")
-                    put("message", result.message ?: (if (result.success) "Success" else "Execution failed"))
-                    if (!result.success) {
-                        put("error", JSONObject().apply {
-                            put("code", result.error ?: "TASK_FAILED")
-                            put("message", result.message ?: "Execution failed")
-                        })
-                    } else {
-                        put("error", JSONObject.NULL)
+            val isUiNav = isUiNavigationTask(targetEntity, goal)
+            if (isUiNav) {
+                val isMessagingApp = targetEntity?.lowercase() in setOf("whatsapp", "telegram")
+                if (!isMessagingApp || MaxRuntimeManager.useComputerUseForMessaging) {
+                    val result = ComputerUseEngine.execute(context, goal, targetEntity)
+                    if (result.success || !isMessagingApp) {
+                        return JSONObject().apply {
+                            put("status", if (result.success) "success" else "error")
+                            put("success", result.success)
+                            put("executionState", if (result.success) "COMPLETED" else "FAILED")
+                            put("message", result.message)
+                            if (!result.success) {
+                                put("error", JSONObject().apply {
+                                    put("code", result.error ?: "TASK_FAILED")
+                                    put("message", result.message)
+                                })
+                            } else {
+                                put("error", JSONObject.NULL)
+                            }
+                            put("data", JSONObject().apply {
+                                put("stepsExecuted", result.stepsExecuted)
+                                if (result.verifiedOutcome != null) {
+                                    put("verifiedOutcome", result.verifiedOutcome)
+                                }
+                            })
+                        }.toString()
                     }
-                    put("data", JSONObject().apply {
-                        put("stepsExecuted", result.stepsExecuted)
-                        if (result.verifiedOutcome != null) {
-                            put("verifiedOutcome", result.verifiedOutcome)
-                        }
-                    })
-                }.toString()
+                    Log.w(TAG, "ComputerUseEngine failed for $targetEntity, falling back to TaskPlanner")
+                }
             }
 
             val parametersMap = mutableMapOf<String, String>()
@@ -378,10 +703,27 @@ object ActionDispatcher {
             }.toString()
         }
 
+        val taskId = normalized.optString("taskId").ifEmpty { null }
+        val stepId = normalized.optString("stepId").ifEmpty { null }
+        val requestId = normalized.optString("requestId").ifEmpty { null }
+        val executionIdStr = normalized.optString("executionId").ifEmpty { null }
+        val executionId = executionIdStr?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: UUID.randomUUID()
+
+        val duplicateInFlight = beginDuplicateExecution(actionName, normalized, executionId)
+        if (duplicateInFlight != null) {
+            Log.w(TAG, "[DISPATCH_DEBOUNCE] Rejecting duplicate in-flight $actionName for target '$targetVal'")
+            return duplicateInFlightResult(actionName, targetVal, duplicateInFlight.executionId)
+        }
+
         val request = ExecutionRequest(
+            executionId = executionId,
             action = actionName,
             arguments = JsonParser.parseString(normalized.toString()).asJsonObject,
-            source = ExecutionSource.GEMINI_LIVE
+            source = ExecutionSource.GEMINI_LIVE,
+            taskId = taskId,
+            stepId = stepId,
+            requestId = requestId
         )
 
         return try {
@@ -389,11 +731,51 @@ object ActionDispatcher {
                 ExecutionEngine.execute(context, request)
             }
             val returnJson = JSONObject().apply {
-                put("status", if (result.success) "success" else "error")
-                put("success", result.success)
-                put("executionState", if (result.success) "COMPLETED" else "FAILED")
+                val isSuccess = result.isVerifiedSuccess
+                val isNeedsInput = result.status == com.example.automation.tools.ToolResultStatus.NEEDS_INPUT
+                val isUserActionRequired = result.status == com.example.automation.tools.ToolResultStatus.USER_ACTION_REQUIRED
+                val isCallRequested = result.status == com.example.automation.tools.ToolResultStatus.ACCEPTED ||
+                    result.verification?.reason?.startsWith("CALL_REQUESTED") == true ||
+                    result.errorCode == "CALL_REQUESTED" ||
+                    result.metadata.optString("status") == "CALL_REQUESTED"
+
+                val statusStr = when {
+                    isSuccess -> "success"
+                    isCallRequested -> "accepted"
+                    isNeedsInput -> "needs_input"
+                    isUserActionRequired -> "user_action_required"
+                    else -> "error"
+                }
+
+                val execStateStr = when {
+                    result.errorCode == "EXECUTION_CANCELLED" -> "CANCELLED"
+                    isSuccess -> "COMPLETED"
+                    isCallRequested -> "CALL_REQUESTED"
+                    isNeedsInput -> "WAITING_FOR_INPUT"
+                    isUserActionRequired -> "BLOCKED"
+                    result.success || result.errorCode in setOf("VERIFICATION_FAILED", "EXECUTION_TIMEOUT", "TERMINAL_PERSISTENCE_FAILED") -> "UNVERIFIED"
+                    else -> "FAILED"
+                }
+
+                put("status", statusStr)
+                put("success", isSuccess)
+                put("taskId", result.metadata.opt("taskId") ?: request.taskId ?: JSONObject.NULL)
+                put("stepId", result.metadata.opt("stepId") ?: request.stepId ?: JSONObject.NULL)
+                put("executionId", request.executionId.toString())
+                put("actionName", request.action)
+                put("target", normalized.optString("target", normalized.optString("app_name")))
+                put("executorSuccess", result.metadata.optBoolean("executorSuccess", result.success))
+                put("verificationStatus", if (isSuccess) "VERIFIED" else "UNVERIFIED")
+                put("evidence", result.verification?.reason ?: JSONObject.NULL)
+                put("timestamp", System.currentTimeMillis())
+                put("executionState", execStateStr)
                 put("message", result.message ?: (if (result.success) "Success" else "Execution failed"))
-                if (!result.success) {
+                if (isNeedsInput) {
+                    put("question", result.needsInputQuestion ?: result.message)
+                    put("options", org.json.JSONArray(result.needsInputOptions))
+                    put("targetParam", result.targetParam)
+                }
+                if (!result.success && !isNeedsInput && !isCallRequested) {
                     put("error", JSONObject().apply {
                         put("code", result.errorCode ?: "UNKNOWN_ERROR")
                         put("message", result.message ?: "Execution failed")
@@ -408,9 +790,14 @@ object ActionDispatcher {
                     val key = metaKeys.next()
                     dataObj.put(key, result.metadata.get(key))
                 }
+                result.outputData.forEach { (k, v) ->
+                    dataObj.put(k, v)
+                }
                 put("data", dataObj)
             }
             returnJson.toString()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e(TAG, "Error in dispatchWithResult: $actionName", e)
             JSONObject().apply {
@@ -424,6 +811,22 @@ object ActionDispatcher {
                 })
                 put("data", JSONObject())
             }.toString()
+        } finally {
+            // Completion, failure, timeout, and cancellation all release the
+            // live marker so a later request can retry normally.
+            endDuplicateExecution(actionName, normalized, executionId)
+        }
+    }
+
+    private fun resolveAtomicIntent(context: Context, json: JSONObject): JSONObject? {
+        val goal = json.optString("last_input_transcription").ifBlank { json.optString("goal") }
+        val steps = GoalPlanner.resolveFastPathPlan(goal, context) ?: return null
+        if (!GoalPlanner.isSimplePlan(steps) || GoalPlanner.validatePlan(steps, goal) != null) return null
+        val request = ExecutionRequest.fromStep(steps.single(), ExecutionSource.GEMINI_LIVE, CancellationToken())
+        return JSONObject(request.arguments.toString()).apply {
+            put("action", request.action)
+            put("last_input_transcription", goal)
+            listOf("taskId", "stepId", "executionId", "requestId").forEach { key -> if (json.has(key)) put(key, json.get(key)) }
         }
     }
 }

@@ -590,25 +590,27 @@ class DynamicHudOverlayView @JvmOverloads constructor(
         val centerY = h / 2f
 
         val controls = listOf(
-            Pair("🎙️", "Mic"),
-            Pair("⏹️", "Stop"),
-            Pair("⚡", "Mode"),
-            Pair("📱", "App")
+            Pair("MIC", "Mic"),
+            Pair("STOP", "Stop"),
+            Pair("MODE", "Mode"),
+            Pair("APP", "App")
         )
 
         for (i in controls.indices) {
             val cx = (i * colW) + (colW / 2f)
             val item = controls[i]
 
-            // Icon
-            textPaint.textSize = 16f * density
+            // Icon / Short indicator
+            textPaint.textSize = 12f * density
             textPaint.color = colorTextPrimary
-            canvas.drawText(item.first, cx - 8f * density, centerY - 2f * density, textPaint)
+            val iconWidth = textPaint.measureText(item.first)
+            canvas.drawText(item.first, cx - iconWidth / 2f, centerY - 2f * density, textPaint)
 
             // Label
             textPaint.textSize = 9.5f * density
             textPaint.color = colorTextSecondary
-            canvas.drawText(item.second, cx - 10f * density, centerY + 16f * density, textPaint)
+            val labelWidth = textPaint.measureText(item.second)
+            canvas.drawText(item.second, cx - labelWidth / 2f, centerY + 16f * density, textPaint)
         }
     }
 

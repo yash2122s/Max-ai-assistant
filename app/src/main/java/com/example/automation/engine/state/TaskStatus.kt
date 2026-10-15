@@ -8,8 +8,12 @@ enum class TaskStatus {
     READY,
     RUNNING,
     WAITING_FOR_UI,
+    WAITING_FOR_INPUT,
+    WAITING_FOR_APPROVAL,
     RECOVERING,
     COMPLETED,
+    BLOCKED,
+    UNVERIFIED,
     FAILED,
     CANCELLED
 }

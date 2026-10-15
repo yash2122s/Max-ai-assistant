@@ -115,10 +115,11 @@ class AssistantVoiceController {
                     }
                     is AssistantEvent.InteractionStatusChanged -> {
                         _uiState.update { current ->
+                            val isProgress = event.status.equals("IN_PROGRESS", ignoreCase = true)
                             current.copy(
                                 interactionStatus = event.status,
-                                isThinking = event.status == "IN_PROGRESS" || current.isThinking,
-                                statusText = if (event.status == "IN_PROGRESS") "Processing workflow…" else current.statusText
+                                isThinking = isProgress,
+                                statusText = if (isProgress) "Processing workflow…" else current.statusText
                             )
                         }
                     }
@@ -140,6 +141,7 @@ class AssistantVoiceController {
                         _uiState.update { current ->
                             current.copy(
                                 interactionStatus = "IDLE",
+                                isThinking = false,
                                 activeToolName = null,
                                 activeToolStatus = null
                             )

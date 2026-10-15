@@ -56,23 +56,41 @@ object ComputerUseEngine {
         context: Context,
         goal: String,
         targetApp: String? = null,
-        maxSteps: Int = 10
+        maxSteps: Int = 10,
+        cancellationToken: com.example.automation.engine.CancellationToken? = null,
+        taskId: String? = null
     ): ComputerUseResult = withContext(Dispatchers.Default) {
         val startTime = System.currentTimeMillis()
-        val query = extractSearchTarget(goal)
-        val isSearch = query.isNotBlank()
+        val classification = GoalClassifier.classifyGoal(goal, targetApp)
+        val effectiveTaskId = taskId ?: "task_${System.currentTimeMillis()}"
         val taskContext = TaskContext(
+            taskId = effectiveTaskId,
             goal = goal,
-            targetApp = targetApp ?: extractTargetApp(goal),
-            searchQuery = query,
-            isSearchGoal = isSearch,
+            targetApp = classification.targetApp,
+            searchQuery = classification.searchQuery,
+            isSearchGoal = classification.intentType == TaskIntentType.SEARCH,
+            intentType = classification.intentType,
+            navigationSteps = classification.navigationSteps,
+            currentStepIndex = 0,
             startTime = startTime,
             maxSteps = maxSteps
         )
 
-        Log.i(TAG, "[TASK] EXECUTE_START taskId=${taskContext.taskId} goal='$goal' targetApp='${taskContext.targetApp}' query='$query' isSearch=$isSearch maxSteps=$maxSteps")
+        Log.i(TAG, "[TASK] EXECUTE_START taskId=${taskContext.taskId} goal='$goal' targetApp='${taskContext.targetApp}' query='${taskContext.searchQuery}' intent=${taskContext.intentType} steps=${taskContext.navigationSteps.map { it.target }} maxSteps=$maxSteps")
 
-        // 1. Master switch safety check
+        // 1. Cancellation before start
+        if (cancellationToken?.isCancelled == true) {
+            Log.w(TAG, "[TASK] ABORTED reason=CANCELLED_BEFORE_START")
+            return@withContext ComputerUseResult(
+                success = false,
+                goal = goal,
+                stepsExecuted = 0,
+                message = "Task was cancelled before execution.",
+                error = ComputerUseErrorCode.CANCELLED.name
+            )
+        }
+
+        // 2. Master switch safety check
         if (!MaxRuntimeManager.isMaxEnabled(context)) {
             Log.w(TAG, "[TASK] ABORTED reason=MAX_DISABLED")
             return@withContext ComputerUseResult(
@@ -84,7 +102,7 @@ object ComputerUseEngine {
             )
         }
 
-        // 2. Concurrency lock acquisition
+        // 3. Concurrency lock acquisition
         if (!ComputerUseConcurrency.tryAcquireLock(taskContext)) {
             Log.w(TAG, "[TASK] ABORTED reason=CONCURRENCY_BLOCKED")
             return@withContext ComputerUseResult(
@@ -98,7 +116,7 @@ object ComputerUseEngine {
 
         try {
             val timedResult = withTimeoutOrNull(MAX_TASK_TIMEOUT_MS) {
-                executeLoop(context, taskContext)
+                executeLoop(context, taskContext, cancellationToken)
             }
 
             val finalResult = timedResult ?: ComputerUseResult(
@@ -118,7 +136,8 @@ object ComputerUseEngine {
 
     private suspend fun executeLoop(
         context: Context,
-        taskContext: TaskContext
+        taskContext: TaskContext,
+        cancellationToken: com.example.automation.engine.CancellationToken? = null
     ): ComputerUseResult {
         var stepsExecuted = 0
         var currentState = GoalState.INIT
@@ -144,7 +163,7 @@ object ComputerUseEngine {
             stepsExecuted = step
 
             // 1. Cancellation check
-            if (ComputerUseConcurrency.isTaskCancelled(taskContext)) {
+            if (cancellationToken?.isCancelled == true || ComputerUseConcurrency.isTaskCancelled(taskContext)) {
                 Log.w(TAG, "[TASK] CANCELLED at step $step")
                 Log.i(TAG, "[CU] FINAL_TASK_STATUS status=FAILED message='Task was cancelled'")
                 return ComputerUseResult(
@@ -160,8 +179,15 @@ object ComputerUseEngine {
 
             // --- 2. STATE: OBSERVING ---
             AssistantEventBus.emit(AssistantEvent.ToolProgress("computer_use", "🔍 Observing screen (Step $step/${taskContext.maxSteps})..."))
-            val obsBefore = ScreenObservationProvider.captureObservation(context)
-            Log.i(TAG, "[OBSERVE] step=$step obsId=${obsBefore.observationId} app=${obsBefore.foregroundPackage} elements=${obsBefore.interactiveElements.size} texts=${obsBefore.visibleTexts.size}")
+            val currentSnapshot = com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot()
+            // Computer-use planning must fuse the current tree with a screenshot on
+            // every action boundary; a fresh tree alone cannot expose overlays/icons.
+            val obsBefore = ScreenObservationProvider.captureObservation(
+                context, captureScreenshot = true, taskId = taskContext.taskId,
+                stepId = "step_$step", executionId = taskContext.executionId,
+                causedByAction = null
+            )
+            Log.i(TAG, "[OBSERVE] step=$step obsId=${obsBefore.observationId} app=${obsBefore.foregroundPackage} elements=${obsBefore.interactiveElements.size} texts=${obsBefore.visibleTexts.size} screenshot=${obsBefore.hasScreenshot}")
 
             // --- 3. STATE: ASSESSING CURRENT STATE & SMART ATTACHMENT ---
             val assessment = GoalStateAssessor.assessCurrentState(
@@ -183,9 +209,11 @@ object ComputerUseEngine {
                 val isTelugu = isTeluguGoal(taskContext.goal)
                 val outcomeMsg = if (isTelugu) {
                     if (taskContext.isSearchGoal) "'${taskContext.searchQuery}' kosam search chesi, result open chesi verify chesanu."
+                    else if (taskContext.completedSteps.isNotEmpty()) "${taskContext.completedSteps.last()} open chesi verify chesanu."
                     else "${taskContext.targetApp ?: "App"} open ayyindi. Verify chesanu."
                 } else {
                     if (taskContext.isSearchGoal) "Target content for '${taskContext.searchQuery}' successfully verified on screen."
+                    else if (taskContext.completedSteps.isNotEmpty()) "Navigated to '${taskContext.completedSteps.last()}' and verified."
                     else "${taskContext.targetApp ?: "App"} opened and verified."
                 }
                 Log.i(TAG, "[CU] FINAL_TASK_STATUS status=VERIFIED_SUCCESS message='$outcomeMsg'")
@@ -238,7 +266,9 @@ object ComputerUseEngine {
             if (action is ComputerAction.FinishTask) {
                 val isActuallyVerified = currentState == GoalState.DESTINATION_VERIFIED ||
                     (taskContext.isSearchGoal && DestinationVerifier.verify(obsBefore, taskContext.searchQuery, taskContext.targetApp, selectedCandidate).verified) ||
-                    (!taskContext.isSearchGoal && obsBefore.isAppForeground && (obsBefore.interactiveElements.isNotEmpty() || obsBefore.visibleTexts.isNotEmpty() || obsBefore.screenshotPath != null))
+                    (taskContext.intentType == TaskIntentType.OPEN_APP_ONLY && assessment.isAlreadySatisfied && assessment.status == EvidenceStatus.VERIFIED) ||
+                    (taskContext.intentType == TaskIntentType.COMPOUND_UI_NAVIGATION && taskContext.remainingSteps.isEmpty() && taskContext.completedSteps.isNotEmpty()) ||
+                    (taskContext.intentType == TaskIntentType.UI_ACTION && taskContext.remainingSteps.isEmpty() && taskContext.completedSteps.isNotEmpty())
 
                 if (!isActuallyVerified && action.success) {
                     Log.w(TAG, "[DECIDE] Refusing false FinishTask: Destination is not verified by observation evidence!")
@@ -283,10 +313,11 @@ object ComputerUseEngine {
 
             // --- 5. STATE: EXECUTING ---
             AssistantEventBus.emit(AssistantEvent.ToolProgress("computer_use", "⚙️ Executing ${action.actionName}..."))
+            val beforeVersion = com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot().stateVersion
             val execResult = ComputerActionExecutor.execute(context, action)
             Log.i(TAG, "[CU] ACTION_EXECUTED action='${action.actionName}' success=${execResult.success} message='${execResult.message}'")
 
-            // --- 6. ADAPTIVE SETTLE ---
+            // --- 6. ADAPTIVE SETTLE & PREDICATE WAIT ---
             val settleTime = when (action) {
                 is ComputerAction.LaunchApp -> 1500L
                 is ComputerAction.TypeText -> 500L
@@ -295,15 +326,35 @@ object ComputerUseEngine {
                 is ComputerAction.ObserveMore -> 300L
                 else -> STEP_SETTLE_DELAY_MS
             }
-            Log.i(TAG, "[WAIT] duration=${settleTime}ms")
-            delay(settleTime)
+            val predicate = when (val exp = action.expectation) {
+                is ActionExpectation.AppForeground -> com.example.automation.state.ExpectedPredicate.PackageForeground(exp.packageName)
+                is ActionExpectation.TextPresent -> com.example.automation.state.ExpectedPredicate.TextAppeared(exp.value)
+                is ActionExpectation.FocusField -> com.example.automation.state.ExpectedPredicate.FocusEquals(exp.target)
+                else -> null
+            }
+            if (predicate != null) {
+                com.example.automation.state.CurrentUiStateStore.waitForPredicate(
+                    predicate = predicate,
+                    timeoutMs = settleTime,
+                    minStateVersion = beforeVersion + 1L
+                )
+            } else {
+                delay(settleTime)
+            }
 
             // --- 7. STATE: RE-OBSERVE & VERIFY ---
-            val obsAfter = ScreenObservationProvider.captureObservation(context)
+            val postSnapshot = com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot()
+            val needPostScreenshot = postSnapshot.isSparseOrObscured || !postSnapshot.isFresh(maxAgeMs = 2000L)
+            val obsAfter = ScreenObservationProvider.captureObservation(
+                context, captureScreenshot = true, taskId = taskContext.taskId,
+                stepId = "step_$step", executionId = taskContext.executionId,
+                causedByAction = action.actionName,
+                expectedPostcondition = action.expectation?.toString()
+            )
             val rootAvailable = JarvisAccessibilityService.getActiveRoot() != null
             val currentPkg = obsAfter.foregroundPackage
             val nodeCount = obsAfter.interactiveElements.size + obsAfter.visibleTexts.size
-            val screenshotAvailable = obsAfter.screenshotPath != null
+            val screenshotAvailable = obsAfter.hasScreenshot
             val obsStatus = when {
                 rootAvailable && screenshotAvailable -> "OBSERVED"
                 rootAvailable || screenshotAvailable -> "DEGRADED"
@@ -335,8 +386,8 @@ object ComputerUseEngine {
                     is ComputerAction.LaunchApp -> {
                         advanceState(GoalState.APP_READY, action.appName)
 
-                        // If goal was simply to launch and verify this app, finish immediately with VERIFIED_SUCCESS
-                        if (!taskContext.isSearchGoal) {
+                        // LaunchApp may ONLY finish the task when intentType == OPEN_APP_ONLY
+                        if (taskContext.intentType == TaskIntentType.OPEN_APP_ONLY) {
                             advanceState(GoalState.DESTINATION_VERIFIED, "${action.appName} verified on screen")
                             val isTelugu = isTeluguGoal(taskContext.goal)
                             val verifiedMsg = if (isTelugu) "${action.appName} open ayyindi. Verify chesanu." else "${action.appName} opened and verified."
@@ -351,9 +402,51 @@ object ComputerUseEngine {
                                 verifiedOutcome = verifiedMsg,
                                 executedPhases = executedPhases.toList()
                             )
+                        } else {
+                            advanceState(GoalState.NAVIGATION_IN_PROGRESS, "${action.appName} launched, proceeding with navigation")
+                            val totalSteps = taskContext.navigationSteps.size + (if (taskContext.targetApp != null) 1 else 0)
+                            Log.i(TAG, "[TASK_PROGRESS] step=1/$totalSteps action=LaunchApp verified=true remaining=${taskContext.remainingSteps}")
                         }
                     }
                     is ComputerAction.TapCoordinate, is ComputerAction.TapElement -> {
+                        if (taskContext.intentType == TaskIntentType.COMPOUND_UI_NAVIGATION ||
+                            taskContext.intentType == TaskIntentType.UI_ACTION) {
+                            val currentTarget = taskContext.currentTarget
+                            val actionTarget = if (action is ComputerAction.TapElement) action.targetText else ""
+                            if (currentTarget != null && actionTarget.isNotBlank() && (
+                                actionTarget.equals(currentTarget, ignoreCase = true) ||
+                                actionTarget.contains(currentTarget, ignoreCase = true) ||
+                                currentTarget.contains(actionTarget, ignoreCase = true)
+                            )) {
+                                taskContext.completedSteps.add(currentTarget)
+                                taskContext.currentStepIndex++
+                                Log.i(TAG, "[TASK_VERIFY] target=$currentTarget verified=true")
+                                val stepNum = taskContext.currentStepIndex + (if (taskContext.targetApp != null) 1 else 0)
+                                val totalSteps = taskContext.navigationSteps.size + (if (taskContext.targetApp != null) 1 else 0)
+                                Log.i(TAG, "[TASK_PROGRESS] step=$stepNum/$totalSteps action=TapElement target=$currentTarget verified=true remaining=${taskContext.remainingSteps}")
+
+                                if (taskContext.remainingSteps.isEmpty()) {
+                                    advanceState(GoalState.DESTINATION_VERIFIED, "All navigation steps completed: ${taskContext.completedSteps.joinToString(" -> ")}")
+                                    val isTelugu = isTeluguGoal(taskContext.goal)
+                                    val destinationMsg = if (isTelugu) {
+                                        "${taskContext.completedSteps.lastOrNull() ?: "Target"} open chesi verify chesanu."
+                                    } else {
+                                        "Navigated to '${taskContext.completedSteps.lastOrNull() ?: "destination"}' and verified."
+                                    }
+                                    Log.i(TAG, "[CU] FINAL_TASK_STATUS status=VERIFIED_SUCCESS message='$destinationMsg'")
+                                    AssistantEventBus.emit(AssistantEvent.ToolProgress("computer_use", "✓ $destinationMsg"))
+                                    return ComputerUseResult(
+                                        success = true,
+                                        goal = taskContext.goal,
+                                        stepsExecuted = stepsExecuted,
+                                        message = destinationMsg,
+                                        taskStatus = TaskStatus.VERIFIED_SUCCESS,
+                                        verifiedOutcome = destinationMsg,
+                                        executedPhases = executedPhases.toList()
+                                    )
+                                }
+                            }
+                        }
                         if (currentState < GoalState.SEARCH_UI_OPEN) {
                             if (obsAfter.findEditableElement() != null || obsAfter.interactiveElements.any { it.isEditable }) {
                                 advanceState(GoalState.SEARCH_UI_OPEN, "Search UI opened")
@@ -397,8 +490,8 @@ object ComputerUseEngine {
                 Log.w(TAG, "[RECOVERY] Action verification failed: $note (attempt $consecutiveFailures/3)")
                 AssistantEventBus.emit(AssistantEvent.ToolProgress("computer_use", "⚠️ $note (recovery attempt $consecutiveFailures/3)"))
 
-                // If non-search app launch execution succeeded but verification failed
-                if (action is ComputerAction.LaunchApp && execResult.success && !taskContext.isSearchGoal) {
+                // If OPEN_APP_ONLY app launch execution succeeded but verification failed
+                if (action is ComputerAction.LaunchApp && execResult.success && taskContext.intentType == TaskIntentType.OPEN_APP_ONLY) {
                     val isTelugu = isTeluguGoal(taskContext.goal)
                     val unverifiedMsg = if (isTelugu) "${action.appName} launch ayyindi, kani screen ni verify cheyyalekapoyanu." else "${action.appName} was launched, but screen verification could not be confirmed."
                     Log.i(TAG, "[CU] FINAL_TASK_STATUS status=EXECUTED_UNVERIFIED message='$unverifiedMsg'")

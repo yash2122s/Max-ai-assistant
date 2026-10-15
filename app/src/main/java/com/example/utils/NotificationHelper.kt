@@ -13,7 +13,7 @@ import com.example.receiver.AutoReplyActionReceiver
 
 object NotificationHelper {
     private const val CHANNEL_ID = "jarvis_automation"
-    private const val CHANNEL_NAME = "Jarvis Automation"
+    private const val CHANNEL_NAME = "MAX Automation"
 
     fun showSendFallbackNotification(context: Context, phoneNumber: String, message: String) {
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

@@ -3,208 +3,202 @@ package com.example.firebase.auth
 import android.app.Activity
 import android.content.Context
 import android.util.Log
-import androidx.credentials.ClearCredentialStateRequest
-import androidx.credentials.CredentialManager
-import androidx.credentials.CustomCredential
-import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.GetCredentialProviderConfigurationException
+import androidx.credentials.exceptions.NoCredentialException
 import com.example.firebase.model.FirebaseUserAccount
-import com.google.android.libraries.identity.googleid.GetGoogleIdOption
-import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.auth.FirebaseUser
-import com.google.firebase.auth.GoogleAuthProvider
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.CopyOnWriteArrayList
 
-sealed class AuthException(message: String, cause: Throwable? = null) : Exception(message, cause) {
+data class AuthSession(val uid: String?, val generation: Long)
+
+sealed class AuthException(message: String) : Exception(message) {
     object UserCancelled : AuthException("Sign-in was cancelled by user.")
-    object ProviderUnavailable : AuthException("Google Sign-In service is currently unavailable on this device.")
-    class GetCredentialFailed(reason: String) : AuthException("Credential retrieval failed: $reason")
+    object SessionChanged : AuthException("Account session changed. Please try again.")
+    object ProviderUnavailable : AuthException("Google Sign-In is unavailable on this device.")
+    class GetCredentialFailed(reason: String) : AuthException(reason)
     class InvalidCredentialType(typeName: String) : AuthException("Unexpected credential type: $typeName")
-    class FirebaseAuthFailed(reason: String, cause: Throwable? = null) : AuthException("Firebase authentication failed: $reason", cause)
-    object ConfigurationError : AuthException("Firebase configuration or Web Client ID error.")
+    class FirebaseAuthFailed(reason: String) : AuthException(reason)
+    object ConfigurationError : AuthException("Firebase configuration or Web Client ID is missing.")
 }
 
-class FirebaseAuthManager(
-    private val context: Context,
-    private val auth: FirebaseAuth? = try {
-        val app = com.example.firebase.FirebaseInitHelper.ensureFirebaseApp(context)
-        if (app != null) FirebaseAuth.getInstance(app) else null
-    } catch (e: Exception) {
-        Log.w(TAG, "FirebaseAuth initialization deferred/unavailable: ${e.message}")
-        null
-    }
+class FirebaseAuthManager internal constructor(
+    private val gateway: GoogleAuthGateway,
+    private val webClientId: () -> String?
 ) {
-    private val credentialManager: CredentialManager = CredentialManager.create(context)
+    constructor(context: Context, auth: FirebaseAuth? = initializedAuth(context)) : this(
+        AndroidGoogleAuthGateway(context.applicationContext, auth), {
+            val id = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+            if (id == 0) null else context.getString(id)
+        })
 
-    private val _userState = MutableStateFlow<FirebaseUserAccount?>(mapFirebaseUser(auth?.currentUser))
+    private val _userState = MutableStateFlow(gateway.currentUser)
     val userState: StateFlow<FirebaseUserAccount?> = _userState.asStateFlow()
+    private val _sessionState = MutableStateFlow(AuthSession(gateway.currentUser?.uid, 0L))
+    val sessionState: StateFlow<AuthSession> = _sessionState.asStateFlow()
+    private val operationMutex = Mutex()
+    private val invalidationListeners = CopyOnWriteArrayList<Pair<Any, () -> Unit>>()
+    private var operationEpoch = 0L
+    private var activeAttempt: Long? = null
+    private var managedAuthWrite = false
 
     init {
-        try {
-            auth?.addAuthStateListener { firebaseAuth ->
-                val account = mapFirebaseUser(firebaseAuth.currentUser)
-                _userState.value = account
-                if (account != null) {
-                    Log.d(TAG, "[AUTH] firebaseAuthSuccess. Active user UID: ${account.uid}")
-                } else {
-                    Log.d(TAG, "[AUTH] authRequired / Signed Out")
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to register AuthStateListener: ${e.message}")
+        gateway.observeAuth {
+            if (!managedAuthWrite && activeAttempt == null) publishAccount(gateway.currentUser)
         }
     }
 
-    val currentUid: String?
-        get() = auth?.currentUser?.uid
+    // The SDK's current user is authoritative, not email or a caller-supplied UID.
+    val currentUid: String? get() = gateway.currentUser?.uid
+    val isAuthenticated: Boolean get() = currentUid != null && isCurrentSession(sessionState.value)
+    fun isCurrentSession(session: AuthSession): Boolean =
+        sessionState.value == session && currentUid == session.uid
 
-    val isAuthenticated: Boolean
-        get() = auth?.currentUser != null
-
-    suspend fun signInWithGoogle(
-        activity: Activity,
-        customServerClientId: String? = null
-    ): Result<FirebaseUserAccount> = withContext(Dispatchers.IO) {
-        try {
-            Log.d(TAG, "[AUTH] signInStarted")
-            val serverClientId = customServerClientId
-                ?: getWebClientIdFromResources()
-                ?: FALLBACK_WEB_CLIENT_ID
-
-            if (serverClientId.isBlank()) {
-                Log.e(TAG, "[AUTH] ConfigurationError: Web Client ID is missing or blank")
-                return@withContext Result.failure(AuthException.ConfigurationError)
-            }
-
-            // Stage 1: Try authorized credentials first (returning user fast-path)
-            val response = try {
-                Log.d(TAG, "[AUTH] authorizedCredentialAttempt starting...")
-                val authorizedOption = GetGoogleIdOption.Builder()
-                    .setFilterByAuthorizedAccounts(true)
-                    .setServerClientId(serverClientId)
-                    .setAutoSelectEnabled(true)
-                    .build()
-
-                val request1 = GetCredentialRequest.Builder()
-                    .addCredentialOption(authorizedOption)
-                    .build()
-
-                credentialManager.getCredential(activity, request1)
-            } catch (e: GetCredentialCancellationException) {
-                Log.i(TAG, "[AUTH] User cancelled during authorized credential attempt.")
-                return@withContext Result.failure(AuthException.UserCancelled)
-            } catch (e: GetCredentialException) {
-                Log.d(TAG, "[AUTH] noAuthorizedCredential (${e.message}). Proceeding to interactiveFallback...")
-
-                // Stage 2: First-time user interactive fallback (shows Google Account Picker directly)
-                try {
-                    Log.d(TAG, "[AUTH] interactiveFallback starting...")
-                    val interactiveOption = GetGoogleIdOption.Builder()
-                        .setFilterByAuthorizedAccounts(false)
-                        .setServerClientId(serverClientId)
-                        .setAutoSelectEnabled(false)
-                        .build()
-
-                    val request2 = GetCredentialRequest.Builder()
-                        .addCredentialOption(interactiveOption)
-                        .build()
-
-                    credentialManager.getCredential(activity, request2)
-                } catch (cancelEx: GetCredentialCancellationException) {
-                    Log.i(TAG, "[AUTH] User cancelled during interactive Google account selection.")
-                    return@withContext Result.failure(AuthException.UserCancelled)
-                } catch (fallbackEx: GetCredentialException) {
-                    Log.e(TAG, "[AUTH] Interactive CredentialManager failed: ${fallbackEx.message}", fallbackEx)
-                    return@withContext Result.failure(AuthException.GetCredentialFailed(fallbackEx.message ?: "Failed to get Google credentials"))
-                }
-            }
-
-            val credential = response.credential
-            val idToken = when {
-                credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL -> {
-                    val googleCredential = GoogleIdTokenCredential.createFrom(credential.data)
-                    Log.d(TAG, "[AUTH] googleCredentialReceived successfully")
-                    googleCredential.idToken
-                }
-                else -> {
-                    Log.e(TAG, "[AUTH] Invalid credential type received: ${credential::class.java.name}")
-                    return@withContext Result.failure(AuthException.InvalidCredentialType(credential::class.java.name))
-                }
-            }
-
-            Log.d(TAG, "[AUTH] firebaseAuthStarted")
-            val firebaseAuth = auth ?: return@withContext Result.failure(AuthException.FirebaseAuthFailed("FirebaseAuth is not initialized"))
-            val authCredential = GoogleAuthProvider.getCredential(idToken, null)
-            val authResult = firebaseAuth.signInWithCredential(authCredential).await()
-            val user = authResult.user
-                ?: return@withContext Result.failure(AuthException.FirebaseAuthFailed("Firebase authentication returned null user."))
-
-            val account = mapFirebaseUser(user) ?: FirebaseUserAccount(uid = user.uid)
-            _userState.value = account
-            Log.i(TAG, "[AUTH] firebaseAuthSuccess for Google User UID: ${account.uid}")
-            Result.success(account)
-        } catch (e: AuthException) {
-            Log.w(TAG, "[AUTH] AuthException caught: ${e.message}")
-            Result.failure(e)
-        } catch (e: Exception) {
-            Log.e(TAG, "[AUTH] firebaseAuthFailure: ${e.message}", e)
-            Result.failure(AuthException.FirebaseAuthFailed(e.message ?: "Authentication failed", e))
-        }
+    fun addSessionInvalidationListener(owner: Any, listener: () -> Unit) {
+        removeSessionInvalidationListener(owner)
+        invalidationListeners += owner to listener
+    }
+    fun removeSessionInvalidationListener(owner: Any) {
+        invalidationListeners.removeAll { it.first === owner }
     }
 
-    suspend fun signOut(): Result<Unit> = withContext(Dispatchers.IO) {
-        try {
-            Log.d(TAG, "Signing out user: ${auth?.currentUser?.uid}...")
-            auth?.signOut()
+    suspend fun signInWithGoogle(activity: Activity, customServerClientId: String? = null): Result<FirebaseUserAccount> =
+        signInInternal(activity, customServerClientId, forceChooser = false)
+
+    suspend fun switchAccount(activity: Activity): Result<FirebaseUserAccount> =
+        signInInternal(activity, null, forceChooser = true)
+
+    private suspend fun signInInternal(activity: Activity, clientOverride: String?, forceChooser: Boolean): Result<FirebaseUserAccount> =
+        withContext(Dispatchers.Main.immediate) {
+            val clientId = clientOverride ?: webClientId()
+            if (clientId.isNullOrBlank()) return@withContext Result.failure(AuthException.ConfigurationError)
+            if (!forceChooser && activeAttempt == null && isAuthenticated) {
+                return@withContext Result.success(gateway.currentUser!!)
+            }
+            val attempt = ++operationEpoch
+            activeAttempt = attempt
+            invalidateSession()
             try {
-                credentialManager.clearCredentialState(ClearCredentialStateRequest())
+                if (forceChooser) operationMutex.withLock {
+                    if (attempt != operationEpoch) return@withContext Result.failure(AuthException.SessionChanged)
+                    managedAuthWrite = true
+                    try {
+                        gateway.signOut()
+                        clearCredentials()
+                    } finally { managedAuthWrite = false }
+                }
+                val token = try {
+                    gateway.googleToken(activity, clientId, authorizedOnly = !forceChooser)
+                } catch (e: NoCredentialException) {
+                    if (forceChooser || attempt != operationEpoch) throw e
+                    gateway.googleToken(activity, clientId, authorizedOnly = false)
+                }
+                operationMutex.withLock {
+                    if (attempt != operationEpoch) return@withContext Result.failure(AuthException.SessionChanged)
+                    managedAuthWrite = true
+                    try {
+                        // Firebase Task cancellation does not undo sign-in. Keep the lock
+                        // until it settles, then clean up stale success before newer writes.
+                        withContext(NonCancellable) { gateway.signIn(token) }
+                        currentCoroutineContext().ensureActive()
+                        if (attempt != operationEpoch) {
+                            gateway.signOut()
+                            return@withContext Result.failure(AuthException.SessionChanged)
+                        }
+                        val account = gateway.currentUser ?: throw AuthException.FirebaseAuthFailed("Google authentication returned no user.")
+                        activeAttempt = null
+                        publishAccount(account)
+                        Result.success(account)
+                    } catch (cancel: CancellationException) {
+                        gateway.signOut()
+                        throw cancel
+                    } finally { managedAuthWrite = false }
+                }
+            } catch (cancel: CancellationException) {
+                throw cancel
+            } catch (e: GetCredentialCancellationException) {
+                Result.failure(AuthException.UserCancelled)
+            } catch (e: GetCredentialProviderConfigurationException) {
+                Result.failure(AuthException.ProviderUnavailable)
+            } catch (e: GetCredentialException) {
+                Result.failure(AuthException.GetCredentialFailed("Unable to retrieve Google credentials. Please try again."))
+            } catch (e: AuthException) {
+                Result.failure(e)
             } catch (e: Exception) {
-                Log.w(TAG, "Error clearing credential state: ${e.message}")
+                // Do not copy SDK exception payloads, credentials or account details to logs/UI.
+                Result.failure(AuthException.FirebaseAuthFailed("Google authentication failed. Check your connection and Firebase configuration."))
+            } finally {
+                if (activeAttempt == attempt) {
+                    activeAttempt = null
+                    publishAccount(gateway.currentUser)
+                }
             }
-            _userState.value = null
-            Log.i(TAG, "Sign-out completed successfully.")
-            Result.success(Unit)
+        }
+
+    suspend fun signOut(): Result<Unit> = withContext(Dispatchers.Main.immediate) {
+        val attempt = ++operationEpoch
+        activeAttempt = attempt
+        // Invalidate before waiting for a still-running Firebase sign-in task.
+        invalidateSession()
+        try {
+            withContext(NonCancellable) {
+                operationMutex.withLock {
+                    if (attempt != operationEpoch) return@withLock Result.failure<Unit>(AuthException.SessionChanged)
+                    managedAuthWrite = true
+                    try {
+                        gateway.signOut()
+                        clearCredentials()
+                        activeAttempt = null
+                        publishAccount(null)
+                        Result.success(Unit)
+                    } finally { managedAuthWrite = false }
+                }
+            }
+        } catch (cancel: CancellationException) {
+            throw cancel
         } catch (e: Exception) {
-            Log.e(TAG, "Error during sign-out: ${e.message}", e)
-            Result.failure(e)
+            Result.failure(AuthException.FirebaseAuthFailed("Unable to sign out. Please try again."))
+        } finally {
+            if (activeAttempt == attempt) {
+                activeAttempt = null
+                publishAccount(gateway.currentUser)
+            }
         }
     }
 
-    private fun getWebClientIdFromResources(): String? {
-        return try {
-            val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
-            if (resId != 0) {
-                context.getString(resId)
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            null
+    private suspend fun clearCredentials() {
+        try { gateway.clearCredentialState() }
+        catch (cancel: CancellationException) { throw cancel }
+        catch (_: Exception) {
+            // Firebase logout still succeeds; explicit switching never auto-selects.
+            Log.w("FirebaseAuthManager", "Credential provider state could not be cleared")
         }
     }
 
-    private fun mapFirebaseUser(user: FirebaseUser?): FirebaseUserAccount? {
-        if (user == null) return null
-        return FirebaseUserAccount(
-            uid = user.uid,
-            email = user.email,
-            displayName = user.displayName,
-            photoUrl = user.photoUrl?.toString(),
-            isAnonymous = user.isAnonymous,
-            createdAtEpochMillis = user.metadata?.creationTimestamp ?: System.currentTimeMillis(),
-            lastLoginAtEpochMillis = user.metadata?.lastSignInTimestamp ?: System.currentTimeMillis()
-        )
+    private fun invalidateSession() {
+        _userState.value = null
+        _sessionState.value = AuthSession(null, sessionState.value.generation + 1)
+        invalidationListeners.forEach { (_, listener) -> listener() }
+    }
+
+    private fun publishAccount(account: FirebaseUserAccount?) {
+        if (sessionState.value.uid != account?.uid) {
+            invalidateSession()
+            _userState.value = account
+            _sessionState.value = AuthSession(account?.uid, sessionState.value.generation + 1)
+        } else _userState.value = account
     }
 
     companion object {
-        private const val TAG = "FirebaseAuthManager"
-        const val FALLBACK_WEB_CLIENT_ID = "789767250832-co5efn9n8fih5rchac5v9kdildivokil.apps.googleusercontent.com"
+        private fun initializedAuth(context: Context): FirebaseAuth? = try {
+            com.example.firebase.FirebaseInitHelper.ensureFirebaseApp(context)?.let { FirebaseAuth.getInstance(it) }
+        } catch (_: Exception) { null }
     }
 }

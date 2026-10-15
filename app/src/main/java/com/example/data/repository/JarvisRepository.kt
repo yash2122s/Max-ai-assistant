@@ -6,8 +6,10 @@ import com.example.data.local.AutoReplyRule
 import com.example.data.local.ChatMessage
 import com.example.data.local.Reminder
 import com.example.data.preferences.SettingsManager
+import com.example.memory.account.MemoryAccountScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.withContext
 
 class JarvisRepository(private val context: Context) {
@@ -17,7 +19,10 @@ class JarvisRepository(private val context: Context) {
     private val autoReplyRuleDao = db.autoReplyRuleDao()
     private val settings = SettingsManager(context)
 
-    val allMessages: Flow<List<ChatMessage>> = chatMessageDao.getAllMessagesFlow()
+    val allMessages: Flow<List<ChatMessage>> = MemoryAccountScope.sessions.flatMapLatest { session ->
+        if (session.ownerKey == MemoryAccountScope.UNAVAILABLE) kotlinx.coroutines.flow.flowOf(emptyList())
+        else chatMessageDao.getAllMessagesFlow(session.ownerKey)
+    }
     val allReminders: Flow<List<Reminder>> = reminderDao.getAllRemindersFlow()
     val allRules: Flow<List<AutoReplyRule>> = autoReplyRuleDao.getAllRulesFlow()
 
@@ -36,8 +41,21 @@ class JarvisRepository(private val context: Context) {
         autoReplyRuleDao.getAllRules()
     }
     
-    suspend fun clearMessages() = withContext(Dispatchers.IO) {
-        chatMessageDao.clearAllMessages()
+    suspend fun clearMessages() {
+        val session = MemoryAccountScope.capture()
+        withContext(Dispatchers.IO) {
+            MemoryAccountScope.requireCurrent(session)
+            chatMessageDao.clearAllMessages(session.ownerKey)
+        }
+    }
+
+    /** Writes history only to the account that was current when the write was queued. */
+    suspend fun insertMessage(sender: String, text: String, timestamp: Long = System.currentTimeMillis()) {
+        val session = MemoryAccountScope.capture()
+        withContext(Dispatchers.IO) {
+            MemoryAccountScope.requireCurrent(session)
+            chatMessageDao.insertMessage(ChatMessage(sender = sender, text = text, timestamp = timestamp, ownerKey = session.ownerKey))
+        }
     }
 
 
@@ -45,9 +63,7 @@ class JarvisRepository(private val context: Context) {
         // Voice output disabled in migration
     }
 
-    suspend fun clearHistory() = withContext(Dispatchers.IO) {
-        chatMessageDao.clearAllMessages()
-    }
+    suspend fun clearHistory() = clearMessages()
 
     suspend fun addManualReminder(message: String, triggerAtMillis: Long) = withContext(Dispatchers.IO) {
         val id = reminderDao.insertReminder(Reminder(message = message, triggerAt = triggerAtMillis, status = "pending"))

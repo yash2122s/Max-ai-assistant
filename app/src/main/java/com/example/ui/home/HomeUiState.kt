@@ -31,7 +31,9 @@ data class HomeUiState(
     val liveAiCaption: String = "",
     val messages: List<ChatMessageItem> = emptyList(),
     val error: String? = null,
-    val pendingAutomation: JSONObject? = null
+    val pendingAutomation: JSONObject? = null,
+    val presentation: AssistantPresentation = AssistantPresentation(AssistantPhase.IDLE, "Ready"),
+    val activity: com.example.automation.activity.AgentActivityState = com.example.automation.activity.AgentActivityState()
 ) {
     val edgeLightingState: com.example.ui.theme.EdgeLightingState
         get() = when {

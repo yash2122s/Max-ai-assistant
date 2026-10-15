@@ -38,20 +38,11 @@ class CapabilityRouter(
                 Log.d(TAG, "[TIER 1 SYSTEM API] Setting '${uiStep.settingKey}' = ${uiStep.enabled}")
                 when (uiStep.settingKey.lowercase()) {
                     "flashlight", "torch" -> {
-                        try {
-                            val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as CameraManager
-                            val cameraIds = cameraManager.cameraIdList
-                            if (cameraIds.isNotEmpty()) {
-                                cameraManager.setTorchMode(cameraIds[0], uiStep.enabled)
-                                AutomationEventBus.publish(AutomationEvent.ActionStarted(executionId, "FLASHLIGHT", uiStep.enabled.toString()))
-                                ExecutionResult(success = true)
-                            } else {
-                                ExecutionResult(success = false)
-                            }
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to toggle flashlight: ${e.message}")
-                            ExecutionResult(success = false)
-                        }
+                        val result = com.example.automation.engine.ExecutionEngine.execute(context,
+                            com.example.automation.engine.ExecutionRequest(executionId = executionId,
+                                action = if (uiStep.enabled) "FLASHLIGHT_ON" else "FLASHLIGHT_OFF",
+                                source = com.example.automation.engine.ExecutionSource.PLANNER))
+                        ExecutionResult(success = result.isVerifiedSuccess, verificationEvidence = result.verification?.reason)
                     }
                     "wifi" -> {
                         try {
@@ -245,7 +236,8 @@ class CapabilityRouter(
                 } else {
                     true
                 }
-                ExecutionResult(success = ok)
+                ExecutionResult(success = ok, verificationEvidence = if (ok && (!target.isNullOrBlank() || !uiStep.packageName.isNullOrBlank()))
+                    "Wait predicate observed: target=$target package=${uiStep.packageName}" else null)
             }
 
             is UiStep.Finish -> {
@@ -258,5 +250,6 @@ class CapabilityRouter(
 data class ExecutionResult(
     val success: Boolean,
     val activePackage: String? = null,
-    val activeScreen: String? = null
+    val activeScreen: String? = null,
+    val verificationEvidence: String? = null
 )

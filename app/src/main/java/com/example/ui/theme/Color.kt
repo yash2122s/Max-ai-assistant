@@ -1,6 +1,10 @@
 package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 
 // ============================================================================
 // MAX "ROYAL OBSIDIAN & TITANIUM CYAN" DESIGN SYSTEM (iOS-Native Dark Luxury)
@@ -19,13 +23,14 @@ val MaxAccentCyan = Color(0xFF00D2FF)        // Titanium Cyan (Specular Sheen & 
 val MaxRoyalGold = Color(0xFFFFD700)         // Royal Amber Gold (Premium Sovereignty)
 val MaxGold = MaxRoyalGold                   // Alias for Royal Gold
 val MaxRoyalGoldDark = Color(0xFFB8860B)     // Dark Royal Gold for muted badges
+val MaxRoyalGoldLight = Color(0xFFB45309)    // Accessible Amber Gold (>= 3:1 on white canvas)
 val MaxRoyalIndigo = Color(0xFF5E5CE6)       // iOS Indigo
 
 // Text & Content Hierarchy (iOS High-Contrast Scale)
 val MaxTextPrimary = Color(0xFFFFFFFF)       // 100% Crisp White (Titles & Key Content)
 val MaxTextSecondary = Color(0xFF94A3B8)     // Slate 400 (Body, Subheadings, Descriptions)
-val MaxTextTertiary = Color(0xFF64748B)      // Slate 500 (Captions, Footnotes, Placeholders)
-val MaxTextMuted = Color(0xFF64748B)         // Alias for Tertiary
+val MaxTextTertiary = Color(0xFF9AA9BC)      // Legible muted captions on obsidian
+val MaxTextMuted = MaxTextTertiary
 
 // Hairline Borders & Specular Edges
 val MaxBorderHairline = Color(0xFF232D42)    // Crisp 0.5dp/1dp Inset Section Divider
@@ -77,16 +82,45 @@ val Purple600 = MaxRoyalIndigo
 val GradientStart = MaxPrimaryRoyal
 val GradientEnd = MaxAccentCyan
 
-// Aesthetic & Jarvis Tokens
-val NeonPink = MaxDestructiveApple
-val NeonBlue = MaxAccentCyan
+// Aesthetic & MAX Tokens (Stitch Luminous Neural White & Pink Theme)
+val LuminousCanvas = Color(0xFFFAFAFC)       // Crisp Pearlescent White Canvas
+val LuminousWhite = Color(0xFFFFFFFF)        // Pure White Surface
+val LuminousCardElevated = Color(0xFFFFFFFF) // Suspended Pure White Card
+val LuminousDockGlass = Color(0xF2FFFFFF)    // Frosted White Milk Glass Dock
+val LuminousDockBorder = Color(0xFFFCE7F3)   // Frosted Glass Dock Border
+
+val NeonPink = Color(0xFFFF2E93)             // Radiant Electric Neon Pink (#FF2E93)
+val MagentaRose = Color(0xFFE11D48)          // Deep Contrast Magenta Rose (#E11D48)
+val BrightRose = Color(0xFFF43F5E)           // Energetic Rose Accent (#F43F5E)
+val SoftRoseTint = Color(0xFFFFF1F2)         // Soft Rose Pill Background (#FFF1F2)
+val SoftRoseBorder = Color(0xFFFCE7F3)       // Delicate Crystalline Border (#FCE7F3)
+val SoftRoseBorderStrong = Color(0xFFFBCFE8) // Focused Rose Border (#FBCFE8)
+
+val SlateInkPrimary = Color(0xFF0F172A)      // Deep Slate 900 Text
+val SlateInkSecondary = Color(0xFF475569)    // Slate 600 Body Text
+val SlateInkMuted = Color(0xFF64748B)        // Slate 500 Metadata Text
+
+val AetherBaseDark = Color(0xFFFAFAFC)       // Pearlescent White Base Canvas
+val AetherSurface = Color(0xFFFFFFFF)        // Pure White Surface
+val AetherSurfaceGlass = Color(0xF2FFFFFF)   // Frosted Glass White
+val AetherBorder = Color(0xFFFCE7F3)         // Soft Rose Hairline
+val AetherBorderNeon = Color(0x66FF2E93)     // Glowing Neon Pink Border
+val AetherNeonCyan = NeonPink                // Electric Pink Accent (#FF2E93)
+val AetherNeonCyanDim = BrightRose           // Bright Rose (#F43F5E)
+val AetherNeonPurple = MagentaRose           // Deep Magenta (#E11D48)
+val AetherGradientAi = listOf(NeonPink, MagentaRose)
+val AetherUserBubbleBg = SoftRoseTint        // Soft Rose Chat Bubble (#FFF1F2)
+
+val NeonBlue = NeonPink
+val NeonCyan = NeonPink
+val NeonPurple = MagentaRose
 val NeonGreen = MaxSuccessApple
 val NeonGold = MaxRoyalGold
-val GradientBorderColors = listOf(MaxAccentCyan, MaxPrimaryRoyal, MaxAccentCyan)
+val GradientBorderColors = listOf(MagentaRose, NeonPink, MagentaRose)
 
-val SlateBackground = MaxBaseDark
-val SlateSurface = MaxSurfaceCard
-val SlateBorder = MaxBorderHairline
+val SlateBackground = LuminousCanvas
+val SlateSurface = LuminousWhite
+val SlateBorder = SoftRoseBorder
 
 val AccentCyan = MaxAccentCyan
 val AccentTeal = Color(0xFF00C7BE)
@@ -105,3 +139,38 @@ val JarvisFieryOrange = Color(0xFFFF6B00)
 val JarvisDarkBg = MaxBaseDark
 val JarvisCardBg = MaxSurfaceCard
 val JarvisBorderAmber = Color(0x40FFD700)
+
+@Immutable
+data class MaxExtraColors(
+    val textSecondary: Color,
+    val textTertiary: Color,
+    val link: Color,
+    val borderSubtle: Color,   // decorative card borders
+    val borderStrong: Color,   // essential control borders (>= 3:1)
+    val glow: Color            // decorative only, never for text
+)
+
+val MaxDarkExtra = MaxExtraColors(
+    textSecondary = Color(0xFF94A3B8),
+    textTertiary  = Color(0xFF9AA9BC),
+    link          = Color(0xFF00D2FF),   // MaxAccentCyan
+    borderSubtle  = Color(0x1FFFFFFF),
+    borderStrong  = Color(0x66FFFFFF),
+    glow          = Color(0xFFFF2E93)    // NeonPink: glow only
+)
+
+val MaxLightExtra = MaxExtraColors(
+    textSecondary = Color(0xFF475569),
+    textTertiary  = Color(0xFF64748B),
+    link          = Color(0xFF0A60C8),   // >= 4.5:1 on white
+    borderSubtle  = Color(0xFFE5C4D3),
+    borderStrong  = Color(0xFFB07A94),   // ~3.4:1 on white
+    glow          = Color(0xFFFF2E93)
+)
+
+val LocalMaxExtra = staticCompositionLocalOf { MaxDarkExtra }
+
+object MaxColors {
+    val extra: MaxExtraColors
+        @Composable @ReadOnlyComposable get() = LocalMaxExtra.current
+}

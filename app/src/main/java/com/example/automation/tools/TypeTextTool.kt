@@ -45,19 +45,21 @@ class TypeTextTool : Tool {
 
     override fun validate(request: ExecutionRequest): Boolean {
         val args = request.arguments
-        val text = args.get("text")?.asString
+        val raw = args.get("text")?.asString
             ?: args.get("target")?.asString
             ?: args.get("query")?.asString
             ?: ""
+        val text = com.example.automation.keyboard.KeyboardController.sanitizeTypeText(raw)
         return text.isNotBlank()
     }
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
         val args = request.arguments
-        val text = args.get("text")?.asString
+        val raw = args.get("text")?.asString
             ?: args.get("target")?.asString
             ?: args.get("query")?.asString
             ?: ""
+        val text = com.example.automation.keyboard.KeyboardController.sanitizeTypeText(raw)
         val targetField = args.get("field")?.asString
             ?: args.get("hint")?.asString
             ?: args.get("description")?.asString
@@ -71,13 +73,22 @@ class TypeTextTool : Tool {
         }
         val pressEnter = args.get("press_enter")?.asBoolean ?: args.get("enter")?.asBoolean ?: false
 
-        return com.example.automation.keyboard.KeyboardController.typeText(
-            context = context,
-            text = text,
-            targetField = targetField,
-            replace = replaceParam,
-            pressEnterAfter = pressEnter,
-            executionId = request.executionId
+        val result = com.example.automation.engine.SerializedActionExecutor.execute("type:${text.take(20)}") {
+            com.example.automation.keyboard.KeyboardController.typeText(
+                context = context,
+                text = text,
+                targetField = targetField,
+                replace = replaceParam,
+                pressEnterAfter = pressEnter,
+                executionId = request.executionId
+            )
+        }
+
+        return result ?: ToolResult(
+            success = false,
+            toolName = name,
+            errorCode = "EXECUTION_LOCKED",
+            message = "Typing action could not acquire UI lock or was cancelled"
         )
     }
 

@@ -60,8 +60,16 @@ data class Turn(
 // Response models
 data class ServerMessage(
     val serverContent: ServerContent?,
-    val toolCall: ToolCall? = null
+    val toolCall: ToolCall? = null,
+    val setupComplete: com.google.gson.JsonObject? = null,
+    val toolCallCancellation: ToolCallCancellation? = null,
+    val sessionResumptionUpdate: SessionResumptionUpdate? = null,
+    val goAway: com.google.gson.JsonObject? = null
 )
+
+data class ToolCallCancellation(val ids: List<String> = emptyList())
+
+data class SessionResumptionUpdate(val newHandle: String? = null, val resumable: Boolean = false)
 
 data class ToolCall(
     val functionCalls: List<FunctionCall>
@@ -70,7 +78,11 @@ data class ToolCall(
 data class ServerContent(
     val modelTurn: ModelTurn? = null,
     val turnComplete: Boolean? = null,
+    val generationComplete: Boolean? = null,
+    val endOfTurn: Boolean? = null,
     val inputTranscription: InputTranscription? = null,
+    @SerializedName(value = "interimInputTranscription", alternate = ["interim_input_transcription"])
+    val interimInputTranscription: InputTranscription? = null,
     val outputTranscription: OutputTranscription? = null,
     val interrupted: Boolean? = null,
     @SerializedName(value = "interactionStatus", alternate = ["interaction_status"])

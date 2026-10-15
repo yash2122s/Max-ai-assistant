@@ -1,24 +1,23 @@
 package com.example.memory.data
 
 import androidx.room.Entity
-import androidx.room.PrimaryKey
 import androidx.room.Index
 import java.security.MessageDigest
 import java.util.UUID
 
 @Entity(
     tableName = "permanent_memory",
+    primaryKeys = ["ownerKey", "memoryId"],
     indices = [
-        Index(value = ["pinned"]),
-        Index(value = ["enabled"]),
-        Index(value = ["category"]),
-        Index(value = ["type"]),
-        Index(value = ["importChecksum"]),
-        Index(value = ["sourceRecordId"])
+        Index(value = ["ownerKey", "pinned"]),
+        Index(value = ["ownerKey", "enabled"]),
+        Index(value = ["ownerKey", "category"]),
+        Index(value = ["ownerKey", "type"]),
+        Index(value = ["ownerKey", "importChecksum"]),
+        Index(value = ["ownerKey", "sourceRecordId"])
     ]
 )
 data class PermanentMemory(
-    @PrimaryKey
     val memoryId: String = UUID.randomUUID().toString(),
     val title: String,
     val content: String,
@@ -41,7 +40,8 @@ data class PermanentMemory(
     val extractedAt: Long? = null,
     val lastSyncAt: Long? = null,
     val contentHash: String? = null,
-    val metadataJson: String? = null
+    val metadataJson: String? = null,
+    val ownerKey: String = "legacy"
 ) {
     companion object {
         fun computeContentHash(title: String, content: String, category: String, tags: String = ""): String {
@@ -70,6 +70,7 @@ data class PermanentMemory(
         other as PermanentMemory
 
         if (memoryId != other.memoryId) return false
+        if (ownerKey != other.ownerKey) return false
         if (title != other.title) return false
         if (content != other.content) return false
         if (category != other.category) return false
@@ -100,6 +101,7 @@ data class PermanentMemory(
 
     override fun hashCode(): Int {
         var result = memoryId.hashCode()
+        result = 31 * result + ownerKey.hashCode()
         result = 31 * result + title.hashCode()
         result = 31 * result + content.hashCode()
         result = 31 * result + category.hashCode()

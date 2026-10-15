@@ -7,12 +7,70 @@ import androidx.core.content.ContextCompat
 import com.example.automation.engine.ContactMatch
 import com.example.automation.engine.PhoneNumber
 import org.json.JSONObject
-import org.json.JSONArray
+
+object ContactAliasResolver {
+    val RELATIONSHIP_ALIASES: Map<String, List<String>> = mapOf(
+        "నాన్న" to listOf("Dad", "Daddy", "Father", "Papa", "Nanna"),
+        "నాన్నకు" to listOf("Dad", "Daddy", "Father", "Papa", "Nanna"),
+        "డాడీ" to listOf("Daddy", "Dad", "Father", "Papa"),
+        "డాడీకి" to listOf("Daddy", "Dad", "Father", "Papa"),
+        "అమ్మ" to listOf("Mom", "Mummy", "Mother", "Amma"),
+        "అమ్మకు" to listOf("Mom", "Mummy", "Mother", "Amma"),
+        "అమ్మకి" to listOf("Mom", "Mummy", "Mother", "Amma"),
+        "మమ్మీ" to listOf("Mummy", "Mom", "Mother", "Amma"),
+        "మమ్మీకి" to listOf("Mummy", "Mom", "Mother", "Amma"),
+        "అన్న" to listOf("Brother", "Anna"),
+        "అన్నయ్య" to listOf("Brother", "Anna", "Annayya"),
+        "అన్నయ్యకు" to listOf("Brother", "Anna", "Annayya"),
+        "తమ్ముడు" to listOf("Brother", "Thammudu"),
+        "తమ్ముడికి" to listOf("Brother", "Thammudu"),
+        "అక్క" to listOf("Sister", "Akka"),
+        "అక్కకు" to listOf("Sister", "Akka"),
+        "అక్కకి" to listOf("Sister", "Akka"),
+        "చెల్లి" to listOf("Sister", "Chelli"),
+        "చెల్లెలు" to listOf("Sister", "Chelli", "Chellelu"),
+        "భార్య" to listOf("Wife", "Honey"),
+        "భర్త" to listOf("Husband"),
+        "ఫ్రెండ్" to listOf("Friend"),
+        "dad" to listOf("Daddy", "Father", "Papa", "Nanna"),
+        "daddy" to listOf("Dad", "Father", "Papa", "Nanna"),
+        "mom" to listOf("Mummy", "Mother", "Amma"),
+        "mummy" to listOf("Mom", "Mother", "Amma"),
+        "mother" to listOf("Mom", "Mummy", "Amma"),
+        "father" to listOf("Dad", "Daddy", "Papa", "Nanna"),
+        "brother" to listOf("Anna", "Thammudu"),
+        "sister" to listOf("Akka", "Chelli")
+    )
+
+    fun cleanQuery(raw: String): String {
+        return raw.trim()
+            .replace(Regex("^(?:to|the|call|dial|ఫోన్|కాల్)\\s+", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("(?:కి|కు|గారికి|గారు)$"), "")
+            .trim()
+    }
+
+    fun getCandidateQueries(rawQuery: String): List<String> {
+        val candidates = mutableListOf<String>()
+        val cleaned = cleanQuery(rawQuery)
+        if (cleaned.isNotBlank()) {
+            candidates.add(cleaned)
+        }
+        if (rawQuery.trim() != cleaned && rawQuery.isNotBlank()) {
+            candidates.add(rawQuery.trim())
+        }
+
+        val aliases = RELATIONSHIP_ALIASES[cleaned.lowercase()] ?: RELATIONSHIP_ALIASES[rawQuery.trim().lowercase()]
+        if (aliases != null) {
+            candidates.addAll(aliases)
+        }
+
+        return candidates.distinct()
+    }
+}
 
 class SearchContactAction : BaseAction<JSONObject>() {
     override fun execute(context: Context, payload: JSONObject) {
-        // This is unused because SearchContactTool will bypass the ActionDispatcher
-        // and just call a search method directly.
+        // Unused because SearchContactTool bypasses ActionDispatcher
     }
 
     fun searchContacts(context: Context, query: String): List<ContactMatch> {
@@ -21,6 +79,17 @@ class SearchContactAction : BaseAction<JSONObject>() {
             throw SecurityException("READ_CONTACTS permission denied")
         }
 
+        val candidates = ContactAliasResolver.getCandidateQueries(query)
+        for (candidate in candidates) {
+            val results = queryContactsProvider(context, candidate)
+            if (results.isNotEmpty()) {
+                return results
+            }
+        }
+        return emptyList()
+    }
+
+    private fun queryContactsProvider(context: Context, query: String): List<ContactMatch> {
         val projection = arrayOf(
             ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
             ContactsContract.CommonDataKinds.Phone.LOOKUP_KEY,
@@ -37,7 +106,7 @@ class SearchContactAction : BaseAction<JSONObject>() {
         )
 
         val matchesMap = mutableMapOf<Long, MutableList<PhoneNumber>>()
-        val contactDetails = mutableMapOf<Long, Pair<String, String>>() // contactId -> (lookupKey, displayName)
+        val contactDetails = mutableMapOf<Long, Pair<String, String>>()
 
         context.contentResolver.query(
             uri,
@@ -78,7 +147,6 @@ class SearchContactAction : BaseAction<JSONObject>() {
             }
         }
 
-        // Convert map to list and sort (exact matches first)
         return contactDetails.map { (contactId, details) ->
             ContactMatch(
                 contactId = contactId,

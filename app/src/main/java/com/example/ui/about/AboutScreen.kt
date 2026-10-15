@@ -2,9 +2,7 @@ package com.example.ui.about
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -17,7 +15,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ui.components.*
 import com.example.ui.theme.*
 
@@ -26,22 +23,16 @@ fun AboutScreen(
     onNavigateBack: () -> Unit,
     onNavigateToPrivacy: () -> Unit
 ) {
-    val scrollState = rememberScrollState()
-
-    Scaffold(
-        topBar = {
-            MaxTopBar(
-                title = "About System",
-                onBackClick = onNavigateBack
-            )
-        },
-        containerColor = MaxBgDark
-    ) { padding ->
+    MaxScreen(
+        title = "About System",
+        eyebrow = "SYSTEM PROFILE",
+        auroraMode = AuroraMode.SUBTLE,
+        scrollable = true,
+        onBack = onNavigateBack
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(scrollState)
                 .padding(horizontal = MaxDimensions.spaceMd, vertical = MaxDimensions.spaceSm),
             verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceMd)
         ) {
@@ -59,14 +50,14 @@ fun AboutScreen(
                             .clip(RoundedCornerShape(MaxDimensions.radiusLg))
                             .background(
                                 Brush.linearGradient(
-                                    listOf(MaxPrimary, MaxSecondary)
+                                    listOf(MaxSemanticColors.accentCyan, MaxSemanticColors.primaryRoyal)
                                 )
                             ),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = "M",
-                            fontSize = 38.sp,
+                            style = MaxType.Display,
                             fontWeight = FontWeight.Black,
                             color = Color.White
                         )
@@ -76,27 +67,26 @@ fun AboutScreen(
 
                     Text(
                         text = "M A X",
-                        fontSize = 28.sp,
+                        style = MaxType.Title,
                         fontWeight = FontWeight.Black,
-                        color = MaxTextPrimary,
-                        letterSpacing = 4.sp
+                        color = MaxSemanticColors.textPrimary
                     )
 
                     Spacer(modifier = Modifier.height(2.dp))
 
                     Text(
                         text = "Autonomous Personal AI Assistant",
-                        fontSize = 14.sp,
+                        style = MaxType.Body,
                         fontWeight = FontWeight.Bold,
-                        color = MaxPrimary
+                        color = MaxSemanticColors.accentCyan
                     )
 
                     Spacer(modifier = Modifier.height(4.dp))
 
                     Text(
                         text = "Version 3.0.0 • Build 36 • Android 14+",
-                        fontSize = 12.sp,
-                        color = MaxTextMuted
+                        style = MaxType.Caption,
+                        color = MaxSemanticColors.textMuted
                     )
                 }
             }
@@ -114,29 +104,29 @@ fun AboutScreen(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(RoundedCornerShape(MaxDimensions.radiusMd))
-                            .background(MaxPrimary.copy(alpha = 0.15f)),
+                            .background(MaxSemanticColors.accentCyan.copy(alpha = 0.15f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             imageVector = Icons.Default.Code,
                             contentDescription = null,
-                            tint = MaxPrimary,
-                            modifier = Modifier.size(24.dp)
+                            tint = MaxSemanticColors.accentCyan,
+                            modifier = Modifier.size(MaxIconTokens.Large)
                         )
                     }
 
                     Column {
                         Text(
                             text = "Engineered by Yaswanth",
-                            fontSize = 15.sp,
+                            style = MaxType.Headline,
                             fontWeight = FontWeight.Bold,
-                            color = MaxTextPrimary
+                            color = MaxSemanticColors.textPrimary
                         )
                         Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = "Full-stack on-device architecture & neural agents",
-                            fontSize = 12.sp,
-                            color = MaxTextSecondary
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textSecondary
                         )
                     }
                 }
@@ -145,45 +135,43 @@ fun AboutScreen(
             // System Capabilities Section
             Text(
                 text = "SYSTEM ARCHITECTURE",
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaxTextMuted,
-                letterSpacing = 1.sp
+                style = MaxType.Eyebrow,
+                color = MaxSemanticColors.textMuted
             )
 
             FeatureCard(
                 icon = Icons.Default.Mic,
                 title = "Realtime Voice Intelligence",
                 description = "Ultra-low latency conversational neural voice processing with seamless hands-free interaction.",
-                tint = MaxPrimary
+                tint = MaxSemanticColors.accentCyan
             )
 
             FeatureCard(
                 icon = Icons.Default.DesktopWindows,
                 title = "Windows Companion PC Bridge",
                 description = "Cross-device clipboard sync, remote terminal control, app launching, and desktop vision.",
-                tint = MaxSecondary
+                tint = MaxSemanticColors.primaryRoyal
             )
 
             FeatureCard(
                 icon = Icons.Default.Psychology,
                 title = "Local Encrypted Memory Vault",
                 description = "AES-256 encrypted Room vector embeddings for persistent context with zero cloud leaks.",
-                tint = MaxPrimary
+                tint = MaxSemanticColors.accentCyan
             )
 
             FeatureCard(
                 icon = Icons.Default.PhoneInTalk,
                 title = "Incoming Call Assistant",
                 description = "Announces caller identity and answers or rejects incoming calls hands-free via voice.",
-                tint = MaxSuccess
+                tint = MaxSemanticColors.success
             )
 
             FeatureCard(
                 icon = Icons.Default.Shield,
                 title = "Local-First Privacy Architecture",
                 description = "Zero proprietary cloud servers, zero telemetry collectors, and zero trackers.",
-                tint = Color(0xFFFFB300)
+                tint = MaxSemanticColors.warning
             )
 
             Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
@@ -196,65 +184,6 @@ fun AboutScreen(
             )
 
             Spacer(modifier = Modifier.height(MaxDimensions.spaceXl))
-        }
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun AboutScreenPreview() {
-    MaxTheme {
-        AboutScreen(
-            onNavigateBack = {},
-            onNavigateToPrivacy = {}
-        )
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview
-@Composable
-fun EdgeLightingPreview() {
-    MaxTheme {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(MaxBgDark),
-            contentAlignment = Alignment.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(32.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = "⚡ MAX Voice Live Active ⚡\n(Fluid Edge Lighting Effect)",
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 16.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                )
-            }
-            androidx.compose.foundation.Canvas(
-                modifier = Modifier.fillMaxSize()
-            ) {
-                val stroke = 16f
-                drawRoundRect(
-                    brush = Brush.sweepGradient(
-                        listOf(
-                            Color(0xFF00A8FF), // Electric Blue
-                            Color(0xFF7C4DFF), // Vivid Purple
-                            Color(0xFF00E5FF), // Cyan
-                            Color(0xFFFF2A6D), // Hot Magenta
-                            Color(0xFF00E676), // Emerald
-                            Color(0xFF00A8FF)  // Loop
-                        )
-                    ),
-                    size = size,
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(40f),
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke)
-                )
-            }
         }
     }
 }
@@ -293,16 +222,15 @@ private fun FeatureCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    fontSize = 14.sp,
+                    style = MaxType.Body,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaxTextPrimary
+                    color = MaxSemanticColors.textPrimary
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = description,
-                    fontSize = 12.sp,
-                    color = MaxTextSecondary,
-                    lineHeight = 16.sp
+                    style = MaxType.Caption,
+                    color = MaxSemanticColors.textSecondary
                 )
             }
         }

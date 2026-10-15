@@ -2,6 +2,9 @@ package com.example.memory.universal
 
 import android.content.Context
 import com.example.data.local.AppDatabase
+import androidx.room.withTransaction
+import com.example.memory.account.MemoryAccountScope
+import com.example.memory.account.MemorySession
 import com.example.memory.data.MemorySource
 import com.example.memory.data.PermanentMemory
 import com.example.memory.data.PermanentMemoryDao
@@ -11,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
+import com.example.memory.sync.MemorySyncQueueCoordinator
 
 class UniversalMemoryImporter(private val context: Context) {
 
@@ -38,7 +42,8 @@ class UniversalMemoryImporter(private val context: Context) {
      * File -> Provider detection -> Parse -> Normalize -> Deduplicate.
      * GUARANTEE: Never modifies Room.
      */
-    suspend fun preview(rawContent: String, fileName: String? = null): ImportPreviewResult = withContext(Dispatchers.IO) {
+    suspend fun preview(rawContent: String, fileName: String? = null, session: MemorySession = MemoryAccountScope.capture()): ImportPreviewResult = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         val parseErrors = mutableListOf<String>()
         val provider = ProviderDetector.detect(rawContent, fileName)
         val candidates = ImportParsers.parse(provider, rawContent, parseErrors)
@@ -51,11 +56,13 @@ class UniversalMemoryImporter(private val context: Context) {
                 supersedeCount = 0,
                 duplicateCount = 0,
                 items = emptyList(),
-                parseErrors = parseErrors
+                parseErrors = parseErrors,
+                session = session
             )
         }
 
-        val existingDbMemories = dao.getAll().map { decryptMemory(it) }
+        val existingDbMemories = dao.getAll(session.ownerKey).map { decryptMemory(it) }
+        MemoryAccountScope.requireCurrent(session)
         val previewItems = evaluateDeduplication(candidates, existingDbMemories)
 
         val insertCount = previewItems.count { it.action == ImportAction.INSERT }
@@ -69,7 +76,8 @@ class UniversalMemoryImporter(private val context: Context) {
             supersedeCount = supersedeCount,
             duplicateCount = duplicateCount,
             items = previewItems,
-            parseErrors = parseErrors
+            parseErrors = parseErrors,
+            session = session
         )
     }
 
@@ -216,7 +224,8 @@ class UniversalMemoryImporter(private val context: Context) {
      * Re-runs deduplication again at commit time against current Room state.
      * Atomically persists in Room and triggers Markdown sync.
      */
-    suspend fun commit(candidates: List<ImportCandidate>): ImportCommitResult = withContext(Dispatchers.IO) {
+    suspend fun commit(candidates: List<ImportCandidate>, session: MemorySession = MemoryAccountScope.capture()): ImportCommitResult = withContext(Dispatchers.IO) {
+        MemoryAccountScope.requireCurrent(session)
         if (candidates.isEmpty()) {
             return@withContext ImportCommitResult(
                 success = true,
@@ -229,7 +238,8 @@ class UniversalMemoryImporter(private val context: Context) {
 
         try {
             // Re-run deduplication against fresh Room DB state
-            val freshDbMemories = dao.getAll().map { decryptMemory(it) }
+            val freshDbMemories = dao.getAll(session.ownerKey).map { decryptMemory(it) }
+            MemoryAccountScope.requireCurrent(session)
             val evaluated = evaluateDeduplication(candidates, freshDbMemories)
 
             val toInsert = mutableListOf<PermanentMemory>()
@@ -245,6 +255,7 @@ class UniversalMemoryImporter(private val context: Context) {
                     }
                     ImportAction.INSERT -> {
                         val memory = PermanentMemory(
+                            ownerKey = session.ownerKey,
                             memoryId = UUID.randomUUID().toString(),
                             title = item.candidate.title,
                             content = item.candidate.content,
@@ -270,6 +281,7 @@ class UniversalMemoryImporter(private val context: Context) {
                     ImportAction.UPDATE_SUPERSEDE -> {
                         val existingId = item.existingMemoryId ?: UUID.randomUUID().toString()
                         val memory = PermanentMemory(
+                            ownerKey = session.ownerKey,
                             memoryId = existingId,
                             title = item.candidate.title,
                             content = item.candidate.content,
@@ -296,25 +308,32 @@ class UniversalMemoryImporter(private val context: Context) {
             }
 
             // Batch insert & update in Room
-            if (toInsert.isNotEmpty()) {
-                dao.insertAll(toInsert)
-            }
-            for (mem in toUpdate) {
-                dao.update(mem)
+            db.withTransaction {
+                MemoryAccountScope.requireCurrent(session)
+                if (toInsert.isNotEmpty()) dao.insertAll(toInsert)
+                for (mem in toUpdate) dao.update(mem)
+                MemoryAccountScope.requireCurrent(session)
             }
 
             // Trigger debounced Markdown projection sync
-            MemorySyncService.getInstance(context).exportToMarkdown()
+            MemorySyncService.getInstance(context).exportToMarkdown(session)
 
             // Notify MemoryRepository and increment memoryRevision for real-time live voice agent visibility
+            MemoryAccountScope.requireCurrent(session)
             com.example.memory.data.MemoryRepository.getInstance(context).notifyMemoryChanged(
                 com.example.memory.data.MemoryChangeEvent.Imported(toInsert.size + toUpdate.size)
             )
 
             // Asynchronously index newly imported memories into RAG
             val allCommittedDecrypted = (toInsert + toUpdate).map { decryptMemory(it) }
+            val revision = com.example.memory.data.MemoryRepository.getInstance(context).memoryRevision.value + 1
+            for (memory in allCommittedDecrypted) {
+                if (memory.memoryId in toInsert.map { it.memoryId }) MemorySyncQueueCoordinator.create(memory, revision)
+                else MemorySyncQueueCoordinator.update(memory, revision)
+            }
             try {
-                com.example.rag.engine.RagEngine.getInstance(context).indexMemories(allCommittedDecrypted)
+                MemoryAccountScope.requireCurrent(session)
+                com.example.rag.engine.RagEngine.getInstance(context).indexMemories(allCommittedDecrypted, session)
             } catch (e: Exception) {
                 android.util.Log.w("UniversalMemoryImporter", "Post-import RAG indexing warning: ${e.message}")
             }

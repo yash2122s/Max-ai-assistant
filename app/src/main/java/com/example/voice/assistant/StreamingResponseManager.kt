@@ -16,21 +16,23 @@ class StreamingResponseManager(
     private val currentTurnText = StringBuilder()
 
     fun handleIncomingText(text: String) {
-        val sanitized = com.example.utils.InternalReasoningFilter.sanitize(text)
-        if (sanitized.isBlank()) return
+        val sanitized = com.example.utils.InternalReasoningFilter.sanitizeDelta(text)
+        if (sanitized.isEmpty()) return
         AssistantLogger.recordFirstTranscript()
         onStateTransition(SessionState.STREAMING_TEXT)
-        synchronized(currentTurnText) {
-            if (currentTurnText.isNotEmpty()) {
-                val lastChar = currentTurnText.last()
-                val firstChar = sanitized.first()
-                if (!lastChar.isWhitespace() && lastChar != '\n' && !sanitized.startsWith(" ") && firstChar.isLetterOrDigit()) {
-                    currentTurnText.append(' ')
-                }
+        val chunkToEmit = synchronized(currentTurnText) {
+            val previous = currentTurnText.toString()
+            val combined = com.example.ui.home.appendResponseChunk(previous, sanitized)
+            val addedDelta = if (combined.startsWith(previous)) {
+                combined.substring(previous.length)
+            } else {
+                sanitized
             }
-            currentTurnText.append(sanitized)
+            currentTurnText.setLength(0)
+            currentTurnText.append(combined)
+            addedDelta
         }
-        AssistantEventBus.emit(AssistantEvent.ResponseChunk(sanitized))
+        AssistantEventBus.emit(AssistantEvent.ResponseChunk(chunkToEmit))
     }
 
     private var firstAudioLogged = false
@@ -54,8 +56,13 @@ class StreamingResponseManager(
             currentTurnText.setLength(0)
             res
         }
+        val verifiedText = com.example.automation.engine.truth.ExecutionTruthCoordinator.validateOrCorrectAssistantResponse(fullText)
+        if (verifiedText != fullText) {
+            android.util.Log.w("StreamingResponseMgr", "Overriding final assembled turn text from '$fullText' to '$verifiedText'")
+            stopAllPlayback()
+        }
         onStateTransition(SessionState.CONNECTED)
-        AssistantEventBus.emit(AssistantEvent.TurnComplete(fullText))
+        AssistantEventBus.emit(AssistantEvent.TurnComplete(verifiedText))
     }
 
     fun handleToolCall(callId: String, toolName: String, args: String) {

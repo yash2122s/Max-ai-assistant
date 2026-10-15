@@ -2,8 +2,8 @@ package com.example.automation
 
 import android.graphics.Rect
 import android.view.accessibility.AccessibilityNodeInfo
-import com.example.automation.resolver.WhatsAppContactMatch
-import com.example.automation.resolver.WhatsAppContactResolver
+import com.example.features.whatsapp.WhatsAppContactMatch
+import com.example.features.whatsapp.WhatsAppContactResolver
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -262,5 +262,70 @@ class WhatsAppContactResolverUnitTest {
         val found = match as WhatsAppContactMatch.Found
         assertEquals("Yashwanth", found.matchedName)
         assertEquals(directRow, found.nodeToClick)
+    }
+
+    @Test
+    fun test11_PhoneticMatching_Yaswanth_vs_Yashwanth() {
+        val root = createNode(className = "android.widget.FrameLayout")
+
+        val contactRow = createNode(
+            resId = "com.whatsapp:id/contact_row_container",
+            isClickable = true
+        )
+        val directName = createNode(
+            text = "Yashwanth",
+            resId = "com.whatsapp:id/conversations_row_contact_name"
+        )
+        shadowOf(contactRow).addChild(directName)
+        shadowOf(root).addChild(contactRow)
+
+        // Target specified as "yaswanth" without 'h'
+        val result = WhatsAppContactResolver.resolveSearchRow(
+            root = root,
+            targetContact = "yaswanth"
+        )
+
+        assertTrue("Phonetic match should find contact: $result", result is WhatsAppContactMatch.Found)
+        val found = result as WhatsAppContactMatch.Found
+        assertEquals("Yashwanth", found.matchedName)
+        assertEquals(contactRow, found.nodeToClick)
+    }
+
+    @Test
+    fun test12_PhoneticChatHeaderVerification() {
+        val chatRoot = createNode(className = "android.widget.FrameLayout")
+
+        val entry = createNode(text = "Type a message", resId = "com.whatsapp:id/entry", isClickable = true)
+        shadowOf(chatRoot).addChild(entry)
+
+        val headerTitle = createNode(
+            text = "Yashwanth",
+            resId = "com.whatsapp:id/conversation_contact_name",
+            bounds = Rect(50, 60, 300, 120)
+        )
+        shadowOf(chatRoot).addChild(headerTitle)
+
+        // Target is "yaswanth", chat opened has "Yashwanth"
+        val isCorrect = WhatsAppContactResolver.isCorrectChatOpen(root = chatRoot, targetContact = "yaswanth")
+        assertTrue("Must verify chat header when phonetic difference exists (yaswanth vs Yashwanth)", isCorrect)
+    }
+
+    @Test
+    fun test13_PhoneticPartialHeaderVerification() {
+        val chatRoot = createNode(className = "android.widget.FrameLayout")
+
+        val entry = createNode(text = "Type a message", resId = "com.whatsapp:id/entry", isClickable = true)
+        shadowOf(chatRoot).addChild(entry)
+
+        val headerTitle = createNode(
+            text = "Yashwanth Reddy",
+            resId = "com.whatsapp:id/conversation_contact_name",
+            bounds = Rect(50, 60, 300, 120)
+        )
+        shadowOf(chatRoot).addChild(headerTitle)
+
+        // Target is "yaswanth", chat opened has "Yashwanth Reddy"
+        val isCorrect = WhatsAppContactResolver.isCorrectChatOpen(root = chatRoot, targetContact = "yaswanth")
+        assertTrue("Must verify chat header when target is substring/token of header with phonetic difference", isCorrect)
     }
 }

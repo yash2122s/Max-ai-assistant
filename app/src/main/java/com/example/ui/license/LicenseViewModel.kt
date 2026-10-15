@@ -15,6 +15,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 
 sealed class LicenseImportState {
@@ -23,6 +26,10 @@ sealed class LicenseImportState {
     data class Success(val message: String) : LicenseImportState()
     data class Error(val error: String) : LicenseImportState()
 }
+
+/** After logout the cloud fast-path is gone; refresh reads synchronous Room DAOs. */
+internal suspend fun com.example.license.entitlement.EntitlementManager.refreshForAccountUi() =
+    withContext(Dispatchers.IO) { refresh() }
 
 class LicenseViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -38,12 +45,30 @@ class LicenseViewModel(application: Application) : AndroidViewModel(application)
 
     private val _importState = MutableStateFlow<LicenseImportState>(LicenseImportState.Idle)
     val importState: StateFlow<LicenseImportState> = _importState.asStateFlow()
+    private var operation: Job? = null
+    private var authenticationOperation = false
+
+    init {
+        app.maxLicenseManager.authManager.addSessionInvalidationListener(this) {
+            if (!authenticationOperation) operation?.cancel()
+            _importState.value = LicenseImportState.Idle
+        }
+    }
+
+    private fun beginOperation(authAction: Boolean = false, block: suspend () -> Unit) {
+        if (operation?.isActive == true) return
+        authenticationOperation = authAction
+        operation = viewModelScope.launch {
+            try { block() } finally { authenticationOperation = false }
+        }
+    }
 
     fun resetState() {
         _importState.value = LicenseImportState.Idle
     }
 
     fun activateLicenseKey(rawKey: String) {
+        val session = app.maxLicenseManager.authManager.sessionState.value
         viewModelScope.launch {
             _importState.value = LicenseImportState.Loading
             try {
@@ -54,8 +79,10 @@ class LicenseViewModel(application: Application) : AndroidViewModel(application)
                 }
 
                 val result = app.maxLicenseManager.claimLicenseKey(cleaned)
+                if (!app.maxLicenseManager.authManager.isCurrentSession(session)) return@launch
                 if (result.isSuccess) {
                     app.entitlementManager.refresh()
+                    if (!app.maxLicenseManager.authManager.isCurrentSession(session)) return@launch
                     try {
                         com.example.voice.assistant.AssistantLifecycleManager.resume()
                         val useCase = com.example.domain.usecase.AssistantUseCase(app)
@@ -76,15 +103,22 @@ class LicenseViewModel(application: Application) : AndroidViewModel(application)
                     _importState.value = LicenseImportState.Error(userMsg)
                 }
             } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                if (!app.maxLicenseManager.authManager.isCurrentSession(session)) return@launch
                 _importState.value = LicenseImportState.Error("Activation failed: ${e.message}")
             }
         }
     }
 
     fun signInWithGoogle(activity: Activity) {
-        viewModelScope.launch {
+        beginOperation(authAction = true) {
             _importState.value = LicenseImportState.Loading
             val result = app.maxLicenseManager.signInWithGoogle(activity)
+            if (result.exceptionOrNull() is com.example.firebase.auth.AuthException.SessionChanged ||
+                result.exceptionOrNull() is com.example.firebase.auth.AuthException.UserCancelled) {
+                _importState.value = LicenseImportState.Idle
+                return@beginOperation
+            }
             if (result.isSuccess) {
                 val user = result.getOrNull()
                 _importState.value = LicenseImportState.Success("Signed in as ${user?.email ?: user?.displayName ?: "Google User"}")
@@ -94,12 +128,28 @@ class LicenseViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun switchAccount(activity: Activity) {
+        beginOperation(authAction = true) {
+            _importState.value = LicenseImportState.Loading
+            val result = app.maxLicenseManager.switchAccount(activity)
+            if (result.exceptionOrNull() is com.example.firebase.auth.AuthException.SessionChanged ||
+                result.exceptionOrNull() is com.example.firebase.auth.AuthException.UserCancelled) {
+                _importState.value = LicenseImportState.Idle
+                return@beginOperation
+            }
+            _importState.value = if (result.isSuccess) {
+                LicenseImportState.Success("Switched to ${result.getOrNull()?.email ?: "Google account"}")
+            } else LicenseImportState.Error(result.exceptionOrNull()?.message ?: "Account switch failed")
+        }
+    }
+
     fun signOut() {
-        viewModelScope.launch {
+        beginOperation(authAction = true) {
             _importState.value = LicenseImportState.Loading
             val result = app.maxLicenseManager.signOut()
             if (result.isSuccess) {
-                app.entitlementManager.refresh()
+                app.entitlementManager.refreshForAccountUi()
+                if (currentUser.value != null) return@beginOperation
                 _importState.value = LicenseImportState.Success("Signed out successfully.")
             } else {
                 _importState.value = LicenseImportState.Error(result.exceptionOrNull()?.message ?: "Sign out failed")
@@ -109,11 +159,14 @@ class LicenseViewModel(application: Application) : AndroidViewModel(application)
 
     fun syncLicense() {
         val user = currentUser.value ?: return
-        viewModelScope.launch {
+        val session = app.maxLicenseManager.authManager.sessionState.value
+        beginOperation {
             _importState.value = LicenseImportState.Loading
             val result = app.maxLicenseManager.syncWithCloud(user.uid)
+            if (!app.maxLicenseManager.authManager.isCurrentSession(session)) return@beginOperation
             if (result.isSuccess) {
                 app.entitlementManager.refresh()
+                if (!app.maxLicenseManager.authManager.isCurrentSession(session)) return@beginOperation
                 _importState.value = LicenseImportState.Success("License synchronized with cloud.")
             } else {
                 _importState.value = LicenseImportState.Error(result.exceptionOrNull()?.message ?: "Sync failed")
@@ -174,5 +227,10 @@ class LicenseViewModel(application: Application) : AndroidViewModel(application)
             app.entitlementManager.refresh()
             _importState.value = LicenseImportState.Success("Offline license removed.")
         }
+    }
+
+    override fun onCleared() {
+        app.maxLicenseManager.authManager.removeSessionInvalidationListener(this)
+        super.onCleared()
     }
 }

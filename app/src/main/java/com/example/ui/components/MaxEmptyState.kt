@@ -13,11 +13,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ui.theme.MaxDimensions
-import com.example.ui.theme.MaxPrimary
-import com.example.ui.theme.MaxTextMuted
-import com.example.ui.theme.MaxTextPrimary
+import com.example.ui.theme.MaxSemanticColors
+import com.example.ui.theme.MaxType
 
 @Composable
 fun MaxEmptyState(
@@ -25,7 +23,7 @@ fun MaxEmptyState(
     message: String,
     modifier: Modifier = Modifier,
     icon: ImageVector = Icons.Default.Info,
-    iconTint: Color = MaxPrimary,
+    iconTint: Color = MaxSemanticColors.accentCyan,
     actionButton: (@Composable () -> Unit)? = null
 ) {
     Column(
@@ -44,16 +42,16 @@ fun MaxEmptyState(
         Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
         Text(
             text = title,
-            fontSize = 17.sp,
+            style = MaxType.Headline,
             fontWeight = FontWeight.Bold,
-            color = MaxTextPrimary,
+            color = MaxSemanticColors.textPrimary,
             textAlign = TextAlign.Center
         )
         Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
         Text(
             text = message,
-            fontSize = 14.sp,
-            color = MaxTextMuted,
+            style = MaxType.Body,
+            color = MaxSemanticColors.textMuted,
             textAlign = TextAlign.Center
         )
         if (actionButton != null) {

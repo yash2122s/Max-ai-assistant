@@ -31,7 +31,13 @@ data class InteractiveElement(
  * Normalized snapshot of the current screen state combining visual and accessibility observations.
  */
 data class ScreenObservation(
-    val observationId: String = "obs_${System.currentTimeMillis()}",
+    val observationId: String = "obs_${java.util.UUID.randomUUID()}",
+    /** Correlation metadata is optional for legacy callers, but populated by computer-use execution. */
+    val taskId: String? = null,
+    val stepId: String? = null,
+    val executionId: String? = null,
+    val causedByAction: String? = null,
+    val expectedPostcondition: String? = null,
     val foregroundPackage: String = "",
     val currentActivity: String? = null,
     val interactiveElements: List<InteractiveElement> = emptyList(),
@@ -41,16 +47,27 @@ data class ScreenObservation(
     val focusedElement: InteractiveElement? = null,
     val screenshotPath: String? = null,
     val screenshotFingerprint: String? = null,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    @Transient val screenshotJpeg: ByteArray? = null
 ) {
+    val hasScreenshot: Boolean get() = screenshotJpeg?.isNotEmpty() == true
+
+    fun isFresh(maxAgeMs: Long = 3000L): Boolean =
+        foregroundPackage.isNotBlank() && System.currentTimeMillis() - timestamp in 0..maxAgeMs
+
+    val screenId: String get() = java.security.MessageDigest.getInstance("SHA-256")
+        .digest(computeScreenSignature().toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
     val isAppForeground: Boolean
         get() = foregroundPackage.isNotBlank() &&
                 !foregroundPackage.contains("launcher", ignoreCase = true) &&
                 !foregroundPackage.contains("systemui", ignoreCase = true)
 
     fun computeScreenSignature(): String {
-        val textsHash = visibleTexts.take(20).joinToString("|")
-        val idsHash = interactiveElements.take(20).mapNotNull { "${it.id}@${it.bounds.left},${it.bounds.top}" }.joinToString("|")
+        val textsHash = visibleTexts.joinToString("|")
+        val idsHash = interactiveElements.joinToString("|") {
+            "${it.id}:${it.text}:${it.contentDescription}:${it.className}@${it.bounds.left},${it.bounds.top},${it.bounds.right},${it.bounds.bottom}:" +
+                "${it.isEnabled}:${it.isSelected}:${it.isFocused}:${it.isClickable}:${it.isEditable}:${it.isScrollable}"
+        }
         val focusHash = "${focusedElement?.id}:${focusedElement?.text}"
         return "$foregroundPackage:$currentActivity:count=${interactiveElements.size}:$textsHash:$idsHash:$focusHash"
     }
@@ -76,6 +93,10 @@ data class ScreenObservation(
      */
     fun toCompactPrompt(): String {
         val sb = StringBuilder()
+        sb.appendLine("OBSERVATION: $observationId SCREEN: $screenId TIMESTAMP: $timestamp")
+        if (taskId != null || stepId != null || executionId != null) {
+            sb.appendLine("CORRELATION: task=$taskId step=$stepId execution=$executionId action=$causedByAction expected=$expectedPostcondition")
+        }
         sb.appendLine("CURRENT APP: $foregroundPackage")
         if (!currentActivity.isNullOrBlank()) {
             sb.appendLine("CURRENT ACTIVITY: $currentActivity")
@@ -101,8 +122,8 @@ data class ScreenObservation(
         if (scrollableElements.isNotEmpty()) {
             sb.appendLine("SCROLLABLE: ${scrollableElements.size} region(s)")
         }
-        if (!screenshotPath.isNullOrBlank()) {
-            sb.appendLine("SCREENSHOT: $screenshotPath")
+        if (hasScreenshot) {
+            sb.appendLine("SCREENSHOT: available in memory")
         }
         return sb.toString()
     }
