@@ -35,6 +35,24 @@ class VoiceInputProtocolUnitTest {
     }
 
     @Test
+    fun testResampleLinear_ClampsLengthToInputBuffer() {
+        val input = shortArrayOf(100, 200, 300)
+
+        val output = AudioRecorder.resampleLinear(input, inputLength = 99, inRate = 16000, outRate = 16000)
+
+        org.junit.Assert.assertArrayEquals(
+            "A bad read length must not index beyond the captured buffer",
+            input,
+            output
+        )
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun testResampleLinear_RejectsInvalidSampleRate() {
+        AudioRecorder.resampleLinear(shortArrayOf(1), inputLength = 1, inRate = 0, outRate = 16000)
+    }
+
+    @Test
     fun testAudioProcessor_CalculatesDurationDynamicallyFrom16kHzSamples() {
         var eosCount = 0
         val processor = AudioProcessor(

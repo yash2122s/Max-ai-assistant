@@ -5,6 +5,12 @@ import com.example.memory.account.MemorySession
 import com.example.memory.data.MemoryType
 import com.example.memory.data.PermanentMemory
 import com.example.memory.sync.*
+import com.example.firebase.FakeGoogleGateway
+import com.example.firebase.auth.FirebaseAuthManager
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.*
@@ -12,13 +18,15 @@ import org.junit.Test
 import java.util.concurrent.atomic.AtomicLong
 
 /** Gate 1: deterministic coverage of the durable queue, without Firebase or Room I/O. */
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class MemorySyncOperationQueueTest {
-    private val session = MemorySession("uid:gate1", 7)
+    private var session = MemorySession("uid:gate1", 0)
     private val dao = FakeDao()
     private val now = AtomicLong(1000)
     private lateinit var remote: FakeRemote
 
-    @After fun cleanup() { MemoryAccountScope.unbind() }
+    @org.junit.Before fun setup() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
+    @After fun cleanup() { MemoryAccountScope.unbind(); Dispatchers.resetMain() }
 
     @Test fun createUpdateDeleteUseStableMemoryIdsAndDeleteIsTombstone() = runTest {
         current(); remote = FakeRemote()
@@ -83,7 +91,10 @@ class MemorySyncOperationQueueTest {
 
     private fun queue() = MemorySyncOperationQueue(dao, remote, clock = { now.get() })
     private fun memory(id: String) = PermanentMemory(id, "title", "content", "general", MemoryType.CUSTOM, ownerKey = session.ownerKey)
-    private fun current() { val f = MemoryAccountScope::class.java.getDeclaredField("state"); f.isAccessible = true; (f.get(null) as kotlinx.coroutines.flow.MutableStateFlow<MemorySession>).value = session }
+    private fun current() {
+        MemoryAccountScope.bind(FirebaseAuthManager(FakeGoogleGateway("gate1")) { "test-client" })
+        session = MemoryAccountScope.capture()
+    }
 
     private class FakeDao : MemorySyncOperationDao {
         private val rows = linkedMapOf<Pair<String, String>, MemorySyncOperation>()

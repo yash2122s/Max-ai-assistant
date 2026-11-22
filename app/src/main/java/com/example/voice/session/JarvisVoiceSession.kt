@@ -20,10 +20,7 @@ import com.example.voice.ui.AssistantHud
 class JarvisVoiceSession(context: Context) : VoiceInteractionSession(context) {
     private val composeViewLifecycleOwner = ComposeViewLifecycleOwner()
 
-    override fun onCreate() {
-        super.onCreate()
-        Log.i("JarvisVoiceSession", "onCreate")
-        composeViewLifecycleOwner.onCreate()
+    private fun applyTransparentWindow() {
         try {
             window?.window?.apply {
                 setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
@@ -34,16 +31,25 @@ class JarvisVoiceSession(context: Context) : VoiceInteractionSession(context) {
         }
     }
 
+    override fun onCreate() {
+        super.onCreate()
+        Log.i("JarvisVoiceSession", "onCreate")
+        composeViewLifecycleOwner.onCreate()
+        applyTransparentWindow()
+    }
+
     override fun onPrepareShow(args: Bundle?, showFlags: Int) {
         super.onPrepareShow(args, showFlags)
         Log.d("JarvisVoiceSession", "onPrepareShow (showFlags=$showFlags)")
+        applyTransparentWindow()
     }
 
     override fun onCreateContentView(): View {
+        applyTransparentWindow()
         val composeView = ComposeView(context)
         composeView.setupComposeOwners(composeViewLifecycleOwner)
         composeView.setContent {
-            MyApplicationTheme {
+            MyApplicationTheme(useSurface = false) {
                 AssistantHud(
                     onDismiss = { hide() }
                 )
@@ -55,6 +61,7 @@ class JarvisVoiceSession(context: Context) : VoiceInteractionSession(context) {
     override fun onShow(args: Bundle?, showFlags: Int) {
         super.onShow(args, showFlags)
         Log.i("JarvisVoiceSession", "onShow - Activating MAX system assistant HUD and listening")
+        applyTransparentWindow()
         composeViewLifecycleOwner.onStart()
         composeViewLifecycleOwner.onResume()
 

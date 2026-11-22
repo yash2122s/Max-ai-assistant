@@ -15,7 +15,6 @@ import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
@@ -146,25 +145,27 @@ object ActionDispatcher {
     fun isExplicitCallUtterance(text: String): Boolean {
         val lower = text.trim().lowercase()
         if (isWhatsAppCallUtterance(lower)) return false
-        return lower.startsWith("call ") ||
-            lower.startsWith("dial ") ||
-            lower.startsWith("make a call") ||
-            lower.startsWith("phone ") ||
-            lower.startsWith("కాల్ ") ||
-            lower.startsWith("ఫోన్ ") ||
-            lower.startsWith("డయల్ ") ||
+        if (lower.contains("call log") || lower.contains("call history") || lower.contains("callback") || lower.contains("recall")) return false
 
+        val hasLatinPrefix = Regex("""^(?:call|dial|phone|make\s+a\s+call)\b""", RegexOption.IGNORE_CASE).containsMatchIn(lower)
+        val hasLatinCallChey = Regex("""\b(?:call|phone)\s*(?:cheyyi|cheyandi|chey|cheyi)\b""", RegexOption.IGNORE_CASE).containsMatchIn(lower)
 
-            lower.contains("phone chey") ||
-            lower.contains("phone cheyyi") ||
-            lower.contains("call chey") ||
-            lower.contains("call cheyyi") ||
-            lower.contains("కాల్ చేయి") ||
-            lower.contains("కాల్ చెయ్") ||
+        val hasTeluguPrefix = lower.startsWith("కాల్ ") || lower.startsWith("ఫోన్ ") || lower.startsWith("డయల్ ")
+        val hasTeluguCallSuffix = lower.contains("కాల్ చెయ్") || lower.contains("ఫోన్ చెయ్") ||
+            lower.contains("డయల్ చెయ్") || lower.contains("కాల్ చేయి") ||
+            lower.contains("కాల్ చెయ్యి") ||
+            lower.contains("కాల్ చేయ్") ||
             lower.contains("కాల్ చేయండి") ||
             lower.contains("ఫోన్ చేయి") ||
-            lower.contains("ఫోన్ చెయ్") ||
-            lower.contains("ఫోన్ చేయండి")
+            lower.contains("ఫోన్ చెయ్యి") ||
+            lower.contains("ఫోన్ చేయ్") ||
+            lower.contains("ఫోన్ చేయండి") ||
+            lower.contains("డయల్ చేయి") ||
+            lower.contains("డయల్ చెయ్యి") ||
+            lower.contains("డయల్ చేయండి") ||
+            ((lower.contains("చేయి") || lower.contains("చెయ్యి") || lower.contains("చేయ్") || lower.contains("చేయండి")) && (lower.contains("కాల్") || lower.contains("ఫోన్")))
+
+        return hasLatinPrefix || hasLatinCallChey || hasTeluguPrefix || hasTeluguCallSuffix
     }
 
     fun isMessagingUtterance(text: String): Boolean {
@@ -226,6 +227,28 @@ object ActionDispatcher {
 
     fun normalizeJson(json: JSONObject): JSONObject {
         var actionName = json.optString("action", "NONE")
+
+        if (json.has("direct_automation")) {
+            val direct = json.optJSONObject("direct_automation")
+            if (direct != null) {
+                val directType = direct.optString("type", "").uppercase()
+                val mapped = when (directType) {
+                    "WHATSAPP" -> "SEND_WHATSAPP_MESSAGE"
+                    "TELEGRAM" -> "SEND_TELEGRAM_MESSAGE"
+                    "SMS" -> "SEND_SMS"
+                    else -> directType.ifEmpty { "NONE" }
+                }
+                json.put("action", mapped)
+                actionName = mapped
+                val keys = direct.keys()
+                while (keys.hasNext()) {
+                    val k = keys.next()
+                    if (!json.has(k)) {
+                        json.put(k, direct.get(k))
+                    }
+                }
+            }
+        }
         
         // Normalization for legacy/fallback OPEN_APP calls
         if (actionName == "OPEN_APP") {
@@ -477,28 +500,22 @@ object ActionDispatcher {
         if (actionName == "TASK_COMPLETED") {
             val summary = normalized.optString("summary", "Task completed and verified.")
             val requestedTaskId = normalized.optString("taskId").takeIf { it.isNotBlank() }
-            val decision = if (requestedTaskId == null && TaskCancellationCoordinator.getActiveTaskId() == null) {
-                // In-session autonomous voice task without a durable background job (e.g. SET_VOLUME, FLASHLIGHT)
-                com.example.automation.engine.execution.CompletionVerifier.Decision(
-                    accepted = true,
-                    reason = summary,
-                    taskId = null
+            // A model completion claim is never sufficient on its own. Even an
+            // in-session voice task must have a correlated persisted task and
+            // locally verified step evidence before completion is accepted.
+            val decision = runCatching {
+                com.example.automation.engine.execution.CompletionVerifier.verify(
+                    context = context,
+                    requestedTaskId = requestedTaskId,
+                    goal = normalized.optString("goal").takeIf { it.isNotBlank() },
+                    summary = summary
                 )
-            } else {
-                runCatching {
-                    com.example.automation.engine.execution.CompletionVerifier.verify(
-                        context = context,
-                        requestedTaskId = requestedTaskId,
-                        goal = normalized.optString("goal").takeIf { it.isNotBlank() },
-                        summary = summary
-                    )
-                }.getOrElse { error ->
-                    com.example.automation.engine.execution.CompletionVerifier.Decision(
-                        accepted = false,
-                        reason = "Completion verification failed: ${error.message ?: "unknown error"}",
-                        taskId = requestedTaskId
-                    )
-                }
+            }.getOrElse { error ->
+                com.example.automation.engine.execution.CompletionVerifier.Decision(
+                    accepted = false,
+                    reason = "Completion verification failed: ${error.message ?: "unknown error"}",
+                    taskId = requestedTaskId
+                )
             }
             return JSONObject().apply {
                 put("status", if (decision.accepted) "success" else "blocked")
@@ -726,10 +743,20 @@ object ActionDispatcher {
             requestId = requestId
         )
 
+        val executionStartTime = System.currentTimeMillis()
         return try {
             val result = withContext(Dispatchers.IO) {
                 ExecutionEngine.execute(context, request)
             }
+            val executionDuration = System.currentTimeMillis() - executionStartTime
+            val toolStatus = if (result.isVerifiedSuccess) com.example.analytics.ActivityStatus.SUCCESS else com.example.analytics.ActivityStatus.FAILURE
+            com.example.analytics.MaxActivityTracker.trackToolExecution(
+                context = context,
+                toolName = actionName,
+                status = toolStatus,
+                durationMs = executionDuration,
+                errorCategory = if (!result.isVerifiedSuccess) (result.errorCode ?: "EXECUTION_FAILED") else null
+            )
             val returnJson = JSONObject().apply {
                 val isSuccess = result.isVerifiedSuccess
                 val isNeedsInput = result.status == com.example.automation.tools.ToolResultStatus.NEEDS_INPUT
@@ -799,6 +826,14 @@ object ActionDispatcher {
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
+            val executionDuration = System.currentTimeMillis() - executionStartTime
+            com.example.analytics.MaxActivityTracker.trackToolExecution(
+                context = context,
+                toolName = actionName,
+                status = com.example.analytics.ActivityStatus.FAILURE,
+                durationMs = executionDuration,
+                errorCategory = "DISPATCH_ERROR"
+            )
             Log.e(TAG, "Error in dispatchWithResult: $actionName", e)
             JSONObject().apply {
                 put("status", "error")

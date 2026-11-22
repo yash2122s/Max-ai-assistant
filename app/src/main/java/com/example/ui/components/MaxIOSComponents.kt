@@ -335,12 +335,12 @@ fun MaxInputDock(
                                 .background(
                                     Brush.linearGradient(
                                         colors = listOf(
-                                            com.example.ui.theme.NeonPink,
-                                            com.example.ui.theme.MagentaRose
+                                            MaxPrimaryRoyal,
+                                            MaxAccentCyan
                                         )
                                     )
                                 )
-                                .border(1.dp, com.example.ui.theme.SoftRoseBorderStrong, CircleShape)
+                                .border(1.dp, MaxAccentCyan.copy(alpha = 0.6f), CircleShape)
                         ) {
                             Icon(
                                 Icons.Rounded.Mic,
@@ -545,7 +545,7 @@ fun MaxQuickAutomationCard(
     icon: ImageVector,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    iconTint: Color = com.example.ui.theme.NeonPink
+    iconTint: Color = MaxAccentCyan
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
@@ -558,12 +558,9 @@ fun MaxQuickAutomationCard(
         label = "card_press"
     )
 
-    val isDark = LocalIsDarkMode.current
-    val cardBackground = if (isDark) {
-        Brush.verticalGradient(listOf(MaxIOSColors.DarkSurfaceGrouped, MaxIOSColors.DarkSurfaceElevated))
-    } else {
-        Brush.verticalGradient(listOf(MaxSemanticColors.surfaceElevated, MaxSemanticColors.surface))
-    }
+    val cardBackground = Brush.verticalGradient(
+        listOf(MaxSurfaceElevated, MaxSurfaceCard)
+    )
 
     Box(
         modifier = modifier
@@ -573,7 +570,7 @@ fun MaxQuickAutomationCard(
             }
             .clip(RoundedCornerShape(MaxRadius.xl))
             .background(cardBackground)
-            .border(MaxStroke.hairline, if (isDark) MaxIOSColors.HairlineDark else com.example.ui.theme.SoftRoseBorder, RoundedCornerShape(MaxRadius.xl))
+            .border(MaxStroke.hairline, MaxBorderHairline, RoundedCornerShape(MaxRadius.xl))
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -594,7 +591,7 @@ fun MaxQuickAutomationCard(
                     modifier = Modifier
                         .size(34.dp)
                         .clip(RoundedCornerShape(MaxRadius.sm))
-                        .background(if (isDark) MaxIOSColors.DarkSurfaceElevated else com.example.ui.theme.SoftRoseTint),
+                        .background(MaxSurfaceElevated),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -608,15 +605,15 @@ fun MaxQuickAutomationCard(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(MaxRadius.md))
-                        .background(if (isDark) MaxIOSColors.DarkSurfaceElevated else com.example.ui.theme.SoftRoseTint)
-                        .border(MaxStroke.hairline, if (isDark) MaxIOSColors.HairlineDark else com.example.ui.theme.SoftRoseBorderStrong, RoundedCornerShape(MaxRadius.md))
+                        .background(MaxSurfaceElevated)
+                        .border(MaxStroke.hairline, MaxBorderSpecular, RoundedCornerShape(MaxRadius.md))
                         .padding(horizontal = 7.dp, vertical = 2.5.dp)
                 ) {
                     Text(
                         text = badge,
                         style = MaxType.Caption,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isDark) iconTint else MaterialTheme.colorScheme.primary
+                        color = iconTint
                     )
                 }
             }
@@ -626,14 +623,14 @@ fun MaxQuickAutomationCard(
                     text = title,
                     style = MaxType.Body,
                     fontWeight = FontWeight.Bold,
-                    color = if (isDark) MaxSemanticColors.textPrimary else Color(0xFF0F172A),
+                    color = Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = subtitle,
                     style = MaxType.Caption,
-                    color = if (isDark) MaxSemanticColors.textSecondary else Color(0xFF475569),
+                    color = Color.White.copy(alpha = 0.70f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )

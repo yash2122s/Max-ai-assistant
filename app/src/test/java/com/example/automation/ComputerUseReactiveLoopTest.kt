@@ -18,6 +18,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -45,7 +46,12 @@ class ComputerUseReactiveLoopTest {
             this.isClickable = isClickable
             this.isEditable = isEditable
             this.isFocused = isFocused
+            this.isEnabled = true
+            this.isVisibleToUser = true
+            this.packageName = resId?.substringBefore(":id/")
             this.setBoundsInScreen(bounds)
+            if (isClickable) addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK)
+            if (isEditable) addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_TEXT)
         }
     }
 
@@ -54,6 +60,14 @@ class ComputerUseReactiveLoopTest {
         CurrentUiStateStore.reset()
         GenericActionExecutor.testGestureDispatcher = null
         GenericActionExecutor.testGlobalActionDispatcher = null
+    }
+
+    @After
+    fun tearDown() {
+        LiveNodeResolver.rootProvider = { com.example.service.JarvisAccessibilityService.getActiveRoot() }
+        GenericActionExecutor.testGestureDispatcher = null
+        GenericActionExecutor.testGlobalActionDispatcher = null
+        CurrentUiStateStore.reset()
     }
 
     @Test

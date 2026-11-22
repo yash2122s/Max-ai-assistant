@@ -148,4 +148,60 @@ class AppDatabaseMigrationTest {
         helper.close()
         targetDbFile.delete()
     }
+
+    @Test
+    fun testMigration23To24BackfillsUniqueOperationIdsBeforeIndexCreation() {
+        val target = context.getDatabasePath("test_memory_conflicts_v23.db")
+        target.parentFile?.mkdirs()
+        target.delete()
+        val config = androidx.sqlite.db.SupportSQLiteOpenHelper.Configuration.builder(context)
+            .name(target.name)
+            .callback(object : androidx.sqlite.db.SupportSQLiteOpenHelper.Callback(23) {
+                override fun onCreate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                    db.execSQL("CREATE TABLE permanent_memory (ownerKey TEXT NOT NULL, importChecksum TEXT, sourceRecordId TEXT)")
+                    db.execSQL("CREATE TABLE memory_sync_state (ownerKey TEXT NOT NULL, id INTEGER NOT NULL)")
+                    db.execSQL("CREATE TABLE period_logs (ownerKey TEXT NOT NULL, startDate INTEGER NOT NULL)")
+                    db.execSQL("""
+                        CREATE TABLE memory_conflicts (
+                            conflictId TEXT NOT NULL,
+                            ownerKey TEXT NOT NULL,
+                            memoryId TEXT NOT NULL,
+                            localRevision INTEGER NOT NULL,
+                            remoteRevision INTEGER NOT NULL,
+                            localJson TEXT,
+                            remoteJson TEXT,
+                            tombstone INTEGER NOT NULL,
+                            state TEXT NOT NULL,
+                            error TEXT,
+                            createdAt INTEGER NOT NULL,
+                            updatedAt INTEGER NOT NULL,
+                            PRIMARY KEY(ownerKey, conflictId)
+                        )
+                    """.trimIndent())
+                    db.execSQL("INSERT INTO memory_conflicts VALUES ('c1','owner','m1',1,2,null,null,0,'UNRESOLVED',null,1,1)")
+                    db.execSQL("INSERT INTO memory_conflicts VALUES ('c2','owner','m2',1,2,null,null,0,'UNRESOLVED',null,2,2)")
+                }
+                override fun onUpgrade(db: androidx.sqlite.db.SupportSQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+            })
+            .build()
+        val helper = androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory().create(config)
+        val db = helper.writableDatabase
+
+        AppDatabase.MIGRATION_23_24.migrate(db)
+
+        val operationIds = mutableSetOf<String>()
+        db.query("SELECT operationId FROM memory_conflicts ORDER BY conflictId").use { cursor ->
+            while (cursor.moveToNext()) operationIds += cursor.getString(0)
+        }
+        assertEquals(setOf("c1", "c2"), operationIds)
+        db.query("PRAGMA index_list(memory_conflicts)").use { cursor ->
+            var found = false
+            while (cursor.moveToNext()) {
+                if (cursor.getString(1) == "index_memory_conflicts_ownerKey_operationId") found = true
+            }
+            assertTrue("Migration must create the unique operation id index", found)
+        }
+        helper.close()
+        target.delete()
+    }
 }

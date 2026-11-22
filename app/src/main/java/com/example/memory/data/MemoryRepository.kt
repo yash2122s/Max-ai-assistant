@@ -366,6 +366,7 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
         Log.d(TAG, "Memory committed to Room DB: '${memory.title}' (embedding deferred)")
         notifyMemoryChanged(MemoryChangeEvent.Created(memoryToSave))
         MemorySyncQueueCoordinator.create(memoryToSave, _memoryRevision.value)
+        com.example.memory.secondbrain.SecondBrainBridge.syncMemoryAsync(context, memoryToSave)
 
         // ASYNC: Generate embedding + update + RAG index + markdown sync
         // Uses repositoryScope (SupervisorJob) — NOT a throwaway CoroutineScope
@@ -437,6 +438,7 @@ class MemoryRepository constructor(private val context: Context) : MemoryProvide
         dao.update(encryptedMem)
         notifyMemoryChanged(MemoryChangeEvent.Updated(updatedMemoryDecrypted), session)
         MemorySyncQueueCoordinator.update(updatedMemoryDecrypted, _memoryRevision.value)
+        com.example.memory.secondbrain.SecondBrainBridge.syncMemoryAsync(context, updatedMemoryDecrypted)
 
         // ASYNC: Generate embedding + update + RAG index
         repositoryScope.launch {

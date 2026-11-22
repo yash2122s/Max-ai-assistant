@@ -462,7 +462,7 @@ private fun NumberedFeatureBullet(
             Spacer(Modifier.height(3.dp))
             Text(
                 text = subtitle,
-                style = MaxType.Caption.copy(color = MaxTextSecondary)
+                style = MaxType.Caption.copy(color = Color.White.copy(alpha = 0.70f))
             )
         }
     }
@@ -629,19 +629,22 @@ private fun AuthStepView(
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = 0.2.sp
             ),
-            color = MaxTextSecondary,
+            color = Color.White.copy(alpha = 0.85f),
             startDelayMs = 250
         )
 
         Spacer(modifier = Modifier.height(MaxDimensions.spaceLg))
 
         // ══ FEATURE CARD — numbered premium bullets ══
-        MaxCard(modifier = Modifier.fillMaxWidth()) {
+        MaxCard(
+            modifier = Modifier.fillMaxWidth(),
+            backgroundColor = MaxSurfaceCard
+        ) {
             Column(
                 modifier = Modifier.padding(MaxDimensions.spaceMd),
                 verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceMd)
             ) {
-                NumberedFeatureBullet(1, "Instant 7-Day Free Trial", "Full autonomous tools, real-time voice, and memory.", 0)
+                NumberedFeatureBullet(1, "Full Autonomous Features", "Autonomous tools, real-time voice, and memory sync.", 0)
                 NumberedFeatureBullet(2, "Cloud License & Firestore Sync", "Your device license is encrypted and backed up in Firestore.", 1)
                 NumberedFeatureBullet(3, "Zero Manual Configuration", "Google Identity automatically registers and activates your device.", 2)
             }
@@ -650,7 +653,10 @@ private fun AuthStepView(
         Spacer(modifier = Modifier.height(MaxDimensions.spaceLg))
 
         // ══ AUTH CARD ══
-        MaxCard(modifier = Modifier.fillMaxWidth()) {
+        MaxCard(
+            modifier = Modifier.fillMaxWidth(),
+            backgroundColor = MaxSurfaceCard
+        ) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -761,13 +767,13 @@ private fun AuthStepView(
 
                     Text(
                         text = "SIGN-IN REQUIRED",
-                        style = MaxType.Eyebrow.copy(color = MaxAccentCyan.copy(alpha = 0.85f))
+                        style = MaxType.Eyebrow.copy(color = MaxAccentCyan)
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
                         text = "Connect your Google account to activate MAX",
                         style = MaxType.Caption,
-                        color = MaxTextSecondary,
+                        color = Color.White.copy(alpha = 0.80f),
                         textAlign = TextAlign.Center
                     )
 
@@ -826,7 +832,10 @@ private fun WelcomeStepView(onGetStarted: () -> Unit) {
         Spacer(modifier = Modifier.height(MaxDimensions.spaceLg))
 
         // ══ FEATURE CARD — numbered premium bullets ══
-        MaxCard(modifier = Modifier.fillMaxWidth()) {
+        MaxCard(
+            modifier = Modifier.fillMaxWidth(),
+            backgroundColor = MaxSurfaceCard
+        ) {
             Column(
                 modifier = Modifier.padding(MaxDimensions.spaceMd),
                 verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceMd)
@@ -1005,7 +1014,7 @@ private fun PermissionCard(
                 Text(
                     text = description,
                     style = MaxType.Caption,
-                    color = MaxTextSecondary
+                    color = Color.White.copy(alpha = 0.70f)
                 )
             }
 
@@ -1066,7 +1075,10 @@ private fun AiConfigStepView(
         Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
 
         val context = LocalContext.current
-        MaxCard(modifier = Modifier.fillMaxWidth()) {
+        MaxCard(
+            modifier = Modifier.fillMaxWidth(),
+            backgroundColor = MaxSurfaceCard
+        ) {
             Column(
                 modifier = Modifier.padding(MaxDimensions.spaceMd),
                 verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
@@ -1129,7 +1141,10 @@ private fun AiConfigStepView(
 
         Spacer(modifier = Modifier.height(MaxDimensions.spaceMd))
 
-        MaxCard(modifier = Modifier.fillMaxWidth()) {
+        MaxCard(
+            modifier = Modifier.fillMaxWidth(),
+            backgroundColor = MaxSurfaceCard
+        ) {
             Column(
                 modifier = Modifier.padding(MaxDimensions.spaceMd),
                 verticalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
@@ -1153,7 +1168,7 @@ private fun AiConfigStepView(
                         tagline = "Caring & Warm",
                         icon = Icons.Default.Face,
                         selected = !isMale,
-                        accent = Color(0xFFFF4081),
+                        accent = Color(0xFF8B5CF6),
                         modifier = Modifier.weight(1f),
                         onClick = { onVoiceSelected("Aoede") }
                     )

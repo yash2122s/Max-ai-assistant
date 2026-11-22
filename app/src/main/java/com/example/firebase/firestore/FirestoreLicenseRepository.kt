@@ -107,11 +107,11 @@ open class FirestoreLicenseRepository(
                 return@withContext Result.success(license)
             }
 
-            // Brand new user: Grant exactly one 3-day trial
-            Log.i(TAG, "[License] trial_initialized user=${userId.take(6)}... duration=3_days")
+            // Brand new user: Grant exactly one 7-day trial
+            Log.i(TAG, "[License] trial_initialized user=${userId.take(6)}... duration=7_days")
             val nowMillis = System.currentTimeMillis()
-            val threeDaysMillis = 3L * 24L * 60L * 60L * 1000L
-            val trialExpiryMillis = nowMillis + threeDaysMillis
+            val sevenDaysMillis = 7L * 24L * 60L * 60L * 1000L
+            val trialExpiryMillis = nowMillis + sevenDaysMillis
 
             val initialLicenseData = mapOf(
                 "userId" to userId,
@@ -251,7 +251,7 @@ open class FirestoreLicenseRepository(
     open suspend fun consumeDailyMessage(
         userId: String,
         period: String = getTodayPeriodKey(),
-        maxDailyLimit: Long = 20L
+        maxDailyLimit: Long = 100L
     ): Result<Pair<Long, Boolean>> = withContext(Dispatchers.IO) {
         val db = firestore ?: return@withContext Result.failure(Exception("Firestore is not initialized"))
         try {
@@ -265,8 +265,8 @@ open class FirestoreLicenseRepository(
 
                 if (!licenseDoc.exists()) {
                     // Auto-initialize trial if doc does not exist yet
-                    val threeDaysMillis = 3L * 24L * 60L * 60L * 1000L
-                    val trialExpiryMillis = now + threeDaysMillis
+                    val sevenDaysMillis = 7L * 24L * 60L * 60L * 1000L
+                    val trialExpiryMillis = now + sevenDaysMillis
 
                     transaction.set(licenseRef, mapOf(
                         "userId" to userId,

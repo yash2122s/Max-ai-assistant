@@ -38,7 +38,10 @@ class SettingsSearchTool : Tool {
 
     override suspend fun execute(context: Context, request: ExecutionRequest): ToolResult {
         val args = JSONObject(request.arguments.toString())
-        val target = args.optString("settingsTarget", "main").lowercase().trim()
+        val target = args.optString("target")
+            .ifEmpty { args.optString("settingsTarget", "main") }
+            .lowercase()
+            .trim()
 
         return try {
             val actionIntentStr = targetIntentMap[target] ?: Settings.ACTION_SETTINGS
@@ -64,6 +67,7 @@ class SettingsSearchTool : Tool {
                 ToolResult(
                     success = true,
                     toolName = name,
+                    verificationRequired = false,
                     message = "Opened settings page for: '$target'."
                 )
             } catch (e: Exception) {
@@ -75,6 +79,7 @@ class SettingsSearchTool : Tool {
                 ToolResult(
                     success = true,
                     toolName = name,
+                    verificationRequired = false,
                     message = "Target settings screen not supported on this device. Fallback to main Settings page."
                 )
             }

@@ -140,6 +140,6 @@ class EntitlementGate(
 
     companion object {
         private const val TAG = "EntitlementGate"
-        const val DEFAULT_DAILY_LIMIT = 20L
+        const val DEFAULT_DAILY_LIMIT = 100L
     }
 }

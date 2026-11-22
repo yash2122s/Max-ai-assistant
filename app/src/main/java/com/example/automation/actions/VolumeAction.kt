@@ -46,6 +46,9 @@ class VolumeAction : BaseAction<JSONObject>() {
         } else if (action == "VOLUME_DOWN" || direction in listOf("down", "lower", "decrease")) {
             log("Lowering volume")
             audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
+        } else if (direction in listOf("show", "adjust", "open", "same") || action in listOf("SHOW_VOLUME", "ADJUST_VOLUME")) {
+            log("Showing volume slider")
+            audioManager.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_SAME, AudioManager.FLAG_SHOW_UI)
         } else {
             throw IllegalArgumentException("Invalid volume payload. Provide percentage (0-100) or direction (up/down): $payload")
         }

@@ -8,14 +8,18 @@ import android.content.Intent
 import android.service.notification.StatusBarNotification
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.preferences.SettingsManager
+import com.example.features.whatsapp.AutoReplyActionReceiver
 import com.example.features.whatsapp.AutoReplyController
+import com.example.features.whatsapp.ConfirmationState
 import com.example.features.whatsapp.RemoteInputSender
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.util.concurrent.ConcurrentHashMap
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -28,8 +32,18 @@ class AutoReplyControllerFilterTest {
     fun setup() {
         context.getSharedPreferences("app_settings", Context.MODE_PRIVATE).edit().clear().commit()
         settings = SettingsManager(context)
+        SettingsManager.setInstanceForTesting(settings)
+        settings.isMaxEnabled = true
         settings.isAutoReplyEnabled = true
         settings.isWhatsAppAutoReplyEnabled = true
+        settings.isAutoSendWithoutConfirmation = false
+        AutoReplyController.resetForTesting()
+    }
+
+    @After
+    fun tearDown() {
+        AutoReplyController.resetForTesting()
+        SettingsManager.setInstanceForTesting(null)
     }
 
     private fun createWhatsAppNotification(sender: String, hasRemoteInput: Boolean = true): StatusBarNotification {
@@ -140,6 +154,118 @@ class AutoReplyControllerFilterTest {
 
         settings.isWhatsAppAutoReplyEnabled = false
         assertFalse(com.example.service.NotificationAppAccessManager.isAppEnabled(context, "com.whatsapp"))
+    }
+
+    @Test
+    fun testMaxGlobalSwitchOffSuppressesAutoReply() = kotlinx.coroutines.runBlocking {
+        settings.isMaxEnabled = false
+        val sbn = createWhatsAppNotification("Priya", hasRemoteInput = true)
+        AutoReplyController.handleIncoming(context, "Priya", "Hello", sbn)
+        assertNull(AutoReplyController.getLatestPendingConfirmation())
+    }
+
+    @Test
+    fun testAutoSendModeImmediatelySendsReplyWithoutConfirmationNotification() = kotlinx.coroutines.runBlocking {
+        settings.isAutoSendWithoutConfirmation = true
+        val sbn = createWhatsAppNotification("Priya", hasRemoteInput = true)
+        AutoReplyController.handleIncoming(context, "Priya", "Hello", sbn)
+
+        // In auto-send mode, no pending confirmation is created
+        assertNull(AutoReplyController.getLatestPendingConfirmation())
+    }
+
+    @Test
+    fun testConfirmationModeCreatesPendingConfirmation() = kotlinx.coroutines.runBlocking {
+        settings.isAutoSendWithoutConfirmation = false
+        val sbn = createWhatsAppNotification("Priya", hasRemoteInput = true)
+        AutoReplyController.handleIncoming(context, "Priya", "Hello", sbn)
+
+        val pending = AutoReplyController.getLatestPendingConfirmation()
+        assertNotNull(pending)
+        assertEquals("Priya", pending?.sender)
+        assertEquals(ConfirmationState.PENDING_CONFIRMATION, pending?.state)
+    }
+
+    @Test
+    fun testExecuteSendGuardFailsClosedWhenSbnMissing() = kotlinx.coroutines.runBlocking {
+        settings.isAutoSendWithoutConfirmation = false
+        val sbn = createWhatsAppNotification("Priya", hasRemoteInput = true)
+        AutoReplyController.handleIncoming(context, "Priya", "Hello", sbn)
+        val pending = AutoReplyController.getLatestPendingConfirmation()
+        assertNotNull(pending)
+
+        // Remove SBN from activeSbnMap via reflection to simulate missing SBN
+        val field = AutoReplyController::class.java.getDeclaredField("activeSbnMap")
+        field.isAccessible = true
+        @Suppress("UNCHECKED_CAST")
+        val map = field.get(AutoReplyController) as ConcurrentHashMap<String, StatusBarNotification>
+        map.remove(pending!!.confirmationId)
+
+        val sent = AutoReplyController.confirmAndSend(context, pending.confirmationId)
+        assertFalse("Send must fail closed when SBN is missing", sent)
+        assertEquals(ConfirmationState.REJECTED_NO_CONFIRMATION, pending.state)
+        assertNull(AutoReplyController.getLatestPendingConfirmation())
+    }
+
+    @Test
+    fun testVoiceConfirmationCommandCancelsOnDontSend() = kotlinx.coroutines.runBlocking {
+        settings.isAutoSendWithoutConfirmation = false
+        val sbn = createWhatsAppNotification("Priya", hasRemoteInput = true)
+        AutoReplyController.handleIncoming(context, "Priya", "Hello", sbn)
+        val pending = AutoReplyController.getLatestPendingConfirmation()
+        assertNotNull(pending)
+
+        val response = AutoReplyController.handleVoiceConfirmationCommand(context, "don't send")
+        assertTrue("Expected cancel response, got: $response", response?.contains("Cancelled") == true)
+        assertNull(AutoReplyController.getLatestPendingConfirmation())
+    }
+
+    @Test
+    fun testVoiceConfirmationCommandCancelsOnDoNotSend() = kotlinx.coroutines.runBlocking {
+        settings.isAutoSendWithoutConfirmation = false
+        val sbn = createWhatsAppNotification("Priya", hasRemoteInput = true)
+        AutoReplyController.handleIncoming(context, "Priya", "Hello", sbn)
+        val pending = AutoReplyController.getLatestPendingConfirmation()
+        assertNotNull(pending)
+
+        val response = AutoReplyController.handleVoiceConfirmationCommand(context, "do not send")
+        assertTrue("Expected cancel response, got: $response", response?.contains("Cancelled") == true)
+        assertNull(AutoReplyController.getLatestPendingConfirmation())
+    }
+
+    @Test
+    fun testVoiceConfirmationCommandConfirmsOnYesSend() = kotlinx.coroutines.runBlocking {
+        settings.isAutoSendWithoutConfirmation = false
+        val sbn = createWhatsAppNotification("Priya", hasRemoteInput = true)
+        AutoReplyController.handleIncoming(context, "Priya", "Hello", sbn)
+        val pending = AutoReplyController.getLatestPendingConfirmation()
+        assertNotNull(pending)
+
+        val response = AutoReplyController.handleVoiceConfirmationCommand(context, "yes send it")
+        assertTrue("Expected confirmed response, got: $response", response?.contains("Confirmed and sent") == true)
+        assertNull(AutoReplyController.getLatestPendingConfirmation())
+    }
+
+    @Test
+    fun testAutoReplyActionReceiverSuppressesWhenMaxDisabled() = kotlinx.coroutines.runBlocking {
+        settings.isAutoSendWithoutConfirmation = false
+        val sbn = createWhatsAppNotification("Priya", hasRemoteInput = true)
+        AutoReplyController.handleIncoming(context, "Priya", "Hello", sbn)
+        val pending = AutoReplyController.getLatestPendingConfirmation()
+        assertNotNull(pending)
+
+        settings.isMaxEnabled = false
+
+        val receiver = AutoReplyActionReceiver()
+        val intent = Intent("com.example.ACTION_CONFIRM_REPLY").apply {
+            putExtra("confirmation_id", pending!!.confirmationId)
+        }
+        receiver.onReceive(context, intent)
+
+        // Pending confirmation should still be pending because receiver suppressed action
+        val stillPending = AutoReplyController.getLatestPendingConfirmation()
+        assertNotNull(stillPending)
+        assertEquals(ConfirmationState.PENDING_CONFIRMATION, stillPending?.state)
     }
 }
 

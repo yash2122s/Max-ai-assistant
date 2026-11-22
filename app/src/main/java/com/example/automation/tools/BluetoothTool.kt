@@ -27,7 +27,8 @@ class BluetoothTool(private val bluetoothAction: BluetoothAction) : Tool {
             ToolResult(
                 success = true,
                 toolName = name,
-                verificationRequired = true
+                verificationRequired = false,
+                message = "Bluetooth request processed successfully."
             )
         } catch (e: Exception) {
             ToolResult(

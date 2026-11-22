@@ -33,7 +33,8 @@ data class HomeUiState(
     val error: String? = null,
     val pendingAutomation: JSONObject? = null,
     val presentation: AssistantPresentation = AssistantPresentation(AssistantPhase.IDLE, "Ready"),
-    val activity: com.example.automation.activity.AgentActivityState = com.example.automation.activity.AgentActivityState()
+    val activity: com.example.automation.activity.AgentActivityState = com.example.automation.activity.AgentActivityState(),
+    val selectedLanguage: String = "Tinglish"
 ) {
     val edgeLightingState: com.example.ui.theme.EdgeLightingState
         get() = when {

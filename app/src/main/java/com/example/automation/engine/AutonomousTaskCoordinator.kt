@@ -188,11 +188,12 @@ class AutonomousTaskCoordinator(
         synchronized(lock) {
             if (!isRunning || waitingForUser) return
 
-            // Single-step action gate: if the goal is not a compound multi-step goal,
-            // the executed action already satisfied the user request. Stop immediately!
+            // A turn boundary is not execution evidence. Single-step actions must
+            // be completed by their verifier or by the task_completed gate; this
+            // coordinator must never convert a tool return into a success claim.
             if (!isCompoundGoal(currentGoal)) {
-                Log.i(TAG, "[AUTONOMOUS_SINGLE_STEP] Goal '$currentGoal' is a single-step action. Halting autonomous loop without continuation.")
-                onTaskCompleted("Single-step action completed.")
+                Log.w(TAG, "[AUTONOMOUS_SINGLE_STEP] Goal '$currentGoal' has no verified completion evidence at turn boundary; stopping without claiming success.")
+                cancel("Single-step completion requires verified outcome")
                 return
             }
 

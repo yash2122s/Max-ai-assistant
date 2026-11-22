@@ -12,7 +12,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -44,6 +49,7 @@ object MaxDestinations {
     const val ABOUT = "about"
     const val PRIVACY = "privacy"
     const val LICENSE = "license"
+    const val WEB_DASHBOARD = "web_dashboard"
 }
 
 enum class DrawerIconGroup {
@@ -71,6 +77,7 @@ val MainDrawerItems = listOf(
     NavigationDrawerItem(MaxDestinations.NOTIFICATIONS, "Notifications & Auto-Reply", Icons.Rounded.Notifications, DrawerIconGroup.ALERT),
     NavigationDrawerItem(MaxDestinations.PERMISSIONS, "Permissions & Shizuku", Icons.Rounded.Security, DrawerIconGroup.TRUST),
     NavigationDrawerItem(MaxDestinations.CAPABILITIES, "Capabilities Index", Icons.Rounded.CheckCircle),
+    NavigationDrawerItem(MaxDestinations.WEB_DASHBOARD, "Web Dashboard", Icons.Rounded.Language),
     NavigationDrawerItem(MaxDestinations.SETTINGS, "Settings", Icons.Rounded.Settings),
     NavigationDrawerItem(MaxDestinations.ABOUT, "About MAX", Icons.Rounded.Info),
     NavigationDrawerItem(MaxDestinations.PRIVACY, "Privacy Policy", Icons.Rounded.Lock, DrawerIconGroup.TRUST)
@@ -110,7 +117,43 @@ fun MaxNavGraph(
     NavHost(
         navController = navController,
         startDestination = initialDestination,
-        modifier = modifier
+        modifier = modifier,
+        enterTransition = {
+            slideIntoContainer(
+                AnimatedContentTransitionScope.SlideDirection.Start,
+                animationSpec = spring(
+                    dampingRatio = 0.88f,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + fadeIn(animationSpec = tween(220))
+        },
+        exitTransition = {
+            slideOutOfContainer(
+                AnimatedContentTransitionScope.SlideDirection.Start,
+                animationSpec = spring(
+                    dampingRatio = 0.88f,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + fadeOut(animationSpec = tween(180))
+        },
+        popEnterTransition = {
+            slideIntoContainer(
+                AnimatedContentTransitionScope.SlideDirection.End,
+                animationSpec = spring(
+                    dampingRatio = 0.88f,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + fadeIn(animationSpec = tween(220))
+        },
+        popExitTransition = {
+            slideOutOfContainer(
+                AnimatedContentTransitionScope.SlideDirection.End,
+                animationSpec = spring(
+                    dampingRatio = 0.88f,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ) + fadeOut(animationSpec = tween(180))
+        }
     ) {
         composable(MaxDestinations.HOME) {
             HomeScreen(
@@ -147,7 +190,8 @@ fun MaxNavGraph(
             com.example.ui.settings.SettingsScreen(
                 onNavigateBack = navigateBackToPreviousOrDrawer,
                 onNavigateToSkills = { navController.navigate(MaxDestinations.SKILLS) },
-                onNavigateToLicense = { navController.navigate(MaxDestinations.LICENSE) }
+                onNavigateToLicense = { navController.navigate(MaxDestinations.LICENSE) },
+                onNavigateToWebDashboard = { navController.navigate(MaxDestinations.WEB_DASHBOARD) }
             )
         }
 
@@ -209,7 +253,14 @@ fun MaxNavGraph(
         composable(MaxDestinations.ABOUT) {
             com.example.ui.about.AboutScreen(
                 onNavigateBack = navigateBackToPreviousOrDrawer,
-                onNavigateToPrivacy = { navController.navigate(MaxDestinations.PRIVACY) }
+                onNavigateToPrivacy = { navController.navigate(MaxDestinations.PRIVACY) },
+                onNavigateToWebDashboard = { navController.navigate(MaxDestinations.WEB_DASHBOARD) }
+            )
+        }
+
+        composable(MaxDestinations.WEB_DASHBOARD) {
+            com.example.ui.web.WebDashboardScreen(
+                onNavigateBack = navigateBackToPreviousOrDrawer
             )
         }
 

@@ -14,7 +14,7 @@ import kotlinx.coroutines.withContext
 
 /** Narrow, opt-in cloud adapter. FirebaseAuthManager remains the sole auth authority. */
 class FirestoreMemoryRepository(
-    context: Context,
+    private val context: Context,
     private val auth: FirebaseAuthManager,
     private val firestore: FirebaseFirestore? = try { FirebaseFirestore.getInstance() } catch (_: Exception) { null }
 ) {
@@ -56,6 +56,7 @@ class FirestoreMemoryRepository(
                 tx.set(ref, data, SetOptions.merge())
             }.await()
             if (auth.currentUid != uid || !auth.isCurrentSession(auth.sessionState.value) || !MemorySession(session.ownerKey, session.generation).let { com.example.memory.account.MemoryAccountScope.isCurrent(it) }) throw RemoteWriteException(ErrorKind.AUTH, "Account changed during sync")
+            com.example.analytics.MaxActivityTracker.trackMemoryOperation(context, if (deleted) "TOMBSTONE" else "UPSERT", 1)
             Result.success(RemoteWriteResult(revision))
         } catch (e: RemoteWriteException) { Result.failure(e)
         } catch (e: FirebaseFirestoreException) { Result.failure(RemoteWriteException(if (e.code == FirebaseFirestoreException.Code.PERMISSION_DENIED) ErrorKind.PERMISSION else ErrorKind.NETWORK, e.message ?: "Firestore error"))

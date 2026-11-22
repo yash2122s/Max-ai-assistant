@@ -4,6 +4,8 @@ import android.annotation.SuppressLint
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.NoiseSuppressor
 import android.util.Log
 
 class AudioRecorder {
@@ -15,15 +17,18 @@ class AudioRecorder {
          * Linear interpolation resampler from [inRate] to [outRate].
          */
         fun resampleLinear(input: ShortArray, inputLength: Int, inRate: Int, outRate: Int): ShortArray {
-            if (inRate == outRate || inputLength <= 0) return input.copyOf(inputLength)
-            val outLength = ((inputLength.toLong() * outRate) / inRate).toInt()
+            require(inRate > 0) { "inRate must be positive" }
+            require(outRate > 0) { "outRate must be positive" }
+            val safeInputLength = inputLength.coerceIn(0, input.size)
+            if (inRate == outRate || safeInputLength <= 0) return input.copyOf(safeInputLength)
+            val outLength = ((safeInputLength.toLong() * outRate) / inRate).toInt()
             if (outLength <= 0) return ShortArray(0)
             val output = ShortArray(outLength)
             val ratio = inRate.toDouble() / outRate.toDouble()
             for (i in 0 until outLength) {
                 val inIndex = i * ratio
                 val i1 = inIndex.toInt()
-                val i2 = minOf(i1 + 1, inputLength - 1)
+                val i2 = minOf(i1 + 1, safeInputLength - 1)
                 val frac = inIndex - i1
                 val sample = (input[i1] * (1.0 - frac) + input[i2] * frac).toInt()
                 output[i] = sample.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
@@ -36,6 +41,8 @@ class AudioRecorder {
     private var isRecording = false
     private var recordingThread: Thread? = null
     private var actualSampleRate = TARGET_SAMPLE_RATE
+    private var echoCanceler: AcousticEchoCanceler? = null
+    private var noiseSuppressor: NoiseSuppressor? = null
 
     fun getActualSampleRate(): Int = actualSampleRate
 
@@ -96,6 +103,31 @@ class AudioRecorder {
         audioRecord = selectedRecord
         actualSampleRate = selectedRate
 
+        val audioSessionId = selectedRecord.audioSessionId
+        try {
+            if (AcousticEchoCanceler.isAvailable()) {
+                echoCanceler = AcousticEchoCanceler.create(audioSessionId)?.apply {
+                    enabled = true
+                    Log.i(TAG, "Hardware AcousticEchoCanceler enabled successfully (sessionId=" + audioSessionId + ")")
+                }
+            } else {
+                Log.w(TAG, "Hardware AcousticEchoCanceler is not available on this device")
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to initialize AcousticEchoCanceler: " + e.message)
+        }
+
+        try {
+            if (NoiseSuppressor.isAvailable()) {
+                noiseSuppressor = NoiseSuppressor.create(audioSessionId)?.apply {
+                    enabled = true
+                    Log.i(TAG, "Hardware NoiseSuppressor enabled successfully (sessionId=" + audioSessionId + ")")
+                }
+            }
+        } catch (e: Throwable) {
+            Log.w(TAG, "Failed to initialize NoiseSuppressor: " + e.message)
+        }
+
         try {
             audioRecord?.startRecording()
             isRecording = true
@@ -107,8 +139,13 @@ class AudioRecorder {
             val buffer = ShortArray(readBufferSize)
 
             recordingThread = Thread({
-                while (isRecording) {
+                try {
+                    while (isRecording) {
                     val shortsRead = audioRecord?.read(buffer, 0, buffer.size) ?: 0
+                    if (shortsRead < 0) {
+                        Log.w(TAG, "AudioRecord.read failed with code $shortsRead")
+                        break
+                    }
                     if (shortsRead > 0) {
                         // Resample to 16kHz if hardware captured at another rate
                         val targetShorts: ShortArray
@@ -126,14 +163,34 @@ class AudioRecorder {
                             val rms = audioProcessor.processAudio(targetShorts, targetCount)
                             onRmsChanged(rms)
 
-                            // Convert short array into little-endian bytes for the Gemini Live API (16kHz mono PCM16)
-                            val byteBuffer = ByteArray(targetCount * 2)
-                            for (i in 0 until targetCount) {
-                                val sample = targetShorts[i].toInt()
-                                byteBuffer[i * 2] = (sample and 0xFF).toByte()
-                                byteBuffer[i * 2 + 1] = ((sample shr 8) and 0xFF).toByte()
+                            // Echo suppression: mute microphone chunks sent to Gemini Live while speaker is actively speaking
+                            val isSpeakerActive = com.example.utils.AudioPlaybackManager.isPlaying()
+                            if (isSpeakerActive) {
+                                // Zero-out PCM data to silence self-voice feedback
+                                val silentBuffer = ByteArray(targetCount * 2)
+                                onAudioChunk(silentBuffer)
+                            } else {
+                                // Convert short array into little-endian bytes for the Gemini Live API (16kHz mono PCM16)
+                                val byteBuffer = ByteArray(targetCount * 2)
+                                for (i in 0 until targetCount) {
+                                    val sample = targetShorts[i].toInt()
+                                    byteBuffer[i * 2] = (sample and 0xFF).toByte()
+                                    byteBuffer[i * 2 + 1] = ((sample shr 8) and 0xFF).toByte()
+                                }
+                                onAudioChunk(byteBuffer)
                             }
-                            onAudioChunk(byteBuffer)
+                        }
+                    }
+                    }
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Audio recording thread failed", e)
+                } finally {
+                    synchronized(this@AudioRecorder) {
+                        if (Thread.currentThread() === recordingThread) {
+                            isRecording = false
+                            audioRecord?.release()
+                            audioRecord = null
+                            recordingThread = null
                         }
                     }
                 }
@@ -141,6 +198,11 @@ class AudioRecorder {
             recordingThread?.start()
         } catch (e: Exception) {
             Log.e(TAG, "Error starting recording", e)
+            isRecording = false
+            audioRecord?.release()
+            audioRecord = null
+            recordingThread = null
+            throw e
         }
     }
 
@@ -153,6 +215,24 @@ class AudioRecorder {
             Log.w(TAG, "Interrupted while joining recording thread", e)
         }
         recordingThread = null
+        try {
+            echoCanceler?.apply {
+                enabled = false
+                release()
+            }
+            echoCanceler = null
+        } catch (e: Throwable) {
+            Log.w(TAG, "Error releasing echo canceler: " + e.message)
+        }
+        try {
+            noiseSuppressor?.apply {
+                enabled = false
+                release()
+            }
+            noiseSuppressor = null
+        } catch (e: Throwable) {
+            Log.w(TAG, "Error releasing noise suppressor: " + e.message)
+        }
         try {
             audioRecord?.apply {
                 if (state == AudioRecord.STATE_INITIALIZED) {

@@ -45,9 +45,9 @@ fun MaxTopBar(
                         )
                         if (subtitle != null) {
                             Text(
-                                text = subtitle,
-                                style = MaxType.Caption,
-                                color = MaxSemanticColors.textSecondary
+                                text = subtitle.uppercase(),
+                                style = MaxType.Eyebrow,
+                                color = MaxSemanticColors.accentCyan
                             )
                         }
                     }

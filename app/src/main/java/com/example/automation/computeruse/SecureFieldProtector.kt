@@ -18,6 +18,7 @@ object SecureFieldProtector {
      * Determines whether an InteractiveElement is a secure/sensitive field.
      */
     fun isSecureElement(element: InteractiveElement): Boolean {
+        if (element.isPassword) return true
         val id = element.id?.lowercase(Locale.ROOT) ?: ""
         val desc = element.contentDescription?.lowercase(Locale.ROOT) ?: ""
         val className = element.className?.lowercase(Locale.ROOT) ?: ""

@@ -71,7 +71,8 @@ sealed class CallState {
         val confirmedAt: Long,
         val expiresAt: Long,
         val originalUserIntent: String? = null,
-        val preparedTarget: PreparedCallTarget? = null
+        val preparedTarget: PreparedCallTarget? = null,
+        val createdAt: Long = confirmedAt
     ) : CallState()
     
     object Calling : CallState()
@@ -297,7 +298,7 @@ object PendingCallManager {
     fun confirmPendingCall(contactId: Long? = null, phoneId: Long? = null): Boolean {
         val currentState = state
         val now = System.currentTimeMillis()
-        val duration = 2 * 60 * 1000L
+        val duration = 15_000L // Reduced from 2 min to 15 s
 
         if (currentState is CallState.AwaitingConfirmation) {
             if (now > currentState.expiresAt) {
@@ -319,7 +320,8 @@ object PendingCallManager {
                 confirmedAt = now,
                 expiresAt = now + duration,
                 originalUserIntent = currentState.originalUserIntent,
-                preparedTarget = currentState.preparedTarget
+                preparedTarget = currentState.preparedTarget,
+                createdAt = currentState.createdAt
             )
             startTimeout(duration)
             return true
@@ -362,7 +364,8 @@ object PendingCallManager {
                     confirmedAt = now,
                     expiresAt = now + duration,
                     originalUserIntent = currentState.originalUserIntent,
-                    preparedTarget = prepared
+                    preparedTarget = prepared,
+                    createdAt = currentState.createdAt
                 )
                 startTimeout(duration)
                 return true
@@ -370,6 +373,51 @@ object PendingCallManager {
         }
 
         return false
+    }
+
+    @Synchronized
+    fun hasPendingCall(): Boolean {
+        val currentState = state
+        val now = System.currentTimeMillis()
+        return when (currentState) {
+            is CallState.AwaitingContactSelection -> {
+                if (now - currentState.createdAt > 2 * 60 * 1000L) {
+                    clear()
+                    false
+                } else {
+                    true
+                }
+            }
+            is CallState.AwaitingConfirmation -> {
+                if (now > currentState.expiresAt) {
+                    clear()
+                    false
+                } else {
+                    true
+                }
+            }
+            is CallState.Confirmed -> {
+                if (now > currentState.expiresAt) {
+                    clear()
+                    false
+                } else {
+                    true
+                }
+            }
+            else -> false
+        }
+    }
+
+    @Synchronized
+    fun pendingSinceMs(): Long {
+        val currentState = state
+        if (!hasPendingCall()) return 0L
+        return when (currentState) {
+            is CallState.AwaitingContactSelection -> currentState.createdAt
+            is CallState.AwaitingConfirmation -> currentState.createdAt
+            is CallState.Confirmed -> currentState.createdAt
+            else -> 0L
+        }
     }
 
     @Synchronized

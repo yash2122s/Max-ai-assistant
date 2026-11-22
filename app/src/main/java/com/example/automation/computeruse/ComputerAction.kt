@@ -146,6 +146,7 @@ data class ActionResult(
     val errorCode: String? = null,
     val targetApp: String? = null,
     val methodUsed: String = "ACCESSIBILITY",
-    val durationMs: Long = 0L
+    val durationMs: Long = 0L,
+    /** True only when a submit/IME action produced an independently observed transition. */
+    val submissionVerified: Boolean = false
 )
-

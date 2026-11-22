@@ -24,9 +24,15 @@ class AccessibilityStepsAction : BaseAction<JSONArray>() {
             }
         }
         
-        JarvisAccessibilityService.pendingTask = AutomationTask(
+        val task = AutomationTask(
             type = "GENERIC",
             steps = steps
         )
+        val service = JarvisAccessibilityService.instance
+        if (service != null) {
+            service.submitAutomationTask(task)
+        } else {
+            JarvisAccessibilityService.setPendingTaskSafely(task)
+        }
     }
 }

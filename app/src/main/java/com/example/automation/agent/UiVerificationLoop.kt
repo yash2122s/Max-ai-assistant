@@ -16,7 +16,7 @@ import kotlinx.coroutines.withContext
 
 /**
  * Autonomous UI verification loop implementing:
- * Observe -> Decide -> Act -> Adaptive Wait -> Re-observe -> Verify -> Recover
+ * Observe -> Decide -> Revalidate -> Act -> Adaptive Wait -> Re-observe -> Verify
  *
  * Fully bounded to maxSteps to prevent infinite loops, with cancellation support and
  * provider-level fallback from OpenRouter to Gemini.
@@ -36,6 +36,10 @@ class UiVerificationLoop(
         private const val DEFAULT_SETTLE_DELAY_MS = 400L
         private const val APP_LAUNCH_MAX_WAIT_MS = 2500L
         private const val APP_LAUNCH_POLL_INTERVAL_MS = 150L
+        private val SCREEN_BOUND_ACTIONS = setOf(
+            UiAction.Type.TAP, UiAction.Type.LONG_PRESS, UiAction.Type.SWIPE,
+            UiAction.Type.SCROLL, UiAction.Type.TYPE, UiAction.Type.KEY_ENTER
+        )
     }
 
     suspend fun executeTask(
@@ -58,9 +62,7 @@ class UiVerificationLoop(
             )
         }
 
-        Log.d(TAG, "Starting UI Automation Loop: '${task.goal}' (maxSteps=${task.maxSteps})")
-
-        val recoveryState = RecoveryState()
+        Log.d(TAG, "Starting UI Automation Loop: task=${task.id} (maxSteps=${task.maxSteps})")
 
         val geminiProvider = GeminiUiAgentProvider()
         val openRouterProvider = OpenRouterUiAgentProvider()
@@ -107,8 +109,7 @@ class UiVerificationLoop(
                         cancellationToken = cancellationToken,
                         openRouterProvider = openRouterProvider,
                         geminiProvider = geminiProvider,
-                        settings = settings,
-                        recoveryState = recoveryState
+                        settings = settings
                     )
                 }
             } catch (_: TimeoutCancellationException) {
@@ -150,8 +151,7 @@ class UiVerificationLoop(
         cancellationToken: com.example.automation.engine.CancellationToken?,
         openRouterProvider: OpenRouterUiAgentProvider,
         geminiProvider: GeminiUiAgentProvider,
-        settings: SettingsManager,
-        recoveryState: RecoveryState
+        settings: SettingsManager
     ): UiTaskResult? {
         suspend fun cancellationResult(): UiTaskResult = UiTaskResult(
             taskId = task.id,
@@ -166,13 +166,21 @@ class UiVerificationLoop(
 
         fun isCancelled(): Boolean = cancellationToken?.isCancelled == true
 
-        if (isCancelled()) return cancellationResult()
-        currentCoroutineContext().ensureActive()
+        suspend fun interruptionResult(): UiTaskResult? {
+            currentCoroutineContext().ensureActive()
+            if (isCancelled()) return cancellationResult()
+            if (!MaxRuntimeManager.isMaxEnabled(context)) {
+                return failedActionResult(task, stepIndex, "none", "none", actionsTaken,
+                    "MAX_DISABLED", "Task cancelled: MAX was turned OFF.")
+            }
+            return null
+        }
+
+        interruptionResult()?.let { return it }
 
         // 1. OBSERVE
         val observationBefore = captureCurrentObservation()
-        if (isCancelled()) return cancellationResult()
-        currentCoroutineContext().ensureActive()
+        interruptionResult()?.let { return it }
 
         // 2. DECIDE
         val (reasoningResult, providerUsed, modelUsed) = decisionProvider?.invoke(
@@ -187,8 +195,7 @@ class UiVerificationLoop(
             geminiProvider = geminiProvider,
             settings = settings
         )
-        if (isCancelled()) return cancellationResult()
-        currentCoroutineContext().ensureActive()
+        interruptionResult()?.let { return it }
 
         when (reasoningResult) {
             is UiAgentReasoningResult.FinishTask -> {
@@ -207,6 +214,7 @@ class UiVerificationLoop(
 
                 // P0 completion gate: a model claim is never completion evidence.
                 val finalObservation = captureCurrentObservation()
+                interruptionResult()?.let { return it }
                 val completion = UiTaskCompletionVerifier.verify(task, finalObservation, stepHistory)
                 if (!completion.verified) {
                     Log.w(TAG, completion.message)
@@ -272,46 +280,41 @@ class UiVerificationLoop(
                     return failedActionResult(task, stepIndex, providerUsed, modelUsed, actionsTaken, "WRONG_FOREGROUND_PACKAGE", "Foreground package is ${observationBefore.foregroundPackage}, expected $targetPackage.")
                 }
 
-                Log.d(TAG, "Action decision: ${action.type} (${action.reason})")
-                actionsTaken.add(action)
+                // Reasoning may take seconds. Never execute coordinates or input against
+                // the screen observed before that network round trip without reacquiring it.
+                if (action.type in SCREEN_BOUND_ACTIONS) {
+                    val currentObservation = captureCurrentObservation()
+                    interruptionResult()?.let { return it }
+                    if (targetPackage != null && !currentObservation.foregroundPackage.equals(targetPackage, ignoreCase = true)) {
+                        return failedActionResult(task, stepIndex, providerUsed, modelUsed, actionsTaken,
+                            "WRONG_FOREGROUND_PACKAGE", "Foreground package changed before action dispatch.")
+                    }
+                    if (!sameInteractionState(observationBefore, currentObservation)) {
+                        return failedActionResult(task, stepIndex, providerUsed, modelUsed, actionsTaken,
+                            "STALE_OBSERVATION", "Screen changed while deciding; action was not dispatched. Observe and plan again.")
+                    }
+                }
+
+                Log.d(TAG, "Action decision: ${action.type}")
 
                 // 3. ACT. Check cancellation immediately before dispatch so a cancelled
                 // decision cannot launch an OS action.
-                if (isCancelled()) return cancellationResult()
-                currentCoroutineContext().ensureActive()
+                interruptionResult()?.let { return it }
+                actionsTaken.add(action)
                 val executionSuccess = actionExecutor(context, action)
-                currentCoroutineContext().ensureActive()
-                if (isCancelled()) return cancellationResult()
+                interruptionResult()?.let { return it }
 
                 // 4. WAIT
                 adaptiveWait?.invoke(action) ?: performAdaptiveWait(action)
-                currentCoroutineContext().ensureActive()
-                if (isCancelled()) return cancellationResult()
+                interruptionResult()?.let { return it }
 
                 // 5. RE-OBSERVE (including after launch)
                 val observationAfter = captureCurrentObservation()
-                currentCoroutineContext().ensureActive()
-                if (isCancelled()) return cancellationResult()
+                interruptionResult()?.let { return it }
 
                 // 6. VERIFY
                 val (isVerified, note) = verifyActionOutcome(action, observationBefore, observationAfter, targetPackage)
-                Log.d(TAG, "Step $stepIndex verification: verified=$isVerified ($note)")
-
-                // 7. RECOVER, bounded by the same step timeout.
-                val currentSignature = "${action.type}:${action.x}:${action.y}:${action.text}:${action.packageName}"
-                val screenChanged = observationBefore.visibleText != observationAfter.visibleText ||
-                    observationBefore.foregroundPackage != observationAfter.foregroundPackage
-                if (currentSignature == recoveryState.lastActionSignature && !screenChanged) {
-                    recoveryState.consecutiveNoOpCount++
-                    if (recoveryState.consecutiveNoOpCount >= 2) {
-                        UiActionExecutor.executeAction(context, UiAction(type = UiAction.Type.KEY_BACK, reason = "Self-healing: dismiss blocking overlay/IME"))
-                        delay(400L)
-                        recoveryState.consecutiveNoOpCount = 0
-                    }
-                } else {
-                    recoveryState.consecutiveNoOpCount = 0
-                }
-                recoveryState.lastActionSignature = currentSignature
+                Log.d(TAG, "Step $stepIndex verification: action=${action.type} verified=$isVerified")
 
                 stepHistory.add(
                     UiStepRecord(
@@ -356,11 +359,6 @@ class UiVerificationLoop(
         modelUsed = modelUsed,
         actionsTaken = actionsTaken,
         error = error
-    )
-
-    private data class RecoveryState(
-        var consecutiveNoOpCount: Int = 0,
-        var lastActionSignature: String? = null
     )
 
     private suspend fun decideNextAction(
@@ -512,14 +510,25 @@ class UiVerificationLoop(
             }
             UiAction.Type.TYPE -> {
                 val typed = action.text ?: ""
-                if (typed.isNotBlank() && after.visibleText.contains(typed, ignoreCase = true)) {
-                    Pair(true, "Typed text appears on screen")
+                val editors = before.prunedElements.filter { it.isEditable }
+                val previousField = editors.filter { it.isFocused }.singleOrNull()
+                    ?: editors.singleOrNull()
+                val sameFields = after.prunedElements.filter { field ->
+                    field.isEditable && previousField != null &&
+                        if (!previousField.resourceId.isNullOrBlank()) previousField.resourceId == field.resourceId
+                        else previousField.nodeId == field.nodeId && previousField.className == field.className
+                }
+                val matchingFields = sameFields.filter { field ->
+                    field.text == typed && (previousField?.isFocused != true || field.isFocused)
+                }
+                if (typed.isNotBlank() && sameFields.size == 1 && matchingFields.size == 1) {
+                    Pair(true, "Expected text confirmed in an observed editable field")
                 } else {
-                    Pair(false, "Typed text '$typed' not detected on screen after input")
+                    Pair(false, "Expected input could not be confirmed in a unique editable field")
                 }
             }
             UiAction.Type.KEY_BACK, UiAction.Type.KEY_HOME, UiAction.Type.KEY_ENTER -> {
-                val changed = before.visibleText != after.visibleText || before.foregroundPackage != after.foregroundPackage
+                val changed = !sameInteractionState(before, after)
                 if (changed) {
                     Pair(true, "Navigation/action key triggered state transition")
                 } else {
@@ -527,7 +536,7 @@ class UiVerificationLoop(
                 }
             }
             UiAction.Type.TAP, UiAction.Type.LONG_PRESS, UiAction.Type.SWIPE, UiAction.Type.SCROLL -> {
-                val changed = before.visibleText != after.visibleText || before.foregroundPackage != after.foregroundPackage
+                val changed = !sameInteractionState(before, after)
                 if (changed) {
                     Pair(true, "Screen state changed")
                 } else {
@@ -536,5 +545,21 @@ class UiVerificationLoop(
             }
             UiAction.Type.SCREENSHOT, UiAction.Type.FINISH -> Pair(true, "Verified")
         }
+    }
+
+    /** Compare interaction evidence, not capture time or JPEG noise on a semantic screen. */
+    private fun sameInteractionState(before: UiObservation, after: UiObservation): Boolean {
+        if (before.foregroundPackage != after.foregroundPackage || before.visibleText != after.visibleText ||
+            before.clickableElements != after.clickableElements || before.prunedElements != after.prunedElements) {
+            return false
+        }
+        // With no semantic tree, do not dispatch an old visual coordinate on a different frame.
+        if (before.prunedElements.isEmpty() && after.prunedElements.isEmpty()) {
+            val previousImage = before.screenshotJpeg
+            val currentImage = after.screenshotJpeg
+            return if (previousImage == null) currentImage == null
+                else currentImage != null && previousImage.contentEquals(currentImage)
+        }
+        return true
     }
 }

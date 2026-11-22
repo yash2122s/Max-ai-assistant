@@ -62,7 +62,8 @@ object DestinationVerifier {
                 obs.visibleTexts.any { it.contains(kw, ignoreCase = true) }
             }
 
-            if ((hasPlayerControls || hasVideoIndicators) && (matchesQuery || selectedCandidate != null)) {
+            val candidateFresh = selectedCandidate?.let { !it.isStale(obs) } == true
+            if ((hasPlayerControls || hasVideoIndicators) && (matchesQuery || candidateFresh)) {
                 records.add(EvidenceRecord("youtube_verifier", EvidenceStatus.VERIFIED, "YouTube video player/detail indicators active"))
                 Log.i(TAG, "[DESTINATION_VERIFIED] PASS: YouTube video page verified for '$query'")
                 return DestinationVerificationResult(

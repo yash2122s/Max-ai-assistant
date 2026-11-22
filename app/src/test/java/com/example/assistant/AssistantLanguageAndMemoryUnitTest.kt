@@ -85,6 +85,28 @@ class AssistantLanguageAndMemoryUnitTest {
         assertEquals(AssistantLanguage.HINDI, LanguagePolicy.resolveResponseLanguage("Hindi lo cheppu"))
         assertEquals(AssistantLanguage.HINDI, LanguagePolicy.resolveResponseLanguage("speak hindi"))
         assertEquals(AssistantLanguage.HINDI, LanguagePolicy.resolveResponseLanguage("hindi mein bolo"))
+
+        // Tinglish override
+        assertEquals(AssistantLanguage.TINGLISH, LanguagePolicy.resolveResponseLanguage("tinglish lo cheppu"))
+        assertEquals(AssistantLanguage.TINGLISH, LanguagePolicy.resolveResponseLanguage("tenglish lo cheppu"))
+    }
+
+    @Test
+    fun testSessionPreferenceResolution() {
+        assertEquals(AssistantLanguage.TELUGU, LanguagePolicy.resolveResponseLanguage(null, "Telugu"))
+        assertEquals(AssistantLanguage.TELUGU, LanguagePolicy.resolveResponseLanguage("Eroju weather ela undi?", "Telugu"))
+        assertEquals(AssistantLanguage.TELUGU, LanguagePolicy.resolveResponseLanguage("What is the time?", "తెలుగు"))
+
+        assertEquals(AssistantLanguage.ENGLISH, LanguagePolicy.resolveResponseLanguage(null, "English"))
+        assertEquals(AssistantLanguage.ENGLISH, LanguagePolicy.resolveResponseLanguage("Eroju weather ela undi?", "English"))
+        assertEquals(AssistantLanguage.ENGLISH, LanguagePolicy.resolveResponseLanguage("నా పేరు చెప్పు", "English"))
+
+        assertEquals(AssistantLanguage.HINDI, LanguagePolicy.resolveResponseLanguage(null, "Hindi"))
+        assertEquals(AssistantLanguage.HINDI, LanguagePolicy.resolveResponseLanguage("Eroju weather ela undi?", "Hindi"))
+        assertEquals(AssistantLanguage.HINDI, LanguagePolicy.resolveResponseLanguage("నా పేరు చెప్పు", "हिंदी"))
+
+        assertEquals(AssistantLanguage.TINGLISH, LanguagePolicy.resolveResponseLanguage(null, "Tinglish"))
+        assertEquals(AssistantLanguage.TINGLISH, LanguagePolicy.resolveResponseLanguage(null, "Tenglish"))
     }
 
     // =========================================================================

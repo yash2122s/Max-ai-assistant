@@ -61,10 +61,16 @@ class PermissionsViewModel(application: Application) : AndroidViewModel(applicat
         val isShizukuAvail = ShizukuManager.isShizukuAvailable()
         val isShizukuGrant = isShizukuAvail && ShizukuManager.isPermissionGranted()
 
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager
+        val isExactAlarm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            alarmManager?.canScheduleExactAlarms() ?: true
+        } else true
+
         val items = listOf(
             PermissionItemState("accessibility", "Accessibility Service", "Required for UI tree analysis, clicking, typing, and app automation", isAccessibility, true, PermissionCategory.CORE_SYSTEM),
             PermissionItemState("overlay", "Display Over Other Apps", "Required for floating capsule HUD and instant AI overlay", isOverlay, true, PermissionCategory.CORE_SYSTEM),
             PermissionItemState("battery", "Ignore Battery Optimizations", "Keeps MAX voice engine and background automation loop active", isBattery, true, PermissionCategory.CORE_SYSTEM),
+            PermissionItemState("exact_alarm", "Alarms & Reminders", "Allows MAX to schedule time-critical reminders and wake up precisely", isExactAlarm, true, PermissionCategory.CORE_SYSTEM),
             PermissionItemState("notif_listener", "Notification Listener", "Allows MAX to read, summarize, and auto-reply to messages", isNotifListener, false, PermissionCategory.CORE_SYSTEM),
             PermissionItemState("microphone", "Microphone", "Enables real-time duplex voice interaction and speech recognition", isMic, true, PermissionCategory.VOICE_AND_VISION),
             PermissionItemState("camera", "Camera & Vision", "Allows MAX to capture photos, analyze screenshots, and use flashlight", isCamera, false, PermissionCategory.VOICE_AND_VISION),
@@ -139,6 +145,15 @@ class PermissionsViewModel(application: Application) : AndroidViewModel(applicat
                 "notif_listener" -> {
                     val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
                     context.startActivity(intent)
+                }
+                "exact_alarm" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                        context.startActivity(intent)
+                    } else {
+                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}")).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
+                        context.startActivity(intent)
+                    }
                 }
                 "shizuku" -> {
                     if (!ShizukuManager.isShizukuAvailable()) {

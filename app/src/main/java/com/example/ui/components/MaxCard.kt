@@ -29,7 +29,7 @@ fun MaxCard(
     content: @Composable ColumnScope.() -> Unit
 ) {
     val isDark = LocalIsDarkMode.current
-    val actualBg = if (backgroundColor != Color.Unspecified) backgroundColor else if (isDark) MaxSurfaceCard else LuminousWhite
+    val actualBg = if (backgroundColor != Color.Unspecified) backgroundColor else MaxSurfaceCard
     val actualBorder = if (borderColor != Color.Unspecified) borderColor else if (isDark) MaxBorderHairline else SoftRoseBorder
     val actualSpecular = if (isDark) MaxBorderSpecular else SoftRoseBorderStrong
     val cardShape = shape ?: RoundedCornerShape(cornerRadius)
@@ -44,8 +44,8 @@ fun MaxCard(
         modifier = modifier
             .fillMaxWidth()
             .clip(cardShape)
-            .then(borderModifier)
             .background(actualBg)
+            .then(borderModifier)
             .then(
                 if (onClick != null) {
                     Modifier.iosPressEffect(

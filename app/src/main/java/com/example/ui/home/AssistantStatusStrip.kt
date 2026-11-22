@@ -32,9 +32,9 @@ internal fun phaseColor(phase: AssistantPhase): Color = when (phase) {
     AssistantPhase.UNVERIFIED, AssistantPhase.WAITING_FOR_APPROVAL,
     AssistantPhase.WAITING_FOR_INPUT, AssistantPhase.CANCELLING -> MaxIOSColors.SystemAmber
     AssistantPhase.COMPLETED -> MaxIOSColors.SystemGreen
-    AssistantPhase.STREAMING, AssistantPhase.SPEAKING, AssistantPhase.LISTENING -> com.example.ui.theme.NeonPink
-    AssistantPhase.IDLE, AssistantPhase.CANCELLED -> com.example.ui.theme.MagentaRose
-    else -> com.example.ui.theme.NeonPink
+    AssistantPhase.STREAMING, AssistantPhase.SPEAKING, AssistantPhase.LISTENING -> MaxAccentCyan
+    AssistantPhase.IDLE, AssistantPhase.CANCELLED -> MaxAccentCyan
+    else -> MaxAccentCyan
 }
 
 @Composable

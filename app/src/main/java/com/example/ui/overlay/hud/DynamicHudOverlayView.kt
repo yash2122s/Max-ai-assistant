@@ -117,7 +117,7 @@ class DynamicHudOverlayView @JvmOverloads constructor(
         isClickable = true
         isFocusable = false
 
-        // Start continuous 60fps animator for visualizer and dot animations
+        // Prepare continuous 60fps animator for active visualizer and dot animations (started on-demand only)
         continuousLoopAnimator = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = 1200
             repeatCount = ValueAnimator.INFINITE
@@ -129,7 +129,6 @@ class DynamicHudOverlayView @JvmOverloads constructor(
                 progressSweep = (animTime * 100f)
                 invalidate()
             }
-            start()
         }
 
         // Gesture handling
@@ -164,6 +163,63 @@ class DynamicHudOverlayView @JvmOverloads constructor(
                 return false
             }
         })
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        updateLoopAnimatorState()
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        pauseLoopAnimator()
+    }
+
+    override fun onVisibilityChanged(changedView: View, visibility: Int) {
+        super.onVisibilityChanged(changedView, visibility)
+        updateLoopAnimatorState()
+    }
+
+    override fun onVisibilityAggregated(isVisible: Boolean) {
+        super.onVisibilityAggregated(isVisible)
+        if (isVisible) {
+            updateLoopAnimatorState()
+        } else {
+            pauseLoopAnimator()
+        }
+    }
+
+    override fun setVisibility(visibility: Int) {
+        super.setVisibility(visibility)
+        updateLoopAnimatorState()
+    }
+
+    private fun shouldAnimateLoop(): Boolean {
+        return visibility == View.VISIBLE &&
+                isAttachedToWindow &&
+                (currentState is HudState.Listening ||
+                 currentState is HudState.Thinking ||
+                 currentState is HudState.Speaking ||
+                 currentState is HudState.ExecutingTool ||
+                 currentState is HudState.Reconnecting)
+    }
+
+    private fun updateLoopAnimatorState() {
+        if (shouldAnimateLoop()) {
+            if (continuousLoopAnimator?.isStarted != true) {
+                continuousLoopAnimator?.start()
+            } else if (continuousLoopAnimator?.isPaused == true) {
+                continuousLoopAnimator?.resume()
+            }
+        } else {
+            pauseLoopAnimator()
+        }
+    }
+
+    private fun pauseLoopAnimator() {
+        if (continuousLoopAnimator?.isRunning == true) {
+            continuousLoopAnimator?.pause()
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -265,6 +321,7 @@ class DynamicHudOverlayView @JvmOverloads constructor(
         }
 
         calculateTargetBounds()
+        updateLoopAnimatorState()
         invalidate()
     }
 
@@ -719,7 +776,12 @@ class DynamicHudOverlayView @JvmOverloads constructor(
     }
 
     fun destroy() {
+        dimensionAnimator?.removeAllUpdateListeners()
         dimensionAnimator?.cancel()
+        dimensionAnimator = null
+
+        continuousLoopAnimator?.removeAllUpdateListeners()
         continuousLoopAnimator?.cancel()
+        continuousLoopAnimator = null
     }
 }

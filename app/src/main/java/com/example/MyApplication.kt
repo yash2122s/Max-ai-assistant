@@ -7,6 +7,9 @@ import com.example.automation.tools.OpenAppTool
 import com.example.automation.tools.ToolRegistry
 import com.example.automation.verification.OpenAppVerifier
 import com.example.automation.verification.VerificationRegistry
+import android.app.Activity
+import android.os.Bundle
+import com.example.analytics.MaxActivityTracker
 import kotlinx.coroutines.launch
 
 class MyApplication : Application() {
@@ -290,6 +293,38 @@ class MyApplication : Application() {
         }
 
         Log.d("MyApplication", "MAX execution framework and Firebase licensing successfully initialized.")
+
+        // Initialize centralized session tracking and lifecycle monitoring
+        MaxActivityTracker.trackSessionStart(this)
+        registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
+            private var startedActivities = 0
+
+            override fun onActivityStarted(activity: Activity) {
+                if (startedActivities == 0) {
+                    _isMaxForeground.value = true
+                    MaxActivityTracker.trackSessionStart(this@MyApplication)
+                }
+                startedActivities++
+            }
+
+            override fun onActivityStopped(activity: Activity) {
+                startedActivities--
+                if (startedActivities <= 0) {
+                    startedActivities = 0
+                    _isMaxForeground.value = false
+                    MaxActivityTracker.trackSessionEnd(this@MyApplication)
+                }
+            }
+
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityResumed(activity: Activity) {
+                MaxActivityTracker.trackSessionHeartbeat(this@MyApplication)
+                MaxActivityTracker.trackScreenView(this@MyApplication, activity.javaClass.simpleName)
+            }
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+        })
     }
 
     lateinit var maxLicenseManager: com.example.firebase.manager.MaxLicenseManager

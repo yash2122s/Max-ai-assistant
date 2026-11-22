@@ -37,6 +37,26 @@ fun MaxAuroraBackground(
 
 @Composable
 private fun StaticAurora(modifier: Modifier) {
+    val transition = rememberInfiniteTransition(label = "static_aurora")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 2f * Math.PI.toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(24000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "static_phase"
+    )
+    val breathe by transition.animateFloat(
+        initialValue = 0.94f,
+        targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(4500, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "static_breathe"
+    )
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -45,34 +65,41 @@ private fun StaticAurora(modifier: Modifier) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
-            val r = size.minDimension * 1.1f
+            val r = size.minDimension * 1.1f * breathe
+
+            // Dynamic subtle orbit offsets
+            val cx1 = w * 0.15f + kotlin.math.cos(phase) * w * 0.04f
+            val cy1 = h * 0.10f + kotlin.math.sin(phase) * h * 0.03f
+
+            val cx2 = w * 0.85f - kotlin.math.cos(phase + 1f) * w * 0.05f
+            val cy2 = h * 0.90f + kotlin.math.sin(phase + 1f) * h * 0.03f
 
             // Top-left cyan glow
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        MaxAccentCyan.copy(alpha = 0.14f),
+                        MaxAccentCyan.copy(alpha = 0.18f),
                         Color.Transparent
                     ),
-                    center = Offset(w * 0.15f, h * 0.10f),
+                    center = Offset(cx1, cy1),
                     radius = r
                 ),
                 radius = r,
-                center = Offset(w * 0.15f, h * 0.10f)
+                center = Offset(cx1, cy1)
             )
 
             // Bottom-right royal glow
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        MaxPrimaryRoyal.copy(alpha = 0.20f),
+                        MaxPrimaryRoyal.copy(alpha = 0.24f),
                         Color.Transparent
                     ),
-                    center = Offset(w * 0.85f, h * 0.90f),
+                    center = Offset(cx2, cy2),
                     radius = r * 1.1f
                 ),
                 radius = r * 1.1f,
-                center = Offset(w * 0.85f, h * 0.90f)
+                center = Offset(cx2, cy2)
             )
         }
     }

@@ -89,6 +89,9 @@ MAX_DATA_BACKUP/
 
 # Firebase Service Account Credentials & License Keys
 *serviceAccountKey*.json
+*service-account*.json
+*-adminsdk-*.json
+*firebase-adminsdk*.json
 tools/license-generator/serviceAccountKey.json
 tools/license-generator/keys.json
 tools/license-generator/customers.csv
@@ -101,4 +104,10 @@ tools/license-generator/customers.csv
 /MAX_RELEASE_BUILD/
 tools/security-tests/.firebase/
 tools/security-tests/*-debug.log
+
+# Standalone website repository
+max-ai-agent-website/
+max-ai-public-website/
+
+
 

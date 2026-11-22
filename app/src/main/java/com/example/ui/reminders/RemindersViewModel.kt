@@ -6,7 +6,6 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.AppDatabase
 import com.example.data.local.Reminder
 import com.example.data.repository.JarvisRepository
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -65,58 +64,50 @@ class RemindersViewModel(application: Application) : AndroidViewModel(applicatio
         _selectedReminderForEdit.value = null
     }
 
-    fun saveReminder(
-        message: String,
-        triggerAtMillis: Long,
-        automationType: String? = null,
-        automationTarget: String? = null,
-        automationMessage: String? = null
-    ) {
+    private var saving = false
+
+    fun saveReminder(message: String, triggerAtMillis: Long?) {
+        if (saving) return
         if (message.isBlank()) {
             viewModelScope.launch { _events.send(RemindersUiEvent.ShowToast("Reminder message cannot be empty")) }
             return
         }
-
-        viewModelScope.launch(Dispatchers.IO) {
-            val current = _selectedReminderForEdit.value
-            if (current != null) {
-                val updated = current.copy(
-                    message = message,
-                    triggerAt = triggerAtMillis,
-                    automationType = automationType,
-                    automationTarget = automationTarget,
-                    automationMessage = automationMessage
-                )
-                dao.insertReminder(updated)
-                repo.scheduleSystemAlarm(updated.id, updated.message, updated.triggerAt)
-            } else {
-                val newRem = Reminder(
-                    message = message,
-                    triggerAt = triggerAtMillis,
-                    status = "pending",
-                    automationType = automationType,
-                    automationTarget = automationTarget,
-                    automationMessage = automationMessage
-                )
-                val id = dao.insertReminder(newRem).toInt()
-                repo.scheduleSystemAlarm(id, newRem.message, newRem.triggerAt)
+        val id = _selectedReminderForEdit.value?.id
+        saving = true
+        viewModelScope.launch {
+            try {
+                repo.saveReminder(id, message, triggerAtMillis)
+                dismissEditor()
+                _events.send(RemindersUiEvent.ShowToast("Reminder saved"))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _events.send(RemindersUiEvent.ShowToast("Could not save reminder. Check alarm permissions and try again."))
+            } finally {
+                saving = false
             }
-            dismissEditor()
-            _events.send(RemindersUiEvent.ShowToast("Reminder scheduled"))
         }
     }
 
     fun toggleComplete(reminder: Reminder) {
-        viewModelScope.launch(Dispatchers.IO) {
-            val newStatus = if (reminder.status == "pending") "completed" else "pending"
-            dao.updateReminderStatus(reminder.id, newStatus)
-            _events.send(RemindersUiEvent.ShowToast(if (newStatus == "completed") "Marked as completed" else "Marked as pending"))
+        viewModelScope.launch {
+            if (reminder.status.equals("pending", ignoreCase = true)) {
+                repo.markReminderCompleted(reminder.id)
+                _events.send(RemindersUiEvent.ShowToast("Marked as completed"))
+            } else if (reminder.triggerAt <= System.currentTimeMillis()) {
+                startEdit(reminder)
+                _events.send(RemindersUiEvent.ShowToast("Choose a new time to reopen this reminder"))
+            } else if (repo.reopenReminder(reminder.id)) {
+                _events.send(RemindersUiEvent.ShowToast("Reminder scheduled"))
+            } else {
+                _events.send(RemindersUiEvent.ShowToast("Could not reschedule reminder"))
+            }
         }
     }
 
     fun deleteReminder(id: Int) {
-        viewModelScope.launch(Dispatchers.IO) {
-            dao.deleteReminderById(id)
+        viewModelScope.launch {
+            repo.deleteReminder(id)
             _events.send(RemindersUiEvent.ShowToast("Reminder deleted"))
         }
     }

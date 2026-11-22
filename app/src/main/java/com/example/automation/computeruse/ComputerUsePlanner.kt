@@ -1,6 +1,7 @@
 package com.example.automation.computeruse
 
 import android.util.Log
+import com.example.automation.AppPackageMatcher
 
 /**
  * Deterministic single-step action planner for the Computer-Use state machine.
@@ -22,11 +23,14 @@ object ComputerUsePlanner {
         }
         val targetApp = context.targetApp
         val targetAppLower = targetApp?.lowercase() ?: ""
-        val currentPkgLower = obs.foregroundPackage.lowercase()
 
         // 1. If target app is not in foreground, launch it
-        if (targetAppLower.isNotBlank() && !currentPkgLower.contains(targetAppLower) && !currentPkgLower.contains("youtube")) {
-            Log.i(TAG, "[DECIDE] action=LAUNCH_APP reason='Target app not in foreground'")
+        if (targetAppLower.isNotBlank() && !AppPackageMatcher.matches(obs.foregroundPackage, targetAppLower)) {
+            Log.i(
+                TAG,
+                "[DECIDE] action=LAUNCH_APP reason='Target app not in foreground' " +
+                    "expected='$targetAppLower' observed='${obs.foregroundPackage}'"
+            )
             return ComputerAction.LaunchApp(appName = targetApp ?: "Target App")
         }
 
@@ -93,8 +97,10 @@ object ComputerUsePlanner {
             GoalState.INIT -> {
                 if (obs.isAppForeground) {
                     ComputerAction.ObserveMore("App is foreground; observing UI hierarchy")
+                } else if (!targetApp.isNullOrBlank()) {
+                    ComputerAction.LaunchApp(appName = targetApp)
                 } else {
-                    ComputerAction.LaunchApp(appName = targetApp ?: "Target App")
+                    ComputerAction.ObserveMore("Awaiting foreground app; observing UI hierarchy")
                 }
             }
 

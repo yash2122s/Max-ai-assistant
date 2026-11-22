@@ -25,6 +25,28 @@ class MemoryAccountContextTest {
     @Before fun setup() { Dispatchers.setMain(UnconfinedTestDispatcher()) }
     @After fun teardown() { Dispatchers.resetMain() }
 
+    @Test fun guestLeaseIsRevokedDuringSignInAndRenewedAfterCancellation() = runTest {
+        val gateway = FakeGoogleGateway()
+        val auth = FirebaseAuthManager(gateway) { "test-client" }
+        MemoryAccountScope.bind(auth)
+        try {
+            val before = MemoryAccountScope.capture()
+            assertEquals(MemoryAccountScope.GUEST, before.ownerKey)
+            gateway.token = {
+                assertEquals(MemoryAccountScope.UNAVAILABLE, MemoryAccountScope.capture().ownerKey)
+                assertFalse(MemoryAccountScope.isCurrent(before))
+                throw androidx.credentials.exceptions.GetCredentialCancellationException()
+            }
+            assertTrue(auth.signInWithGoogle(android.app.Activity()).isFailure)
+            val after = MemoryAccountScope.capture()
+            assertEquals(MemoryAccountScope.GUEST, after.ownerKey)
+            assertTrue(MemoryAccountScope.isCurrent(after))
+            assertFalse(MemoryAccountScope.isCurrent(before))
+        } finally {
+            MemoryAccountScope.unbind()
+        }
+    }
+
     @Test fun logoutClearsDerivedPlaintextWithoutDeletingDeviceLocalMemory() = runBlocking {
         val context = ApplicationProvider.getApplicationContext<Application>()
         val dao = AppDatabase.getDatabase(context).permanentMemoryDao()

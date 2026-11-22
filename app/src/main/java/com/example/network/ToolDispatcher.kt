@@ -6,6 +6,7 @@ import com.example.utils.asStringOrNull
 import com.example.utils.asLongOrNull
 import com.example.automation.engine.ActionDispatcher
 import com.example.automation.engine.PendingCallManager
+import com.example.automation.engine.CallState
 import com.example.automation.approval.ApprovalCoordinator
 import com.example.automation.engine.DirectCallAuthorization
 
@@ -99,6 +100,10 @@ object ToolDispatcher {
         "task_completed" to "TASK_COMPLETED",
         "computer_use" to "COMPUTER_USE",
         "ui_agent" to "COMPUTER_USE",
+        // Keep compound automation on the planner path. AssistantEngine
+        // handles EXECUTE_AUTOMATION by calling GoalPlanner.planAndExecute;
+        // mapping it to COMPUTER_USE would bypass that path entirely.
+        "execute_automation" to "EXECUTE_AUTOMATION",
         "task_intent" to "TASK_INTENT",
         "get_screen_context" to "GET_SCREEN_CONTEXT",
         "click_element" to "CLICK_TEXT",
@@ -165,20 +170,49 @@ object ToolDispatcher {
         "delay" to "WAIT",
         "inspect_screen" to "INSPECT_SCREEN",
         "spotify_smart_search" to "PLAY_SPOTIFY",
-        "instagram_bulk_unlike" to "BULK_UNLIKE"
+        "instagram_bulk_unlike" to "BULK_UNLIKE",
+        "set_volume" to "SET_VOLUME",
+        "youtube_search" to "YOUTUBE_SEARCH"
     )
 
-    fun dispatch(functionCall: FunctionCall, lastInputTranscription: String): String {
+    fun dispatch(
+        functionCall: FunctionCall,
+        lastInputTranscription: String,
+        lastInputAtMs: Long = 0L,
+        isApprovalConsumed: Boolean = false
+    ): String {
         val name = functionCall.name
         val argsObj = JSONObject(functionCall.args?.toString() ?: "{}")
         argsObj.put("function_name", name)
         if (lastInputTranscription.isNotBlank()) {
             argsObj.put("last_input_transcription", lastInputTranscription)
         }
+        if (lastInputAtMs > 0L) {
+            argsObj.put("last_input_at_ms", lastInputAtMs)
+        }
 
         if (name == "control_media") {
             val mediaAction = argsObj.optString("media_action", "PLAY_MEDIA")
             argsObj.put("action", mediaAction)
+            return argsObj.toString()
+        }
+
+        if (name == "flashlight") {
+            val enabled = when {
+                argsObj.has("enabled") -> argsObj.optBoolean("enabled", true)
+                argsObj.has("state") -> argsObj.optBoolean("state", true)
+                else -> true
+            }
+            argsObj.put("action", if (enabled) "FLASHLIGHT_ON" else "FLASHLIGHT_OFF")
+            return argsObj.toString()
+        }
+
+        if (name == "schedule_task" || name == "cancel_task" || name == "list_scheduled_tasks") {
+            argsObj.put("action", when (name) {
+                "schedule_task" -> "SCHEDULE_TASK"
+                "cancel_task" -> "CANCEL_TASK"
+                else -> "LIST_TASKS"
+            })
             return argsObj.toString()
         }
 
@@ -288,31 +322,21 @@ object ToolDispatcher {
                         argsObj.put("error", "CALL_PHONE rejected: utterance is messaging but target app was not specified.")
                     }
                 } else {
-                    val contactIdVal = functionCall.args?.get("contactId").asLongOrNull() ?: -1L
-                    val phoneIdVal = functionCall.args?.get("phoneId").asLongOrNull() ?: -1L
-                    val contactVal = functionCall.args?.get("contact").asStringOrNull() ?: ""
-                    val phoneAliases = listOf("phoneNumber", "number").mapNotNull { key -> functionCall.args?.get(key).asStringOrNull()?.trim()?.takeIf { it.isNotEmpty() } }
-                    val phoneNumberVal = phoneAliases.firstOrNull() ?: ""
-                    val conflictingAliases = phoneAliases.distinct().size > 1
-
-                    // Never trust a model-provided authorization flag. Derive the
-                    // one-shot direct-number authorization only from the actual
-                    // user transcription recognized as an explicit cellular call.
+                    // Strip any model-injected confirmation or authorization flags immediately
                     argsObj.remove("explicit_user_call")
                     argsObj.remove("direct_call_authorization")
-                    val directTarget = phoneNumberVal.ifBlank { contactVal }
-                    val contactIsSameNumber = contactVal.isBlank() ||
-                        (DirectCallAuthorization.normalize(contactVal) != null &&
-                            DirectCallAuthorization.normalize(contactVal) == DirectCallAuthorization.normalize(directTarget))
-                    val directFastPath = !conflictingAliases && contactIsSameNumber &&
-                        contactIdVal == -1L && phoneIdVal == -1L && directTarget.isNotBlank()
-                    if (directFastPath) {
-                        DirectCallAuthorization.issue(lastInputTranscription, directTarget)?.let {
-                            argsObj.put("direct_call_authorization", it)
-                        }
-                    }
+                    argsObj.remove("confirmed")
+                    argsObj.remove("user_confirmed")
+                    argsObj.remove("original_user_intent")
 
-                    // Check if explicit user confirmation is present in utterance
+                    var contactIdVal = functionCall.args?.get("contactId").asLongOrNull() ?: -1L
+                    var phoneIdVal = functionCall.args?.get("phoneId").asLongOrNull() ?: -1L
+                    var contactVal = functionCall.args?.get("contact").asStringOrNull() ?: ""
+                    val phoneAliases = listOf("phoneNumber", "number").mapNotNull { key -> functionCall.args?.get(key).asStringOrNull()?.trim()?.takeIf { it.isNotEmpty() } }
+                    var phoneNumberVal = phoneAliases.firstOrNull() ?: ""
+                    val conflictingAliases = phoneAliases.distinct().size > 1
+
+                    // 1. Check if user explicitly denied/cancelled the call
                     val userReply = ApprovalCoordinator.parseReply(lastInputTranscription)
                     if (userReply == ApprovalCoordinator.ReplyIntent.DENY) {
                         PendingCallManager.cancel()
@@ -322,17 +346,79 @@ object ToolDispatcher {
                         return argsObj.toString()
                     }
 
-                    if (userReply == ApprovalCoordinator.ReplyIntent.APPROVE) {
+                    val hasPending = PendingCallManager.hasPendingCall()
+                    val pendingTargetName = when (val s = PendingCallManager.state) {
+                        is CallState.AwaitingConfirmation -> s.displayName
+                        is CallState.Confirmed -> s.displayName
+                        else -> null
+                    }
+                    val isConsent = ApprovalCoordinator.isConsentUtterance(lastInputTranscription, pendingTargetName)
+
+                    // 2. Leftover-content rule:
+                    // If a call is pending and the utterance is an explicit call request but not pure consent
+                    // (e.g. "yes call Dad" or "నాన్నకి కాల్ చేయి"), cancel pending call and treat as a new request.
+                    if (hasPending && !isConsent && isExplicitCellularCall) {
+                        Log.i(TAG, "New explicit call request ('$lastInputTranscription') while pending call exists; cancelling pending call")
+                        PendingCallManager.cancel()
+                    }
+
+                    // Freshness must fail closed: lastInputAtMs must be > 0 and > pendingSinceMs
+                    val pendingSince = PendingCallManager.pendingSinceMs()
+                    val isFresh = if (PendingCallManager.hasPendingCall()) (lastInputAtMs > 0L && lastInputAtMs > pendingSince) else true
+
+                    // 3. Selection turn: If state is AwaitingContactSelection, try resolving selection input ("2", "mobile", "ఒకటి")
+                    if (PendingCallManager.state is CallState.AwaitingContactSelection) {
+                        val selectionQuery = lastInputTranscription.trim().ifEmpty {
+                            contactVal.ifBlank { phoneNumberVal }
+                        }
+                        val candidate = PendingCallManager.resolveAndSelectCandidate(selectionQuery)
+                        if (candidate != null) {
+                            contactIdVal = candidate.contactMatch.contactId
+                            phoneIdVal = candidate.phoneNumber.id
+                            contactVal = candidate.contactMatch.displayName
+                            phoneNumberVal = candidate.phoneNumber.normalizedNumber
+                        }
+                    }
+
+                    // 4. Confirmation turn:
+                    // Only confirm if utterance satisfies the consent rule, transcript is fresh, call is still pending,
+                    // and approval has not been consumed yet in this turn
+                    val confirmed = isConsent && isFresh && PendingCallManager.hasPendingCall() && !isApprovalConsumed
+                    Log.i(TAG, "[APPROVAL_DECISION] transcript='$lastInputTranscription' lastInputAtMs=$lastInputAtMs pendingSinceMs=$pendingSince parseResult=$userReply isConsent=$isConsent isFresh=$isFresh consumedFlag=$isApprovalConsumed approved=$confirmed")
+                    if (confirmed) {
+                        when (val s = PendingCallManager.state) {
+                            is CallState.AwaitingConfirmation -> {
+                                contactIdVal = s.contactId
+                                phoneIdVal = s.phoneId
+                                contactVal = s.displayName
+                                phoneNumberVal = s.phoneNumber
+                            }
+                            is CallState.Confirmed -> {
+                                contactIdVal = s.contactId
+                                phoneIdVal = s.phoneId
+                                contactVal = s.displayName
+                                phoneNumberVal = s.phoneNumber
+                            }
+                            else -> Unit
+                        }
                         PendingCallManager.confirmPendingCall(
                             if (contactIdVal != -1L) contactIdVal else null,
                             if (phoneIdVal != -1L) phoneIdVal else null
                         )
                         argsObj.put("confirmed", true)
                         argsObj.put("user_confirmed", true)
-                    } else {
-                        // Reject model-controlled confirmed flags without user approval
-                        argsObj.remove("confirmed")
-                        argsObj.remove("user_confirmed")
+                    }
+
+                    val directTarget = phoneNumberVal.ifBlank { contactVal }
+                    val contactIsSameNumber = contactVal.isBlank() ||
+                        (DirectCallAuthorization.normalize(contactVal) != null &&
+                            DirectCallAuthorization.normalize(contactVal) == DirectCallAuthorization.normalize(directTarget))
+                    val directFastPath = !conflictingAliases && contactIsSameNumber &&
+                        contactIdVal == -1L && phoneIdVal == -1L && directTarget.isNotBlank()
+                    if (directFastPath && !PendingCallManager.hasPendingCall()) {
+                        DirectCallAuthorization.issue(lastInputTranscription, directTarget)?.let {
+                            argsObj.put("direct_call_authorization", it)
+                        }
                     }
 
                     val originalIntent = PendingCallManager.getOriginalIntent()

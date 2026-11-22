@@ -17,16 +17,16 @@ import java.util.TimeZone
 
 /**
  * Unit & Integration Test Suite for MAX Commercial License System:
- * - 3-Day Free Trial
- * - 10 Messages / Day Quota Limiter
+ * - 7-Day Free Trial
+ * - 100 Messages / Day Quota Limiter
  * - Lifetime License Key Formatting, Hashing & Idempotent Activation
  * - Expiration and Entitlement Invariants
  */
 class LicenseEntitlementTest {
 
-    // 1. First Google account gets exactly one 3-day trial
+    // 1. First Google account gets exactly one 7-day trial
     @Test
-    fun testFirstGoogleAccount_getsExactlyOneThreeDayTrial() {
+    fun testFirstGoogleAccount_getsExactlyOneSevenDayTrial() {
         val now = 1700000000000L
         val license = CloudLicense.createTrial(
             userId = "google_user_001",
@@ -38,10 +38,10 @@ class LicenseEntitlementTest {
         assertEquals(LicenseStatus.TRIAL, license.status)
         assertEquals(now, license.trialStartedAtEpochMillis)
 
-        val threeDaysMillis = 3L * 24L * 60L * 60L * 1000L
-        assertEquals(now + threeDaysMillis, license.trialExpiresAtEpochMillis)
+        val sevenDaysMillis = 7L * 24L * 60L * 60L * 1000L
+        assertEquals(now + sevenDaysMillis, license.trialExpiresAtEpochMillis)
         assertTrue(license.isEntitled(now))
-        assertEquals(3, license.remainingTrialDays(now))
+        assertEquals(7, license.remainingTrialDays(now))
     }
 
     // 2. Repeated initialization does not reset trial
@@ -60,7 +60,7 @@ class LicenseEntitlementTest {
         assertEquals(originalLicense.trialStartedAtEpochMillis, rehydrated.trialStartedAtEpochMillis)
         assertEquals(originalLicense.trialExpiresAtEpochMillis, rehydrated.trialExpiresAtEpochMillis)
         assertTrue(rehydrated.isEntitled(later))
-        assertEquals(2, rehydrated.remainingTrialDays(later))
+        assertEquals(6, rehydrated.remainingTrialDays(later))
     }
 
     // 3. App restart preserves trial
@@ -102,29 +102,29 @@ class LicenseEntitlementTest {
 
         val afterReinstall = CloudLicense.fromFirestoreMap(uid, cloudDoc)
         assertEquals(start, afterReinstall.trialStartedAtEpochMillis)
-        assertEquals(1, afterReinstall.remainingTrialDays(reinstallTime))
+        assertEquals(5, afterReinstall.remainingTrialDays(reinstallTime))
     }
 
-    // 6. Trial allows up to 10 messages/day
+    // 6. Trial allows up to 100 messages/day
     @Test
-    fun testTrial_allowsUpTo10MessagesPerDay() {
-        val maxLimit = 10L
-        for (currentCount in 0L until 10L) {
+    fun testTrial_allowsUpTo100MessagesPerDay() {
+        val maxLimit = 100L
+        for (currentCount in 0L until 100L) {
             val isAllowed = currentCount < maxLimit
             val newCount = if (isAllowed) currentCount + 1 else currentCount
             assertTrue("Count $currentCount must be allowed", isAllowed)
-            assertTrue("New count must be <= 10", newCount <= 10L)
+            assertTrue("New count must be <= 100", newCount <= 100L)
         }
     }
 
-    // 7. 11th message is blocked
+    // 7. 101st message is blocked
     @Test
-    fun testTrial_11thMessageIsBlocked() {
-        val maxLimit = 10L
-        val currentCount = 10L
+    fun testTrial_101stMessageIsBlocked() {
+        val maxLimit = 100L
+        val currentCount = 100L
 
         val isAllowed = currentCount < maxLimit
-        assertFalse("11th message must be blocked when currentCount=10", isAllowed)
+        assertFalse("101st message must be blocked when currentCount=100", isAllowed)
     }
 
     // 8. Next usage period resets correctly (daily period key)
@@ -143,14 +143,14 @@ class LicenseEntitlementTest {
         assertNotEquals(periodDay1, periodDay2)
     }
 
-    // 9. Trial expires after 3 days
+    // 9. Trial expires after 7 days
     @Test
-    fun testTrial_expiresAfter3Days() {
+    fun testTrial_expiresAfter7Days() {
         val start = 1700000000000L
         val license = CloudLicense.createTrial("google_user_009", start)
 
-        val beforeExpiry = start + (2L * 24L * 60L * 60L * 1000L)
-        val afterExpiry = start + (3L * 24L * 60L * 60L * 1000L) + 1000L
+        val beforeExpiry = start + (6L * 24L * 60L * 60L * 1000L)
+        val afterExpiry = start + (7L * 24L * 60L * 60L * 1000L) + 1000L
 
         assertTrue(license.isEntitled(beforeExpiry))
         assertFalse(license.isEntitled(afterExpiry))
@@ -166,7 +166,7 @@ class LicenseEntitlementTest {
             plan = LicensePlan.EXPIRED,
             status = LicenseStatus.EXPIRED,
             trialStartedAtEpochMillis = start,
-            trialExpiresAtEpochMillis = start + (3L * 24L * 60L * 60L * 1000L)
+            trialExpiresAtEpochMillis = start + (7L * 24L * 60L * 60L * 1000L)
         )
 
         assertFalse(expiredLicense.isEntitled())

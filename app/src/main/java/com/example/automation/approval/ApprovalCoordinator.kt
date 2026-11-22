@@ -249,15 +249,104 @@ object ApprovalCoordinator {
     /** Pure reply classifier used by both the typed and voice reply loops. */
     fun parseReply(reply: String): ReplyIntent {
         val text = reply.trim().lowercase()
-        // Normalize punctuation to spaces so commas/periods don't prevent word boundary detection
-        var cleaned = text.replace(Regex("[,!?;:.]"), " ").trim()
+        // Strip apostrophes so "don't" becomes "dont" before punctuation strip
+        val normalizedApostrophes = text.replace(Regex("['’‘ʻʼ`]"), "")
+        // Strip punctuation while preserving Unicode letters, Telugu combining marks (\p{M}), numbers, and whitespace
+        val cleaned = normalizedApostrophes.replace(Regex("[^\\p{L}\\p{M}\\p{N}\\s]"), " ")
+        val tokens = cleaned.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
 
-        // Strip common honorific/conversational suffixes ("anna", "bro", "sir", "boss", "max", "bhai", "dude", "please")
-        val suffixes = listOf("anna", "bro", "sir", "boss", "max", "bhai", "dude", "please", "ఓకే", "అన్నా", "బ్రో")
-        for (suffix in suffixes) {
-            if (cleaned.endsWith(" $suffix")) {
-                cleaned = cleaned.substringBeforeLast(" $suffix").trim()
+        if (tokens.isEmpty() || tokens.size > 6) {
+            return ReplyIntent.OTHER
+        }
+
+        val denyWords = setOf(
+            // Existing deny tokens
+            "no", "nope", "cancel", "deny", "stop", "never", "block",
+            "venna", "vadhu", "vaddu", "vaddhu", "oddu",
+            "వద్దు", "వేద్దు", "కాదు",
+            // User-requested additions & negations
+            "aapu", "aapandi", "ledu", "kadu", "aagu", "dont", "not", "wait", "hold",
+            "వద్దండి", "లేదు", "ఆపు", "ఆపండి", "ఆపేయి", "ఆగు", "ఆగండి",
+            "cheyaku", "cheyyaku", "చేయకు", "చెయ్యకు", "చేయొద్దు"
+        )
+
+        // DENY is checked first: if any token is a denial/negation, reject immediately
+        if (tokens.any { it in denyWords }) {
+            return ReplyIntent.DENY
+        }
+
+        // Multi-token approve phrases
+        if (tokens.size in 2..4) {
+            val joined = tokens.joinToString(" ")
+            if (joined == "do it" || joined == "go ahead") {
+                return ReplyIntent.APPROVE
             }
+        }
+
+        // Bare verbs count as APPROVE only if the utterance is exactly 1 token
+        val bareVerbs = setOf(
+            "chey", "cheyyi", "cheyandi", "cheyyo", "chesko",
+            "చేయి", "చేయండి", "చేయ్", "చెయ్యి"
+        )
+        if (tokens.size == 1 && tokens[0] in bareVerbs) {
+            return ReplyIntent.APPROVE
+        }
+
+        val approveWords = setOf(
+            // Existing approve tokens
+            "allow", "allo", "alou", "allaow", "alow", "allowed",
+            "approve", "approved",
+            "yes", "yep", "yeah", "ya", "yea", "yup", "yess", "yesh",
+            "ok", "okay", "okey", "oki", "okeyy", "okie", "k",
+            "sure",
+            "confirm", "conform", "confirmed", "conformed",
+            "proceed", "run", "execute",
+            "sare", "saree", "సరే",
+            "ha", "haa", "haan", "హా", "హాన్",
+            "avunu", "అవును",
+            "alage", "అలాగే",
+            "pampu", "పంపు",
+            // User-requested additions
+            "ఔను", "ఓకే", "అవునండి", "సరేనండి", "ఓకేనండి", "avunandi", "sarenandi"
+        )
+
+        if (tokens.any { it in approveWords }) {
+            return ReplyIntent.APPROVE
+        }
+
+        return ReplyIntent.OTHER
+    }
+
+    /**
+     * Leftover-content consent rule:
+     * Removes call words, bare verbs, and fillers.
+     * If leftover tokens remain, they count as consent ONLY if an approve token is present
+     * and every leftover token matches the pending candidate's display name or its alias group.
+     */
+    fun isConsentUtterance(transcript: String, pendingCandidateName: String? = null): Boolean {
+        val text = transcript.trim().lowercase()
+        val normalizedApostrophes = text.replace(Regex("['’‘ʻʼ`]"), "")
+        val cleaned = normalizedApostrophes.replace(Regex("[^\\p{L}\\p{M}\\p{N}\\s]"), " ")
+        val tokens = cleaned.trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (tokens.isEmpty()) return false
+
+        val denyWords = setOf(
+            "no", "nope", "cancel", "deny", "stop", "never", "block",
+            "venna", "vadhu", "vaddu", "vaddhu", "oddu",
+            "వద్దు", "వేద్దు", "కాదు",
+            "aapu", "aapandi", "ledu", "kadu", "aagu", "dont", "not", "wait", "hold",
+            "వద్దండి", "లేదు", "ఆపు", "ఆపండి", "ఆపేయి", "ఆగు", "ఆగండి",
+            "cheyaku", "cheyyaku", "చేయకు", "చెయ్యకు", "చేయొద్దు"
+        )
+        if (tokens.any { it in denyWords }) return false
+
+        val callWords = setOf("call", "dial", "phone", "కాల్", "ఫోన్", "డయల్")
+        val bareVerbs = setOf("chey", "cheyyi", "cheyandi", "cheyyo", "chesko", "చేయి", "చేయండి", "చేయ్", "చెయ్యి")
+        val fillers = setOf("please", "now", "ippudu", "ఇప్పుడు", "her", "him", "them", "to")
+
+        val stripped = tokens.filterNot { it in callWords || it in bareVerbs || it in fillers }
+        if (stripped.isEmpty()) {
+            return tokens.size == 1 && tokens[0] in bareVerbs
         }
 
         val approveWords = setOf(
@@ -267,24 +356,41 @@ object ApprovalCoordinator {
             "ok", "okay", "okey", "oki", "okeyy", "okie", "k",
             "sure",
             "confirm", "conform", "confirmed", "conformed",
-            "do it", "go ahead", "proceed", "run", "execute",
-            "chey", "cheyyi", "cheyandi", "cheyyo", "chesko", "చేయి", "చేయండి", "చేయ్",
+            "proceed", "run", "execute",
             "sare", "saree", "సరే",
             "ha", "haa", "haan", "హా", "హాన్",
             "avunu", "అవును",
             "alage", "అలాగే",
-            "pampu", "పంపు"
+            "pampu", "పంపు",
+            "ఔను", "ఓకే", "అవునండి", "సరేనండి", "ఓకేనండి", "avunandi", "sarenandi"
         )
 
-        val denyWords = setOf(
-            "no", "nope", "cancel", "deny", "don't", "dont", "stop", "block", "never",
-            "venna", "vadhu", "వద్దు", "వేద్దు", "కాదు", "vaddu", "vaddhu", "oddu"
-        )
+        val nonApproveTokens = stripped.filterNot { it in approveWords }
+        if (nonApproveTokens.isEmpty()) {
+            return true
+        }
 
-        return when {
-            approveWords.any { cleaned == it || cleaned.startsWith("$it ") || cleaned.endsWith(" $it") || cleaned.contains(" $it ") } -> ReplyIntent.APPROVE
-            denyWords.any { cleaned == it || cleaned.startsWith("$it ") || cleaned.endsWith(" $it") || cleaned.contains(" $it ") } -> ReplyIntent.DENY
-            else -> ReplyIntent.OTHER
+        // Leftover non-approve tokens are allowed IF at least one approve token is present
+        // and all leftover tokens match the pending candidate name or its alias group
+        val hasApproveToken = stripped.any { it in approveWords }
+        if (!hasApproveToken || pendingCandidateName.isNullOrBlank()) {
+            return false
+        }
+
+        val candidateClean = pendingCandidateName.trim().lowercase()
+        val candidateTokens = candidateClean.split(Regex("\\s+")).filter { it.isNotBlank() }.toSet()
+        val candidateAliases = com.example.automation.actions.ContactAliasResolver.getCandidateQueries(candidateClean)
+            .map { it.trim().lowercase() }.toSet()
+
+        return nonApproveTokens.all { leftover ->
+            val lo = leftover.lowercase()
+            val loStripped = com.example.automation.actions.ContactAliasResolver.stripTeluguCaseSuffix(lo)
+            lo in candidateTokens ||
+            lo in candidateAliases ||
+            loStripped in candidateTokens ||
+            loStripped in candidateAliases ||
+            candidateClean == lo ||
+            candidateClean == loStripped
         }
     }
 

@@ -42,7 +42,8 @@ class VerificationEngine(private val context: Context) {
         return RuntimeStepVerifier.verifyTargetVisible(
             context = context,
             targetQuery = outcome.targetQuery,
-            timeoutMs = outcome.timeoutMs
+            timeoutMs = outcome.timeoutMs,
+            expectedPackage = outcome.expectedPackage
         )
     }
 
@@ -51,7 +52,8 @@ class VerificationEngine(private val context: Context) {
         return RuntimeStepVerifier.verifyTextEntered(
             context = context,
             expectedText = outcome.expectedText,
-            timeoutMs = outcome.timeoutMs
+            timeoutMs = outcome.timeoutMs,
+            expectedPackage = outcome.expectedPackage
         )
     }
 

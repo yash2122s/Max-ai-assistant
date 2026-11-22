@@ -1,6 +1,7 @@
 package com.example.automation.computeruse
 
 import android.util.Log
+import com.example.automation.AppPackageMatcher
 
 /**
  * Assesses the current screen observation against the task goal,
@@ -23,13 +24,7 @@ object GoalStateAssessor {
 
         // 1. App Foreground Check
         val isTargetAppForeground = if (targetPkg.isNotBlank()) {
-            currentPkg.contains(targetPkg) || 
-            (targetPkg.contains("youtube") && currentPkg.contains("youtube")) ||
-            (targetPkg.contains("instagram") && currentPkg.contains("instagram")) ||
-            (targetPkg.contains("whatsapp") && currentPkg.contains("whatsapp")) ||
-            (targetPkg.contains("telegram") && currentPkg.contains("telegram")) ||
-            (targetPkg.contains("maps") && currentPkg.contains("maps")) ||
-            (targetPkg.contains("settings") && currentPkg.contains("settings"))
+            AppPackageMatcher.matches(currentPkg, targetPkg)
         } else {
             obs.isAppForeground
         }

@@ -7,11 +7,13 @@ import android.util.Log
 import com.example.service.NotificationAppAccessManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 open class WhatsAppNotificationService : NotificationListenerService() {
 
-    private val serviceScope = CoroutineScope(Dispatchers.Main)
+    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     companion object {
         private var instance: WhatsAppNotificationService? = null
@@ -37,6 +39,7 @@ open class WhatsAppNotificationService : NotificationListenerService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        serviceScope.cancel()
         if (instance == this) {
             instance = null
         }
@@ -46,6 +49,11 @@ open class WhatsAppNotificationService : NotificationListenerService() {
     override fun onNotificationPosted(sbn: StatusBarNotification?) {
         if (sbn == null) return
         val pkg = sbn.packageName ?: return
+
+        // Only process notifications from WhatsApp packages
+        if (pkg != "com.whatsapp" && pkg != "com.whatsapp.w4b") {
+            return
+        }
         
         // EARLY PRIVACY CHECK: Immediately ignore if app is NOT enabled in MAX Notification Access settings
         if (!NotificationAppAccessManager.isAppEnabled(applicationContext, pkg)) {

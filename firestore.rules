@@ -11,7 +11,11 @@ service cloud.firestore {
       return isAuthenticated() && request.auth.uid == userId;
     }
 
-    // License timestamps are Firestore timestamps. A trial lasts at most three
+    function isAdmin() {
+      return isAuthenticated() && request.auth.token.admin == true;
+    }
+
+    // License timestamps are Firestore timestamps. A trial lasts at most seven
     // server-relative days; lifetime activation references a 64-char key hash.
     function validLicenseIdentity(data, userId) {
       return data.userId == userId
@@ -24,7 +28,7 @@ service cloud.firestore {
         && data.issuedAt == request.time
         && data.trialExpiresAt is timestamp
         && data.trialExpiresAt > request.time
-        && data.trialExpiresAt <= request.time + duration.value(3, 'd')
+        && data.trialExpiresAt <= request.time + duration.value(7, 'd')
         && data.expiresAt == data.trialExpiresAt;
     }
 
@@ -125,7 +129,7 @@ service cloud.firestore {
 
       // Daily usage subcollection:
       // Track AI message consumption per 24h period.
-      // - Max 20 messages for trial users.
+      // - Max 100 messages for trial users.
       // - Client cannot decrease counter or reset early.
       match /dailyUsage/{period} {
         allow read: if isOwner(userId);
@@ -164,6 +168,52 @@ service cloud.firestore {
 
       // Normal clients cannot create or delete keys
       allow create, delete: if false;
+    }
+
+    // 4. Analytics & Activity Tracking Collections:
+    // Only administrators with custom claim admin == true can list/read all activity events.
+    // Authenticated users can write their own activity events with trusted timestamp.
+    match /activityEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.eventId == eventId
+        && request.resource.data.serverTimestamp == request.time;
+      allow update, delete: if false;
+    }
+
+    // User session tracking
+    match /userSessions/{sessionId} {
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.sessionId == sessionId
+        && request.resource.data.startedAt == request.time;
+      allow update: if isAuthenticated()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastHeartbeat', 'lastHeartbeatAt', 'isActive', 'endedAt', 'durationMs']);
+      allow delete: if false;
+    }
+
+    // Aggregates are written by the authenticated ingestion function via the Admin SDK.
+    match /dailyAnalytics/{date} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // Global admin overview aggregates (only accessible by admins)
+    match /adminAggregates/{docId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // User analytics summary profiles (accessible by owner or admin)
+    match /userAnalytics/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if false;
     }
 
     // Catch-all: deny all other paths

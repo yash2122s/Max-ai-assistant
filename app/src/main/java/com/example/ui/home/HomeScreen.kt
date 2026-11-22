@@ -44,10 +44,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.example.firebase.manager.EntitlementGate
 import com.example.network.ConnectionState
 import com.example.network.model.GeminiModelMode
 import com.example.ui.components.*
@@ -144,6 +146,7 @@ fun HomeScreen(
             onSendTextMessage = viewModel::sendTextMessage,
             onStopRecording = viewModel::stopRecording,
             onInterruptSpeech = viewModel::interruptSpeech,
+            onSelectLanguage = viewModel::selectLanguage,
             onRequestMicPermission = { micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO) },
             modifier = Modifier.fillMaxSize(),
             snackbarHostState = snackbarHostState
@@ -169,6 +172,7 @@ internal fun HomeScreenContent(
     onSendTextMessage: (String) -> Unit,
     onStopRecording: () -> Unit,
     onInterruptSpeech: () -> Unit,
+    onSelectLanguage: (String) -> Unit = {},
     onRequestMicPermission: () -> Unit,
     modifier: Modifier = Modifier,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() }
@@ -226,6 +230,14 @@ internal fun HomeScreenContent(
                 license = cloudLicense,
                 dailyUsage = dailyUsage,
                 onClick = { onNavigateTo(com.example.ui.navigation.MaxDestinations.LICENSE) }
+            )
+
+            LanguageSelectorBar(
+                selectedLanguage = uiState.selectedLanguage,
+                onSelectLanguage = onSelectLanguage,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp)
             )
 
             Box(
@@ -286,7 +298,7 @@ internal fun HomeScreenContent(
 
             // Floating "Scroll to Bottom" Pill
             androidx.compose.animation.AnimatedVisibility(
-                visible = isScrolledUp,
+                visible = isScrolledUp && uiState.messages.isNotEmpty(),
                 enter = fadeIn() + scaleIn(),
                 exit = fadeOut() + scaleOut(),
                 modifier = Modifier
@@ -436,7 +448,7 @@ fun TrialQuotaBanner(
     if (license.plan == com.example.firebase.model.LicensePlan.LIFETIME) return
 
     val isExpired = license.isExpired()
-    val isLimitReached = dailyUsage >= 10L
+    val isLimitReached = dailyUsage >= EntitlementGate.DEFAULT_DAILY_LIMIT
     val remainingDays = license.remainingTrialDays()
     val isDark = com.example.ui.theme.LocalIsDarkMode.current
 
@@ -446,7 +458,7 @@ fun TrialQuotaBanner(
                 if (isDark) listOf(MaxSemanticColors.destructiveSurface, MaxSemanticColors.destructiveSurface.copy(alpha = 0.6f))
                 else listOf(MaxDestructiveApple.copy(alpha = 0.12f), MaxDestructiveApple.copy(alpha = 0.05f)),
                 "Free Trial Expired",
-                "Your 3-day trial has ended. Tap to activate Lifetime Premium.",
+                "Your 7-day trial has ended. Tap to activate Lifetime Premium.",
                 Icons.Rounded.ErrorOutline,
                 MaxDestructiveApple
             )
@@ -455,7 +467,7 @@ fun TrialQuotaBanner(
             TrialBannerData(
                 if (isDark) listOf(MaxSemanticColors.warningSurface, MaxSemanticColors.warningSurface.copy(alpha = 0.6f))
                 else listOf(MaxWarningApple.copy(alpha = 0.15f), MaxWarningApple.copy(alpha = 0.08f)),
-                "Daily Free Limit Reached (10/10)",
+                "Daily Free Limit Reached (${EntitlementGate.DEFAULT_DAILY_LIMIT}/${EntitlementGate.DEFAULT_DAILY_LIMIT})",
                 "Daily quota used. Tap to activate Lifetime Premium.",
                 Icons.Rounded.Warning,
                 MaxWarningApple
@@ -465,8 +477,8 @@ fun TrialQuotaBanner(
             TrialBannerData(
                 if (isDark) listOf(MaxSemanticColors.primaryRoyal.copy(alpha = 0.25f), MaxSemanticColors.surfaceVariant)
                 else listOf(com.example.ui.theme.SoftRoseTint, Color.White),
-                "3-Day Free Trial Active",
-                "$remainingDays days remaining • $dailyUsage/10 messages used today",
+                "7-Day Free Trial Active",
+                "$remainingDays days remaining • $dailyUsage/${EntitlementGate.DEFAULT_DAILY_LIMIT} messages used today",
                 Icons.Rounded.HourglassTop,
                 if (isDark) MaxColors.extra.link else MaterialTheme.colorScheme.primary
             )
@@ -550,6 +562,92 @@ fun TrialQuotaBanner(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// LANGUAGE SELECTOR BAR (Tinglish, Telugu, English, Hindi)
+// ─────────────────────────────────────────────────────────────────────────────
+
+data class HomeLanguageOption(
+    val id: String,
+    val label: String,
+    val badge: String
+)
+
+val HOME_LANGUAGE_OPTIONS = listOf(
+    HomeLanguageOption("Tinglish", "Tinglish", "TE+EN"),
+    HomeLanguageOption("Telugu", "తెలుగు", "Telugu"),
+    HomeLanguageOption("English", "English", "English"),
+    HomeLanguageOption("Hindi", "हिंदी", "Hindi")
+)
+
+@Composable
+internal fun LanguageSelectorBar(
+    selectedLanguage: String,
+    onSelectLanguage: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.50f),
+        border = androidx.compose.foundation.BorderStroke(MaxStroke.hairline, MaxColors.extra.borderSubtle)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            HOME_LANGUAGE_OPTIONS.forEach { opt ->
+                val isSelected = selectedLanguage.equals(opt.id, ignoreCase = true) ||
+                        (opt.id.equals("Tinglish", ignoreCase = true) && selectedLanguage.equals("Tenglish", ignoreCase = true))
+
+                val animatedBg by animateColorAsState(
+                    targetValue = if (isSelected) MaxSemanticColors.accentCyan.copy(alpha = 0.22f) else Color.Transparent,
+                    animationSpec = tween(durationMillis = 200),
+                    label = "langBg"
+                )
+                val animatedBorderColor by animateColorAsState(
+                    targetValue = if (isSelected) MaxSemanticColors.accentCyan.copy(alpha = 0.70f) else Color.Transparent,
+                    animationSpec = tween(durationMillis = 200),
+                    label = "langBorder"
+                )
+                val animatedTextColor by animateColorAsState(
+                    targetValue = if (isSelected) MaxSemanticColors.accentCyan else Color.White.copy(alpha = 0.75f),
+                    animationSpec = tween(durationMillis = 200),
+                    label = "langText"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(animatedBg)
+                        .border(
+                            width = if (isSelected) 1.dp else 0.dp,
+                            color = animatedBorderColor,
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        .clickable { onSelectLanguage(opt.id) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = opt.label,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 12.sp
+                        ),
+                        color = animatedTextColor,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TOP BAR (Minimalist iOS Header)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -588,13 +686,13 @@ internal fun IOSTopBar(
                 modifier = Modifier
                     .size(48.dp)
                     .clip(MaxShapes.card)
-                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                    .border(MaxStroke.hairline, MaxColors.extra.borderSubtle, MaxShapes.card)
+                    .background(MaxSurfaceElevated)
+                    .border(MaxStroke.hairline, MaxBorderHairline, MaxShapes.card)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Menu,
                     contentDescription = "Open Drawer",
-                    tint = MaterialTheme.colorScheme.onBackground,
+                    tint = Color.White,
                     modifier = Modifier.size(MaxIconTokens.Medium)
                 )
             }
@@ -609,11 +707,11 @@ internal fun IOSTopBar(
                         .size(8.dp)
                         .clip(CircleShape)
                         .background(
-                            if (!isMaxEnabled) MaterialTheme.colorScheme.onSurfaceVariant
+                            if (!isMaxEnabled) Color.White.copy(alpha = 0.4f)
                             else when (connectionState) {
                                 ConnectionState.CONNECTED -> MaxColors.extra.glow
                                 ConnectionState.CONNECTING -> MaxWarningApple
-                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> Color.White.copy(alpha = 0.4f)
                             }
                         )
                 )
@@ -635,13 +733,13 @@ internal fun IOSTopBar(
                     modifier = Modifier
                         .size(48.dp)
                         .clip(MaxShapes.card)
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .border(MaxStroke.hairline, MaxColors.extra.borderSubtle, MaxShapes.card)
+                        .background(MaxSurfaceElevated)
+                        .border(MaxStroke.hairline, MaxBorderHairline, MaxShapes.card)
                 ) {
                     Icon(
                         imageVector = if (isDarkMode) Icons.Rounded.WbSunny else Icons.Rounded.NightsStay,
                         contentDescription = if (isDarkMode) "Switch to Day Mode" else "Switch to Night Mode",
-                        tint = if (isDarkMode) MaxRoyalGold else MaterialTheme.colorScheme.primary,
+                        tint = if (isDarkMode) MaxRoyalGold else Color.White,
                         modifier = Modifier.size(MaxIconTokens.Medium)
                     )
                 }
@@ -653,13 +751,13 @@ internal fun IOSTopBar(
                         modifier = Modifier
                             .size(48.dp)
                             .clip(MaxShapes.card)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .border(MaxStroke.hairline, MaxColors.extra.borderSubtle, MaxShapes.card)
+                            .background(MaxSurfaceElevated)
+                            .border(MaxStroke.hairline, MaxBorderHairline, MaxShapes.card)
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.MoreVert,
                             contentDescription = "Options",
-                            tint = MaterialTheme.colorScheme.onBackground,
+                            tint = Color.White,
                             modifier = Modifier.size(MaxIconTokens.Medium)
                         )
                     }
@@ -710,6 +808,19 @@ internal fun IOSTopBar(
                                 showMenu = false
                             }
                         )
+
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outline, thickness = MaxStroke.hairline)
+
+                        DropdownMenuItem(
+                            text = { Text("Settings", color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium) },
+                            leadingIcon = {
+                                Icon(Icons.Rounded.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(MaxIconTokens.Medium))
+                            },
+                            onClick = {
+                                onNavigateToSettings()
+                                showMenu = false
+                            }
+                        )
                     }
                 }
             }
@@ -755,7 +866,7 @@ internal fun IOSDashboardEmptyState(
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 16.dp),
-        contentPadding = PaddingValues(top = 32.dp, bottom = 24.dp),
+        contentPadding = PaddingValues(top = 32.dp, bottom = 80.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {

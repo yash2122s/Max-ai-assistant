@@ -144,7 +144,7 @@ class GeminiUiAgentProvider : UiAgentProvider {
                 UiAgentModelInfo(
                     id = modelId,
                     name = when (modelId) {
-                        "gemini-2.5-flash" -> "Gemini 2.5 Flash"
+                        "gemini-3.8-flash" -> "Gemini 3.8 Flash"
                         "gemini-3.5-flash" -> "Gemini 3.5 Flash"
                         "gemini-2.5-pro" -> "Gemini 2.5 Pro"
                         else -> modelId.replace("-", " ").replaceFirstChar { it.uppercase() }
@@ -161,7 +161,7 @@ class GeminiUiAgentProvider : UiAgentProvider {
         listOf(
             UiAgentModelInfo(
                 id = UiAgentModels.GEMINI_UI_AGENT_DEFAULT,
-                name = "Gemini 2.5 Flash",
+                name = "Gemini 3.8 Flash",
                 description = "Fast, state-of-the-art multimodal agentic reasoning and visual grounding",
                 supportsVision = true,
                 supportsToolCalling = true,

@@ -9,62 +9,120 @@ import com.example.automation.engine.PhoneNumber
 import org.json.JSONObject
 
 object ContactAliasResolver {
-    val RELATIONSHIP_ALIASES: Map<String, List<String>> = mapOf(
-        "నాన్న" to listOf("Dad", "Daddy", "Father", "Papa", "Nanna"),
-        "నాన్నకు" to listOf("Dad", "Daddy", "Father", "Papa", "Nanna"),
-        "డాడీ" to listOf("Daddy", "Dad", "Father", "Papa"),
-        "డాడీకి" to listOf("Daddy", "Dad", "Father", "Papa"),
-        "అమ్మ" to listOf("Mom", "Mummy", "Mother", "Amma"),
-        "అమ్మకు" to listOf("Mom", "Mummy", "Mother", "Amma"),
-        "అమ్మకి" to listOf("Mom", "Mummy", "Mother", "Amma"),
-        "మమ్మీ" to listOf("Mummy", "Mom", "Mother", "Amma"),
-        "మమ్మీకి" to listOf("Mummy", "Mom", "Mother", "Amma"),
-        "అన్న" to listOf("Brother", "Anna"),
-        "అన్నయ్య" to listOf("Brother", "Anna", "Annayya"),
-        "అన్నయ్యకు" to listOf("Brother", "Anna", "Annayya"),
-        "తమ్ముడు" to listOf("Brother", "Thammudu"),
-        "తమ్ముడికి" to listOf("Brother", "Thammudu"),
-        "అక్క" to listOf("Sister", "Akka"),
-        "అక్కకు" to listOf("Sister", "Akka"),
-        "అక్కకి" to listOf("Sister", "Akka"),
-        "చెల్లి" to listOf("Sister", "Chelli"),
-        "చెల్లెలు" to listOf("Sister", "Chelli", "Chellelu"),
-        "భార్య" to listOf("Wife", "Honey"),
-        "భర్త" to listOf("Husband"),
-        "ఫ్రెండ్" to listOf("Friend"),
-        "dad" to listOf("Daddy", "Father", "Papa", "Nanna"),
-        "daddy" to listOf("Dad", "Father", "Papa", "Nanna"),
-        "mom" to listOf("Mummy", "Mother", "Amma"),
-        "mummy" to listOf("Mom", "Mother", "Amma"),
-        "mother" to listOf("Mom", "Mummy", "Amma"),
-        "father" to listOf("Dad", "Daddy", "Papa", "Nanna"),
-        "brother" to listOf("Anna", "Thammudu"),
-        "sister" to listOf("Akka", "Chelli")
+    // Canonical symmetric alias groups (lowercased canonical terms)
+    // "appa", "maa", and "friend" are removed per instructions.
+    // Private aliases from ContactResolver.kt (bhaarya, bharta, bro, sis) are merged. "honey", "wifey", "hubby" pruned per instructions.
+    val ALIAS_GROUPS: List<List<String>> = listOf(
+        // Mother
+        listOf("mom", "mummy", "mother", "amma", "mommy", "అమ్మ", "అమ్మా", "మమ్మీ", "Mom", "Mummy", "Mother", "Amma"),
+        // Father
+        listOf("dad", "daddy", "father", "papa", "nanna", "నాన్న", "డాడీ", "Dad", "Daddy", "Father", "Papa", "Nanna"),
+        // Brother
+        listOf("brother", "anna", "annayya", "thammudu", "tammudu", "bro", "అన్న", "అన్నయ్య", "తమ్ముడు", "Brother", "Anna", "Annayya", "Thammudu"),
+        // Sister
+        listOf("sister", "akka", "chelli", "chellelu", "sis", "అక్క", "చెల్లి", "చెల్లెలు", "Sister", "Akka", "Chelli", "Chellelu"),
+        // Spouse
+        listOf("wife", "bhaarya", "bharya", "భార్య", "Wife"),
+        listOf("husband", "bharta", "భర్త", "Husband")
     )
 
-    fun cleanQuery(raw: String): String {
+    // Symmetric lookup map: every lowercase variant maps to the unique list of terms in its group
+    val SYMMETRIC_ALIAS_MAP: Map<String, List<String>> = buildMap {
+        for (group in ALIAS_GROUPS) {
+            val distinctTerms = group.distinct()
+            for (term in group) {
+                put(term.lowercase(), distinctTerms)
+            }
+        }
+    }
+
+    // Retain backward-compatible map
+    val RELATIONSHIP_ALIASES: Map<String, List<String>> get() = SYMMETRIC_ALIAS_MAP
+
+    /** Strips call prefixes and suffixes: "call", "dial", "to", "the", "ఫోన్", "కాల్", "call cheyyi", etc. */
+    fun stripCallPrefixes(raw: String): String {
         return raw.trim()
             .replace(Regex("^(?:to|the|call|dial|ఫోన్|కాల్)\\s+", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("(?:కి|కు|గారికి|గారు)$"), "")
+            .replace(Regex("\\s+(?:call|dial|call\\s*chey|call\\s*cheyyi|call\\s*cheyandi|కాల్\\s*చేయి|కాల్\\s*చెయ్యి|కాల్|ఫోన్\\s*చేయి|ఫోన్)$", RegexOption.IGNORE_CASE), "")
             .trim()
     }
 
+    /** Strips possessive prefixes: "my", "our", "నా", "మా" (requires trailing whitespace to preserve words like "నాన్న") */
+    fun stripPossessivePrefixes(raw: String): String {
+        return raw.trim()
+            .replace(Regex("^(?:my|our|నా|మా)\\s+", RegexOption.IGNORE_CASE), "")
+            .trim()
+    }
+
+    /** Strips Telugu case markers in Telugu script and common Latin transliterations (గారికి, గారు, తో, కి, కు, ను, ki, ku, tho, to, garu) */
+    fun stripTeluguCaseSuffix(raw: String): String {
+        return raw.trim()
+            .replace(Regex("(?:గారికి|గారు|తో|కి|కు|ను)$"), "")
+            .replace(Regex("\\s+(?:gariki|garu|tho|to|ki|ku|nu)$", RegexOption.IGNORE_CASE), "")
+            .trim()
+    }
+
+    /** Normalizes a query for alias group lookup (strips call verbs, possessives, and case suffixes) */
+    fun normalizeForAliasLookup(raw: String): String {
+        val noCall = stripCallPrefixes(raw)
+        val noPossessive = stripPossessivePrefixes(noCall)
+        val noSuffix = stripTeluguCaseSuffix(noPossessive)
+        return noSuffix.trim().lowercase()
+    }
+
+    /** Returns all alias terms for a query, or empty set if no matching group exists */
+    fun getAliasGroupTerms(query: String): Set<String> {
+        val normalized = normalizeForAliasLookup(query)
+        val direct = SYMMETRIC_ALIAS_MAP[normalized]
+        if (direct != null) return direct.toSet()
+
+        // Also check raw stripped of just call prefixes
+        val rawClean = stripCallPrefixes(query).lowercase()
+        return SYMMETRIC_ALIAS_MAP[rawClean]?.toSet() ?: emptySet()
+    }
+
+    /** Alias lookup helper returning a List or null */
+    fun getAliasesFor(query: String): List<String>? {
+        val terms = getAliasGroupTerms(query)
+        return if (terms.isNotEmpty()) terms.toList() else null
+    }
+
+    /** Backward-compatible candidate queries generator. */
     fun getCandidateQueries(rawQuery: String): List<String> {
         val candidates = mutableListOf<String>()
         val cleaned = cleanQuery(rawQuery)
         if (cleaned.isNotBlank()) {
             candidates.add(cleaned)
         }
-        if (rawQuery.trim() != cleaned && rawQuery.isNotBlank()) {
-            candidates.add(rawQuery.trim())
+        val rawTrim = rawQuery.trim()
+        if (rawTrim != cleaned && rawTrim.isNotBlank()) {
+            candidates.add(rawTrim)
         }
 
-        val aliases = RELATIONSHIP_ALIASES[cleaned.lowercase()] ?: RELATIONSHIP_ALIASES[rawQuery.trim().lowercase()]
-        if (aliases != null) {
-            candidates.addAll(aliases)
-        }
+        val groupTerms = getAliasGroupTerms(rawQuery)
+        candidates.addAll(groupTerms)
 
         return candidates.distinct()
+    }
+
+    fun cleanQuery(raw: String): String {
+        val withoutCall = stripCallPrefixes(raw)
+        val withoutSuffix = stripTeluguCaseSuffix(withoutCall)
+        return withoutSuffix.trim()
+    }
+
+    /**
+     * Pure exact-match ranking / filtering.
+     * If any result's normalized display name equals the query or a group term exactly,
+     * return only exact matches; otherwise return all (for disambiguation).
+     */
+    fun filterExactMatches(candidates: List<ContactMatch>, targetTerms: Set<String>): List<ContactMatch> {
+        if (candidates.isEmpty() || targetTerms.isEmpty()) return candidates
+        val normalizedTerms = targetTerms.map { it.trim().lowercase() }.filter { it.isNotBlank() }.toSet()
+        val exact = candidates.filter { match ->
+            match.displayName.trim().lowercase() in normalizedTerms
+        }
+        return if (exact.isNotEmpty()) exact else candidates
     }
 }
 
@@ -79,13 +137,44 @@ class SearchContactAction : BaseAction<JSONObject>() {
             throw SecurityException("READ_CONTACTS permission denied")
         }
 
-        val candidates = ContactAliasResolver.getCandidateQueries(query)
-        for (candidate in candidates) {
-            val results = queryContactsProvider(context, candidate)
-            if (results.isNotEmpty()) {
-                return results
+        val rawCleaned = ContactAliasResolver.stripCallPrefixes(query)
+        if (rawCleaned.isBlank()) return emptyList()
+
+        // Stage 1: Literal spoken name search
+        var literalHits = queryContactsProvider(context, rawCleaned)
+        val suffixStripped = ContactAliasResolver.stripTeluguCaseSuffix(rawCleaned)
+        if (literalHits.isEmpty() && suffixStripped != rawCleaned && suffixStripped.isNotBlank()) {
+            literalHits = queryContactsProvider(context, suffixStripped)
+        }
+
+        if (literalHits.isNotEmpty()) {
+            val termsToCheck = setOf(rawCleaned, suffixStripped)
+            return ContactAliasResolver.filterExactMatches(literalHits, termsToCheck)
+        }
+
+        // Stage 2: Alias group union search
+        val groupTerms = ContactAliasResolver.getAliasGroupTerms(rawCleaned)
+        if (groupTerms.isNotEmpty()) {
+            val unionMap = mutableMapOf<Long, ContactMatch>()
+            for (term in groupTerms) {
+                val hits = queryContactsProvider(context, term)
+                for (hit in hits) {
+                    val existing = unionMap[hit.contactId]
+                    if (existing == null) {
+                        unionMap[hit.contactId] = hit
+                    } else {
+                        val combinedPhones = (existing.phoneNumbers + hit.phoneNumbers)
+                            .distinctBy { it.normalizedNumber }
+                        unionMap[hit.contactId] = existing.copy(phoneNumbers = combinedPhones)
+                    }
+                }
+            }
+            val unionList = unionMap.values.toList()
+            if (unionList.isNotEmpty()) {
+                return ContactAliasResolver.filterExactMatches(unionList, groupTerms + setOf(rawCleaned, suffixStripped))
             }
         }
+
         return emptyList()
     }
 
@@ -113,7 +202,7 @@ class SearchContactAction : BaseAction<JSONObject>() {
             projection,
             null,
             null,
-            "${ContactsContract.CommonDataKinds.Phone.TIMES_CONTACTED} DESC"
+            "${ContactsContract.CommonDataKinds.Phone.STARRED} DESC, ${ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME} ASC"
         )?.use { cursor ->
             val idIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
             val lookupIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.LOOKUP_KEY)

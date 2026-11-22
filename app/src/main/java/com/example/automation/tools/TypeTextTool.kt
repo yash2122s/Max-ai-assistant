@@ -63,6 +63,12 @@ class TypeTextTool : Tool {
         val targetField = args.get("field")?.asString
             ?: args.get("hint")?.asString
             ?: args.get("description")?.asString
+            ?: args.get("resourceId")?.asString
+            ?: args.get("id")?.asString
+            // `target` is the field hint when an explicit text/query value is
+            // also present. For legacy calls that only provide `target`, it
+            // remains the text payload and must not become its own field hint.
+            ?: args.get("target")?.asString?.takeIf { args.has("text") || args.has("query") }
 
         val replaceParam = if (args.has("replace")) {
             args.get("replace").asBoolean
@@ -367,4 +373,3 @@ class TypeTextTool : Tool {
         return true
     }
 }
-

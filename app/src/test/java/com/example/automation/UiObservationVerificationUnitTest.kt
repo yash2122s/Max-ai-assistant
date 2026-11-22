@@ -13,6 +13,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.After
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -28,6 +29,12 @@ class UiObservationVerificationUnitTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         WorldStateManager.reset()
+        com.example.service.JarvisAccessibilityService.testRootProvider = null
+    }
+
+    @After
+    fun tearDown() {
+        com.example.service.JarvisAccessibilityService.testRootProvider = null
     }
 
     private fun createNode(
@@ -115,6 +122,8 @@ class UiObservationVerificationUnitTest {
     @Test
     fun testRuntimeVerifierAppForeground() = runBlocking {
         WorldStateManager.setForegroundApp("com.google.android.apps.maps")
+        val root = createNode().apply { packageName = "com.google.android.apps.maps" }
+        com.example.service.JarvisAccessibilityService.testRootProvider = { root }
 
         val success = RuntimeStepVerifier.verifyAppForeground(
             context = context,

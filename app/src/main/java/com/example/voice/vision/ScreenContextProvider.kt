@@ -175,9 +175,10 @@ object ScreenContextProvider {
 
         // Determine if screenshot capture is required based on focus mode & text availability
         val needScreenshot = when (normalizedFocus) {
-            "read_text" -> visibleText.length < 100
+            "read_text" -> visibleText.isBlank()
             "find_element" -> clickableElements.isEmpty()
-            "summary", "explain_error", "visual", "screenshot" -> true
+            "summary" -> visibleText.isBlank() && clickableElements.isEmpty()
+            "explain_error", "visual", "screenshot" -> true
             "general", "accessibility_only", "planning" -> false
             else -> false
         }

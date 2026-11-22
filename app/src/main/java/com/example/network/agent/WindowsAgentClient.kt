@@ -79,8 +79,8 @@ class WindowsAgentClient(private val context: Context) {
         }
     }
 
-    private val toolCallbacks = mutableMapOf<String, ToolResponseCallback>()
-    private val toolCallbackTimestamps = mutableMapOf<String, Long>()
+    private data class PendingToolRequest(val socket: WebSocket, val callback: ToolResponseCallback, val timeout: Runnable)
+    private val toolCallbacks = java.util.concurrent.ConcurrentHashMap<String, PendingToolRequest>()
     private val TOOL_CALLBACK_TIMEOUT_MS = 60_000L // 60 seconds
     private var lastSentCapabilitiesJson: String? = null
 
@@ -282,6 +282,7 @@ class WindowsAgentClient(private val context: Context) {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                failToolRequests(webSocket)
                 Log.d("WindowsAgentClient", "[WS_CLOSED] WebSocket closed: code=$code, reason=$reason (priorState=$connectionState)")
                 this@WindowsAgentClient.webSocket = null
                 val priorSession = sessionToken
@@ -301,6 +302,7 @@ class WindowsAgentClient(private val context: Context) {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                failToolRequests(webSocket)
                 Log.e("WindowsAgentClient", "[WS_FAILURE] WebSocket error: ${t.message} (priorState=$connectionState)", t)
                 this@WindowsAgentClient.webSocket = null
                 val priorSession = sessionToken
@@ -430,17 +432,16 @@ class WindowsAgentClient(private val context: Context) {
 
                 "tool_progress" -> {
                     val payload = gson.fromJson(gson.toJson(envelope.payload), ToolProgressPayload::class.java)
-                    toolCallbacks[id]?.onProgress(payload.message ?: "")
+                    toolCallbacks[id]?.callback?.onProgress(payload.message ?: "")
                 }
                 "tool_response" -> {
                     val payload = gson.fromJson(gson.toJson(envelope.payload), ToolResponsePayload::class.java)
+                    val callback = takeToolCallback(id) ?: return
                     if (payload.status == "success") {
-                        toolCallbacks[id]?.onResponse(payload.status, payload.output ?: "")
+                        callback.onResponse(payload.status, payload.output ?: "")
                     } else {
-                        toolCallbacks[id]?.onError(payload.output ?: "Execution failed")
+                        callback.onError(payload.output ?: "Execution failed")
                     }
-                    toolCallbacks.remove(id)
-                    toolCallbackTimestamps.remove(id)
                 }
                 "heartbeat" -> {
                     Log.d("WindowsAgentClient", "Heartbeat echoed back successfully")
@@ -496,7 +497,7 @@ class WindowsAgentClient(private val context: Context) {
         
         clientScope.launch {
             val finalResult = idempotencyCache.executeOrAwait(payload.commandId) {
-                executeLocalAction(payload)
+                executeLocalActionWithTimeout(payload)
             }
             
             val responseEnv = Envelope(
@@ -606,6 +607,8 @@ class WindowsAgentClient(private val context: Context) {
                     executionTimeMs = durationMs
                 )
             }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
         } catch (e: Exception) {
             Log.e("WindowsAgentClient", "Exception during action execution: ${e.message}", e)
             CommandResultPayload(
@@ -620,6 +623,32 @@ class WindowsAgentClient(private val context: Context) {
                 executionTimeMs = System.currentTimeMillis() - startTime
             )
         }
+    }
+
+    /** Enforces the timeout promised by the remote command protocol. */
+    private suspend fun executeLocalActionWithTimeout(payload: CommandRequestPayload): CommandResultPayload {
+        return executeWithProtocolTimeout(payload) { executeLocalAction(payload) }
+    }
+
+    internal suspend fun executeWithProtocolTimeout(
+        payload: CommandRequestPayload,
+        block: suspend () -> CommandResultPayload
+    ): CommandResultPayload {
+        val result = withTimeoutOrNull(payload.timeoutMs.toLong()) { block() }
+        return result ?: CommandResultPayload(
+            commandId = payload.commandId,
+            status = "failed",
+            action = payload.action.trim().uppercase(),
+            tool = payload.tool,
+            deviceId = deviceId,
+            deviceName = android.os.Build.MODEL,
+            data = emptyMap(),
+            error = CommandError(
+                "EXECUTION_TIMEOUT",
+                "Command deadline exceeded; the outcome may be unknown and must not be replayed automatically."
+            ),
+            executionTimeMs = payload.timeoutMs.toLong()
+        )
     }
 
     internal fun validateCommandRequest(payload: CommandRequestPayload, envelope: Envelope): CommandError? {
@@ -764,11 +793,12 @@ class WindowsAgentClient(private val context: Context) {
     }
 
     fun sendToolRequest(tool: String, action: String, arguments: Map<String, Any>, callback: ToolResponseCallback) {
+        val socket = webSocket
+        if (socket == null) {
+            callback.onError("Connection is not active")
+            return
+        }
         val requestId = UUID.randomUUID().toString()
-        toolCallbacks[requestId] = callback
-        toolCallbackTimestamps[requestId] = System.currentTimeMillis()
-        
-        cleanExpiredCallbacks()
         
         val token = sessionToken ?: ""
         val envelope = Envelope(
@@ -783,10 +813,12 @@ class WindowsAgentClient(private val context: Context) {
                 arguments = arguments
             )
         )
-        val sent = webSocket?.send(gson.toJson(envelope)) ?: false
-        if (!sent) {
-            callback.onError("Connection is not active")
-            toolCallbacks.remove(requestId)
+        val frame = gson.toJson(envelope)
+        val timeout = Runnable { takeToolCallback(requestId)?.onError("Request timed out") }
+        toolCallbacks[requestId] = PendingToolRequest(socket, callback, timeout)
+        mainHandler.postDelayed(timeout, TOOL_CALLBACK_TIMEOUT_MS)
+        if (!socket.send(frame)) {
+            takeToolCallback(requestId)?.onError("Connection is not active")
         }
     }
 
@@ -851,27 +883,28 @@ class WindowsAgentClient(private val context: Context) {
 
     fun disconnect() {
         connectionState = ConnectionState.DISCONNECTED
-        webSocket?.close(1000, "Normal dismissal")
+        webSocket?.let { socket ->
+            socket.close(1000, "Normal dismissal")
+            failToolRequests(socket)
+        }
         webSocket = null
         isHandshakeDone = false
         sessionToken = null
         pendingPairingCode = null
         lastSentCapabilitiesJson = null
-        toolCallbacks.clear()
-        toolCallbackTimestamps.clear()
         pairCallback = null
         WindowsToolExecutor.markConnected(false)
     }
 
-    private fun cleanExpiredCallbacks() {
-        val now = System.currentTimeMillis()
-        val expiredIds = toolCallbackTimestamps.filter { (_, timestamp) ->
-            now - timestamp > TOOL_CALLBACK_TIMEOUT_MS
-        }.keys
-        for (id in expiredIds) {
-            toolCallbacks[id]?.onError("Request timed out")
-            toolCallbacks.remove(id)
-            toolCallbackTimestamps.remove(id)
+    private fun takeToolCallback(id: String): ToolResponseCallback? {
+        val pending = toolCallbacks.remove(id) ?: return null
+        mainHandler.removeCallbacks(pending.timeout)
+        return pending.callback
+    }
+
+    private fun failToolRequests(socket: WebSocket) {
+        for ((id, pending) in toolCallbacks) {
+            if (pending.socket === socket) takeToolCallback(id)?.onError("Connection closed")
         }
     }
 

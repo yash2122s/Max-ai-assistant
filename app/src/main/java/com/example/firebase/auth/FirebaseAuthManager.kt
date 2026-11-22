@@ -17,7 +17,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.util.concurrent.CopyOnWriteArrayList
 
-data class AuthSession(val uid: String?, val generation: Long)
+data class AuthSession(val uid: String?, val generation: Long, val resolving: Boolean = false)
 
 sealed class AuthException(message: String) : Exception(message) {
     object UserCancelled : AuthException("Sign-in was cancelled by user.")
@@ -59,7 +59,7 @@ class FirebaseAuthManager internal constructor(
     val currentUid: String? get() = gateway.currentUser?.uid
     val isAuthenticated: Boolean get() = currentUid != null && isCurrentSession(sessionState.value)
     fun isCurrentSession(session: AuthSession): Boolean =
-        sessionState.value == session && currentUid == session.uid
+        !session.resolving && sessionState.value == session && currentUid == session.uid
 
     fun addSessionInvalidationListener(owner: Any, listener: () -> Unit) {
         removeSessionInvalidationListener(owner)
@@ -184,13 +184,13 @@ class FirebaseAuthManager internal constructor(
 
     private fun invalidateSession() {
         _userState.value = null
-        _sessionState.value = AuthSession(null, sessionState.value.generation + 1)
+        _sessionState.value = AuthSession(null, sessionState.value.generation + 1, resolving = true)
         invalidationListeners.forEach { (_, listener) -> listener() }
     }
 
     private fun publishAccount(account: FirebaseUserAccount?) {
-        if (sessionState.value.uid != account?.uid) {
-            invalidateSession()
+        if (sessionState.value.uid != account?.uid || sessionState.value.resolving) {
+            if (!sessionState.value.resolving) invalidateSession()
             _userState.value = account
             _sessionState.value = AuthSession(account?.uid, sessionState.value.generation + 1)
         } else _userState.value = account

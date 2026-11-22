@@ -33,7 +33,7 @@ class BatteryTool(private val batteryAction: BatteryAction) : Tool {
                 toolName = name,
                 message = message,
                 metadata = info,
-                verificationRequired = true
+                verificationRequired = false
             )
         } catch (e: Exception) {
             ToolResult(

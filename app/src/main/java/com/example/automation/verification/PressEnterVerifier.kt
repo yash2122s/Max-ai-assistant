@@ -13,10 +13,11 @@ class PressEnterVerifier : Verifier {
         result: ToolResult,
         snapshot: DeviceContext
     ): VerificationResult {
-        // Press Enter verification passes if the tool completed execution without error
+        val submissionVerified = result.metadata.optBoolean("submissionVerified", false)
         return VerificationResult(
-            success = result.success,
-            reason = if (result.success) null else result.message,
+            success = result.success && submissionVerified,
+            reason = if (result.success && submissionVerified) null
+                else result.message ?: "Enter/Search dispatch was not independently verified",
             retryRecommended = false,
             snapshot = snapshot
         )

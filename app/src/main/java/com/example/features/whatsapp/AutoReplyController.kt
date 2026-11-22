@@ -65,6 +65,15 @@ object AutoReplyController {
     // Concurrency-safe cooldown map per sender to prevent reply loops & ping-pong
     private val lastReplyTimePerSender = ConcurrentHashMap<String, Long>()
 
+    @androidx.annotation.VisibleForTesting
+    fun resetForTesting() {
+        pendingConfirmations.clear()
+        activeMessageKeys.clear()
+        activeSbnMap.clear()
+        lastAiCall.clear()
+        lastReplyTimePerSender.clear()
+    }
+
     fun updateSbn(sender: String, sbn: StatusBarNotification) {
         val latestConf = pendingConfirmations.values
             .filter { normalize(it.sender) == normalize(sender) && it.state == ConfirmationState.PENDING_CONFIRMATION }
@@ -113,7 +122,11 @@ object AutoReplyController {
         message: String,
         sbn: StatusBarNotification
     ) {
-        val settings = SettingsManager(context)
+        val settings = SettingsManager.getInstance(context)
+        if (!settings.isMaxEnabled) {
+            Log.d(TAG, "Max global switch is OFF. Suppressing auto-reply.")
+            return
+        }
         if (!settings.isAutoReplyEnabled) {
             Log.d(TAG, "Auto reply is disabled in settings.")
             return
@@ -223,7 +236,22 @@ object AutoReplyController {
                 }
             }
 
-            // Create PendingReplyConfirmation with MANDATORY PENDING_CONFIRMATION state
+            if (settings.isAutoSendWithoutConfirmation) {
+                // Auto-send mode: send directly, no confirmation
+                val sent = RemoteInputSender.sendReply(context, sbn, proposedReply)
+                if (sent) {
+                    lastReplyTimePerSender[normalize(sender)] = System.currentTimeMillis()
+                    Log.d(TAG, "AUTO_SENT: To='$sender', Reply='$proposedReply'")
+                } else {
+                    Log.w(TAG, "AUTO_SEND_FAILED: To='$sender', Reply='$proposedReply'")
+                }
+                activeMessageKeys.remove(msgKey)
+                return
+            }
+
+            // Confirmation mode: keep the existing PendingReplyConfirmation flow
+            // BUT completely remove the CoroutineScope that does delay(5_000L) and calls confirmAndSend.
+            // The reply must only be sent when the user explicitly confirms.
             val confirmation = PendingReplyConfirmation(
                 packageName = sbn.packageName,
                 sender = sender,
@@ -245,17 +273,9 @@ object AutoReplyController {
                 incomingMessage = message,
                 proposedReply = proposedReply
             )
-
-            // Schedule auto-send after 5 seconds if user does not cancel
-            CoroutineScope(Dispatchers.IO).launch {
-                delay(5_000L)
-                if (confirmation.state == ConfirmationState.PENDING_CONFIRMATION) {
-                    Log.d(TAG, "AUTO_REPLY_AUTO_SEND: 5s grace period elapsed without cancellation. Confirming and sending reply for ${confirmation.confirmationId} to $sender")
-                    confirmAndSend(context, confirmation.confirmationId)
-                }
-            }
         } catch (e: Exception) {
             Log.e(TAG, "Error in AutoReplyController handleIncoming", e)
+        } finally {
             activeMessageKeys.remove(msgKey)
         }
     }
@@ -306,11 +326,13 @@ object AutoReplyController {
         Log.d(TAG, "REPLY_SENT: Executing confirmed reply send to '${confirmation.sender}' with text: '${confirmation.proposedReply}'")
 
         val sbnToUse = activeSbnMap.remove(confirmation.confirmationId)
-            ?: activeSbnMap.values.lastOrNull { it.packageName == confirmation.packageName }
-        var sent = false
-        if (sbnToUse != null) {
-            sent = RemoteInputSender.sendReply(context, sbnToUse, confirmation.proposedReply)
+        if (sbnToUse == null) {
+            Log.e(TAG, "No matching SBN for confirmation ID. Aborting send.")
+            confirmation.state = ConfirmationState.REJECTED_NO_CONFIRMATION
+            pendingConfirmations.remove(confirmation.confirmationId)
+            return false
         }
+        var sent = RemoteInputSender.sendReply(context, sbnToUse, confirmation.proposedReply)
 
         if (!sent) {
             if (confirmation.packageName.contains("whatsapp", ignoreCase = true)) {
@@ -339,17 +361,17 @@ object AutoReplyController {
         val confirmTriggers = listOf("yes", "send it", "confirm", "send", "yes send it", "ok send it", "sure send it", "send message", "confirm reply")
         val cancelTriggers = listOf("no", "cancel", "don't send", "dont send", "stop", "do not send", "reject")
 
-        val isConfirm = confirmTriggers.any { cleaned == it || cleaned.startsWith("$it ") || cleaned.endsWith(" $it") }
         val isCancel = cancelTriggers.any { cleaned == it || cleaned.startsWith("$it ") || cleaned.endsWith(" $it") }
+        val isConfirm = !isCancel && confirmTriggers.any { cleaned == it || cleaned.startsWith("$it ") || cleaned.endsWith(" $it") }
 
         return when {
-            isConfirm -> {
-                val sent = confirmAndSend(context, latest.confirmationId)
-                if (sent) "Confirmed and sent reply to ${latest.sender}." else "Failed to send reply to ${latest.sender}."
-            }
             isCancel -> {
                 cancelPendingReply(context, latest.confirmationId)
                 "Cancelled proposed reply to ${latest.sender}."
+            }
+            isConfirm -> {
+                val sent = confirmAndSend(context, latest.confirmationId)
+                if (sent) "Confirmed and sent reply to ${latest.sender}." else "Failed to send reply to ${latest.sender}."
             }
             else -> {
                 // Ambiguous input (e.g. "maybe", "wait", "later", "okay") -> MUST NOT send

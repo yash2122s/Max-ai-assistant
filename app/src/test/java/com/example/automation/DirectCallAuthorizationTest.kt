@@ -55,13 +55,9 @@ class DirectCallAuthorizationTest {
     }
 
     @Test
-    fun directGrantAcceptsBareNumberUtterance() {
-        val token = DirectCallAuthorization.issue("9640461271", "9640461271")
-        assertNotNull(token)
-        assertTrue(DirectCallAuthorization.consume(token, "9640461271"))
-
-        val token2 = DirectCallAuthorization.issue("49640461271", "49640461271")
-        assertNotNull(token2)
-        assertTrue(DirectCallAuthorization.consume(token2, "49640461271"))
+    fun directGrantRequiresCallIntentAndAllSpokenDigits() {
+        assertFalse(DirectCallAuthorization.issue("9640461271", "9640461271") != null)
+        assertFalse(DirectCallAuthorization.issue("save chey 9640461271", "9640461271") != null)
+        assertFalse(DirectCallAuthorization.issue("call 49640461271", "9640461271") != null)
     }
 }

@@ -98,6 +98,10 @@ class LongHorizonTaskExecutionTest {
             })
         }
         WorldStateManager.setForegroundApp("com.android.chrome")
+        val liveRoot = android.view.accessibility.AccessibilityNodeInfo.obtain().apply {
+            packageName = "com.android.chrome"
+        }
+        JarvisAccessibilityService.testRootProvider = { liveRoot }
 
         val task = AgentTask(
             originalIntent = "Open Chrome and search",
@@ -172,8 +176,16 @@ class LongHorizonTaskExecutionTest {
     @Test
     fun testPlanExecutionThroughOrchestrator() = runBlocking {
         WorldStateManager.setForegroundApp("com.android.chrome")
-        val root = android.view.accessibility.AccessibilityNodeInfo.obtain().apply { packageName = "com.android.chrome" }
+        val root = android.view.accessibility.AccessibilityNodeInfo.obtain().apply {
+            packageName = "com.android.chrome"
+            isVisibleToUser = true
+            className = "android.widget.FrameLayout"
+            text = "Chrome"
+        }
         JarvisAccessibilityService.testRootProvider = { root }
+        JarvisAccessibilityService.testShellExecutor = { command ->
+            if (command.contains("keyevent")) root.text = "submitted"
+        }
 
         val steps = listOf(
             ActionStep(stepId = "s1", actionType = "OPEN_APP", targetText = "Chrome"),

@@ -98,6 +98,26 @@ class AutonomousTaskCoordinatorTest {
     }
 
     @Test
+    fun testTurnBoundaryDoesNotAutoClaimSingleStepCompletion() {
+        coordinator.onAutomationToolInvoked("open_app", "Open YouTube")
+        val connection = com.example.voice.assistant.ConnectionManager(
+            context = org.robolectric.RuntimeEnvironment.getApplication(),
+            onMessageReceived = {},
+            onAudioReceived = {},
+            onConnectionStateChanged = {},
+            onExecuteAutomation = { "{}" }
+        )
+        val audioPlayer = com.example.voice.audio.AudioPlayer(
+            com.example.voice.audio.AudioFocusManager(org.robolectric.RuntimeEnvironment.getApplication())
+        )
+
+        coordinator.onTurnComplete(connection, audioPlayer, org.robolectric.RuntimeEnvironment.getApplication())
+
+        assertFalse("A turn boundary must not claim unverified completion", coordinator.isRunning)
+        assertEquals("", coordinator.currentGoal)
+    }
+
+    @Test
     fun testUserInterruptionWithStopWord() {
         coordinator.onAutomationToolInvoked("open_app", "Open YouTube")
         assertTrue(coordinator.isRunning)

@@ -16,7 +16,8 @@ data class InteractiveElement(
     val isScrollable: Boolean = false,
     val isFocused: Boolean = false,
     val isEnabled: Boolean = true,
-    val isSelected: Boolean = false
+    val isSelected: Boolean = false,
+    val isPassword: Boolean = false
 ) {
     val displayLabel: String
         get() = when {

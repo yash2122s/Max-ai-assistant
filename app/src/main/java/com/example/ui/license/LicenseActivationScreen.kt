@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.firebase.manager.EntitlementGate
 import com.example.firebase.model.CloudLicense
 import com.example.firebase.model.DeviceRegistration
 import com.example.firebase.model.FirebaseUserAccount
@@ -381,7 +382,7 @@ fun GoogleAccountSection(
                             color = MaxSemanticColors.textPrimary
                         )
                         Text(
-                            text = "Sign in to activate your 7-day trial and sync license",
+                            text = "Sign in to activate and sync your cloud license",
                             style = MaxType.Caption,
                             color = MaxSemanticColors.textSecondary
                         )
@@ -449,18 +450,18 @@ fun CloudLicenseHeroCard(
         }
         entitlement is Entitlement.Trial -> {
             val days = license.remainingTrialDays()
-            val usageStatus = "$dailyUsage/20 messages used today"
+            val usageStatus = "$dailyUsage/${EntitlementGate.DEFAULT_DAILY_LIMIT} messages used today"
             LicenseHeroConfig(
-                title = "3-Day Free Trial Active",
+                title = "7-Day Free Trial Active",
                 subtitle = "$days days remaining • $usageStatus",
-                badgeColor = if (dailyUsage >= 20L) MaxSemanticColors.destructive else MaxSemanticColors.accentCyan,
-                icon = if (dailyUsage >= 20L) Icons.Default.Warning else Icons.Default.HourglassTop,
+                badgeColor = if (dailyUsage >= EntitlementGate.DEFAULT_DAILY_LIMIT) MaxSemanticColors.destructive else MaxSemanticColors.accentCyan,
+                icon = if (dailyUsage >= EntitlementGate.DEFAULT_DAILY_LIMIT) Icons.Default.Warning else Icons.Default.HourglassTop,
                 accentGradient = listOf(MaxSemanticColors.infoSurface, MaxSemanticColors.surface)
             )
         }
         entitlement is Entitlement.Expired || license.isExpired() -> LicenseHeroConfig(
             title = "Free Trial Ended",
-            subtitle = "Your 3-day trial has ended. Activate MAX Premium to continue.",
+            subtitle = "Your 7-day trial has ended. Activate MAX Premium to continue.",
             badgeColor = MaxSemanticColors.destructive,
             icon = Icons.Default.ErrorOutline,
             accentGradient = listOf(MaxSemanticColors.destructiveSurface, MaxSemanticColors.surface)
@@ -481,7 +482,7 @@ fun CloudLicenseHeroCard(
         )
         else -> LicenseHeroConfig(
             title = "Free Tier",
-            subtitle = "Sign in with Google to unlock 3-day trial and cloud licensing.",
+            subtitle = "Sign in with Google to unlock 7-day trial and cloud licensing.",
             badgeColor = MaxSemanticColors.textMuted,
             icon = Icons.Default.Lock,
             accentGradient = listOf(MaxSemanticColors.surfaceElevated, MaxSemanticColors.surface)

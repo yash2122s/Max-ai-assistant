@@ -49,7 +49,8 @@ data class ComputerUseResult(
  */
 object ComputerUseEngine {
     private const val TAG = "ComputerUseEngine"
-    private const val MAX_TASK_TIMEOUT_MS = 60_000L
+    private const val BASE_TASK_TIMEOUT_MS = 60_000L
+    private const val PER_STEP_TIMEOUT_MS = 8_000L
     private const val STEP_SETTLE_DELAY_MS = 350L
 
     suspend fun execute(
@@ -114,16 +115,28 @@ object ComputerUseEngine {
             )
         }
 
+        val maxTaskTimeoutMs = BASE_TASK_TIMEOUT_MS + (maxSteps * PER_STEP_TIMEOUT_MS)
         try {
-            val timedResult = withTimeoutOrNull(MAX_TASK_TIMEOUT_MS) {
-                executeLoop(context, taskContext, cancellationToken)
+            val timedResult = try {
+                withTimeoutOrNull(maxTaskTimeoutMs) {
+                    executeLoop(context, taskContext, cancellationToken)
+                }
+            } catch (e: Throwable) {
+                Log.e(TAG, "[TASK] Uncaught execution error in executeLoop", e)
+                ComputerUseResult(
+                    success = false,
+                    goal = goal,
+                    stepsExecuted = 0,
+                    message = "Execution error: ${e.message ?: "Internal error"}",
+                    error = "INTERNAL_ERROR"
+                )
             }
 
             val finalResult = timedResult ?: ComputerUseResult(
                 success = false,
                 goal = goal,
-                stepsExecuted = maxSteps,
-                message = "Task timed out after ${MAX_TASK_TIMEOUT_MS / 1000}s",
+                stepsExecuted = maxOf(taskContext.completedSteps.size, taskContext.currentStepIndex),
+                message = "Task timed out after ${maxTaskTimeoutMs / 1000}s",
                 error = ComputerUseErrorCode.TASK_TIMEOUT.name
             )
 
@@ -144,10 +157,12 @@ object ComputerUseEngine {
         val executedPhases = mutableListOf<GoalState>(GoalState.INIT)
         var consecutiveFailures = 0
         var lastFailedAction: ComputerAction? = null
+        var originalFailedAction: ComputerAction? = null
         var selectedCandidate: TargetGrounding? = null
 
         fun advanceState(nextState: GoalState, evidence: String) {
-            if (nextState.ordinal > currentState.ordinal) {
+            val canAdvance = nextState.ordinal > currentState.ordinal || (nextState.isTerminal && !currentState.isTerminal)
+            if (canAdvance) {
                 Log.i(TAG, "[TRANSITION] $currentState -> $nextState evidence='$evidence'")
                 currentState = nextState
                 if (!executedPhases.contains(nextState)) {
@@ -188,6 +203,31 @@ object ComputerUseEngine {
                 causedByAction = null
             )
             Log.i(TAG, "[OBSERVE] step=$step obsId=${obsBefore.observationId} app=${obsBefore.foregroundPackage} elements=${obsBefore.interactiveElements.size} texts=${obsBefore.visibleTexts.size} screenshot=${obsBefore.hasScreenshot}")
+
+            // Permission dialogs are user-gated UI, not a loading state. Stop
+            // with an actionable terminal result instead of retrying the same
+            // search against the permission controller forever.
+            val permissionPrompt = findBlockingPermissionPrompt(obsBefore)
+            if (permissionPrompt != null) {
+                advanceState(GoalState.FAILED, "Permission prompt requires user action: $permissionPrompt")
+                val message = "Google Maps is waiting for user permission ($permissionPrompt). Approve it, then retry the search."
+                Log.w(TAG, "[TASK] TERMINAL status=FAILED error=${ComputerUseErrorCode.PERMISSION_REQUIRED} detail='$permissionPrompt'")
+                return ComputerUseResult(
+                    success = false,
+                    goal = taskContext.goal,
+                    stepsExecuted = stepsExecuted,
+                    message = message,
+                    taskStatus = TaskStatus.FAILED,
+                    executedPhases = executedPhases.toList(),
+                    error = ComputerUseErrorCode.PERMISSION_REQUIRED.name
+                )
+            }
+
+            // Discard stale candidate before assessment
+            if (selectedCandidate?.isStale(obsBefore) == true) {
+                Log.w(TAG, "[CANDIDATE] Discarding stale candidate: ${selectedCandidate?.semanticLabel}")
+                selectedCandidate = null
+            }
 
             // --- 3. STATE: ASSESSING CURRENT STATE & SMART ATTACHMENT ---
             val assessment = GoalStateAssessor.assessCurrentState(
@@ -230,11 +270,12 @@ object ComputerUseEngine {
             }
 
             // --- 4. STATE: PLANNING ---
-            val action = if (consecutiveFailures > 0 && lastFailedAction != null) {
-                if (consecutiveFailures >= ComputerUseRecoveryEngine.MAX_RECOVERY_ATTEMPTS) {
-                    Log.e(TAG, "[RECOVERY] Exhausted max 3 recovery attempts for '${lastFailedAction.actionName}'. Aborting.")
+            val action = if (consecutiveFailures > 0 && (lastFailedAction != null || originalFailedAction != null)) {
+                val actionToRecover = originalFailedAction ?: lastFailedAction!!
+                if (consecutiveFailures > ComputerUseRecoveryEngine.MAX_RECOVERY_ATTEMPTS) {
+                    Log.e(TAG, "[RECOVERY] Exhausted max 3 recovery attempts for '${actionToRecover.actionName}'. Aborting.")
                     val isTelugu = isTeluguGoal(taskContext.goal)
-                    val recMsg = if (isTelugu) "${taskContext.targetApp ?: "App"} open cheyyadam fail ayyindi." else "Action '${lastFailedAction.actionName}' failed after 3 recovery attempts."
+                    val recMsg = if (isTelugu) "${taskContext.targetApp ?: "App"} open cheyyadam fail ayyindi." else "Action '${actionToRecover.actionName}' failed after 3 recovery attempts."
                     Log.i(TAG, "[CU] FINAL_TASK_STATUS status=FAILED message='$recMsg'")
                     return ComputerUseResult(
                         success = false,
@@ -248,7 +289,7 @@ object ComputerUseEngine {
                 }
                 ComputerUseRecoveryEngine.planRecovery(
                     attempt = consecutiveFailures,
-                    failedAction = lastFailedAction,
+                    failedAction = actionToRecover,
                     obs = obsBefore,
                     context = taskContext,
                     currentPhase = currentState
@@ -315,7 +356,13 @@ object ComputerUseEngine {
             AssistantEventBus.emit(AssistantEvent.ToolProgress("computer_use", "⚙️ Executing ${action.actionName}..."))
             val beforeVersion = com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot().stateVersion
             val execResult = ComputerActionExecutor.execute(context, action)
-            Log.i(TAG, "[CU] ACTION_EXECUTED action='${action.actionName}' success=${execResult.success} message='${execResult.message}'")
+            Log.i(
+                TAG,
+                "[CU_STEP] taskId=${taskContext.taskId} executionId=${taskContext.executionId} " +
+                    "step=$step phase=$currentState query='${taskContext.searchQuery}' action=${action.actionName} " +
+                    "dispatchSuccess=${execResult.success} submissionVerified=${execResult.submissionVerified} " +
+                    "durationMs=${execResult.durationMs} method=${execResult.methodUsed} error=${execResult.errorCode}"
+            )
 
             // --- 6. ADAPTIVE SETTLE & PREDICATE WAIT ---
             val settleTime = when (action) {
@@ -373,12 +420,18 @@ object ComputerUseEngine {
                 execResult.success -> "UNVERIFIED"
                 else -> "FAILED"
             }
-            Log.i(TAG, "[CU] VERIFICATION_STATUS status=$verStatus reason='$note'")
+            Log.i(
+                TAG,
+                "[CU] VERIFICATION_STATUS taskId=${taskContext.taskId} step=$step status=$verStatus " +
+                    "observedPackage='${obsAfter.foregroundPackage}' retry=$consecutiveFailures " +
+                    "timeoutMs=$PER_STEP_TIMEOUT_MS reason='$note'"
+            )
             Log.i(TAG, "[VERIFY] action=${action.actionName} isVerified=$isActionVerified note='$note'")
 
             if (isActionVerified) {
                 consecutiveFailures = 0
                 lastFailedAction = null
+                originalFailedAction = null
                 AssistantEventBus.emit(AssistantEvent.ToolProgress("computer_use", "✓ $note"))
 
                 // Phase advancement rules upon verified action execution
@@ -412,7 +465,14 @@ object ComputerUseEngine {
                         if (taskContext.intentType == TaskIntentType.COMPOUND_UI_NAVIGATION ||
                             taskContext.intentType == TaskIntentType.UI_ACTION) {
                             val currentTarget = taskContext.currentTarget
-                            val actionTarget = if (action is ComputerAction.TapElement) action.targetText else ""
+                            val actionTarget = when (action) {
+                                is ComputerAction.TapElement -> action.targetText
+                                is ComputerAction.TapCoordinate -> action.grounding?.semanticLabel
+                                    ?: action.grounding?.contentDescription
+                                    ?: action.description
+                                    ?: ""
+                                else -> ""
+                            }
                             if (currentTarget != null && actionTarget.isNotBlank() && (
                                 actionTarget.equals(currentTarget, ignoreCase = true) ||
                                 actionTarget.contains(currentTarget, ignoreCase = true) ||
@@ -458,7 +518,7 @@ object ComputerUseEngine {
                     }
                     is ComputerAction.TypeText -> {
                         advanceState(GoalState.QUERY_ENTERED, action.text)
-                        if (action.pressEnterAfter) {
+                        if (action.pressEnterAfter && execResult.submissionVerified) {
                             advanceState(GoalState.SEARCH_SUBMITTED, "Search submitted via enter")
                         }
                     }
@@ -487,6 +547,10 @@ object ComputerUseEngine {
             } else {
                 consecutiveFailures++
                 lastFailedAction = action
+                if (originalFailedAction == null) {
+                    originalFailedAction = action
+                }
+                selectedCandidate = null
                 Log.w(TAG, "[RECOVERY] Action verification failed: $note (attempt $consecutiveFailures/3)")
                 AssistantEventBus.emit(AssistantEvent.ToolProgress("computer_use", "⚠️ $note (recovery attempt $consecutiveFailures/3)"))
 
@@ -547,20 +611,22 @@ object ComputerUseEngine {
         }
 
         // 2. Telugu pattern: "<query> (ani|ni|lo)? search"
-        val teluguMatch = Regex("""(?i)([a-zA-Z0-9_\s]{2,40}?)(?:\s+ani|\s+ni|\s+lo)?\s+search""").find(goal)
+        val teluguMatch = Regex("""(?i)([a-zA-Z0-9_\s\u0C00-\u0C7F]{2,40}?)(?:\s+ani|\s+ni|\s+lo)?\s+search""").find(goal)
         if (teluguMatch != null) {
             val candidate = teluguMatch.groupValues[1].trim()
             val filtered = candidate.replace(Regex("""(?i)^(?:open\s+\w+\.?\s*|youtube\s*|instagram\s*|whatsapp\s*)"""), "").trim()
+                .replace(Regex("""(?i)^(?:lo|ni|ki|ani|na|meeda|nundi|nunchi)\s+"""), "").trim()
             if (filtered.isNotBlank() && !filtered.equals("search", ignoreCase = true)) {
                 return filtered
             }
         }
 
         // 3. English pattern: "search (for|about|lo)? <query>"
-        val englishMatch = Regex("""(?i)(?:search\s+for|search\s+about|search\s+lo|search|find|look\s+for)\s+([a-zA-Z0-9_\s]{2,40})""").find(goal)
+        val englishMatch = Regex("""(?i)(?:search\s+for|search\s+about|search\s+lo|search|find|look\s+for)\s+([a-zA-Z0-9_\s\u0C00-\u0C7F]{2,40})""").find(goal)
         if (englishMatch != null) {
             var candidate = englishMatch.groupValues[1].trim()
             candidate = candidate.split(Regex("""(?i)\.|\,|\band\b|\bthen\b|\binspect\b|\bopen\b|\bidentify\b|\bchesi\b|\bcheyyi\b""")).firstOrNull()?.trim() ?: candidate
+            candidate = candidate.replace(Regex("""(?i)^(?:lo|ni|ki|ani|na|meeda|nundi|nunchi)\s+"""), "").trim()
             if (candidate.isNotBlank() && !candidate.equals("for", ignoreCase = true) && !candidate.equals("search", ignoreCase = true)) {
                 return candidate
             }
@@ -571,5 +637,24 @@ object ComputerUseEngine {
         if (lower.contains("python automation")) return "Python automation tutorial"
 
         return ""
+    }
+
+    /**
+     * Returns the visible permission choice when Maps is blocked by Android's
+     * runtime permission controller. The automation must not silently grant a
+     * permission on the user's behalf.
+     */
+    internal fun findBlockingPermissionPrompt(obs: ScreenObservation): String? {
+        val labels = (obs.visibleTexts + obs.interactiveElements.map { it.displayLabel })
+            .map { it.trim().lowercase() }
+        val joined = labels.joinToString(" ")
+        val isPermissionUi = obs.foregroundPackage.contains("permission", ignoreCase = true) ||
+            joined.contains("allow") || joined.contains("while using")
+        val mentionsLocation = joined.contains("location") || joined.contains("precise") || joined.contains("approximate")
+        if (!isPermissionUi || !mentionsLocation) return null
+
+        return labels.firstOrNull {
+            it.contains("while using") || it == "allow" || it.contains("only this time") || it == "deny"
+        } ?: "location permission"
     }
 }

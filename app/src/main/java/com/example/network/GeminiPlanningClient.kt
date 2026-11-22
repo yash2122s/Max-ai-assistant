@@ -17,7 +17,7 @@ object GeminiPlanningClient {
         goal: String,
         screenContext: ScreenContextPayload,
         apiKey: String,
-        modelName: String = "gemini-2.5-flash"
+        modelName: String = com.example.network.model.UiAgentModels.GEMINI_UI_AGENT_DEFAULT
     ): PlanningResult {
         val provider = GeminiPlanningProvider(
             apiKeyProvider = { apiKey }

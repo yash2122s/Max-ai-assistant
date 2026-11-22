@@ -1,6 +1,16 @@
 package com.example.ui.reminders
 
+import android.Manifest
+import android.app.TimePickerDialog
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.NotificationManagerCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -35,23 +45,6 @@ fun RemindersScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-
-    var showEditorSheet by remember { mutableStateOf(false) }
-    var messageInput by remember { mutableStateOf("") }
-    var selectedMinutesOffset by remember { mutableStateOf(15) }
-
-    LaunchedEffect(uiState.isCreatingNew, uiState.selectedReminderForEdit) {
-        if (uiState.isCreatingNew) {
-            messageInput = ""
-            selectedMinutesOffset = 15
-            showEditorSheet = true
-        } else if (uiState.selectedReminderForEdit != null) {
-            messageInput = uiState.selectedReminderForEdit?.message ?: ""
-            showEditorSheet = true
-        } else {
-            showEditorSheet = false
-        }
-    }
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
@@ -147,7 +140,32 @@ fun RemindersScreen(
             }
         }
 
-        if (showEditorSheet) {
+        val editing = uiState.selectedReminderForEdit
+        if (uiState.isCreatingNew || editing != null) {
+            var messageInput by remember(editing?.id) { mutableStateOf(editing?.message.orEmpty()) }
+            var selectedMinutesOffset by remember(editing?.id) { mutableStateOf<Int?>(if (editing == null) 15 else null) }
+            var customPickedMillis by remember(editing?.id) { mutableStateOf<Long?>(null) }
+
+            var isNotifGranted by remember {
+                mutableStateOf(NotificationManagerCompat.from(context).areNotificationsEnabled())
+            }
+
+            val notifPermissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestPermission()
+            ) { granted ->
+                isNotifGranted = granted || NotificationManagerCompat.from(context).areNotificationsEnabled()
+                if (!isNotifGranted) {
+                    Toast.makeText(context, "Notification permission is required for reminders to pop up", Toast.LENGTH_LONG).show()
+                }
+            }
+
+            val alarmManager = remember { context.getSystemService(Context.ALARM_SERVICE) as? android.app.AlarmManager }
+            val isExactAlarmGranted = remember {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    alarmManager?.canScheduleExactAlarms() ?: true
+                } else true
+            }
+
             ModalBottomSheet(
                 onDismissRequest = { viewModel.dismissEditor() },
                 containerColor = MaxSemanticColors.surface
@@ -165,6 +183,79 @@ fun RemindersScreen(
                         color = MaxSemanticColors.textPrimary
                     )
 
+                    // Permission Warning: Notifications
+                    if (!isNotifGranted) {
+                        Surface(
+                            shape = RoundedCornerShape(MaxDimensions.radiusSm),
+                            color = MaxSemanticColors.destructive.copy(alpha = 0.12f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaxSemanticColors.destructive.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(MaxDimensions.spaceSm),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Notifications disabled. Reminders will not alert you.",
+                                    style = MaxType.Caption,
+                                    color = MaxSemanticColors.destructive,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    onClick = {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            notifPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                        } else {
+                                            val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                                putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                            }
+                                            context.startActivity(intent)
+                                        }
+                                    }
+                                ) {
+                                    Text("Enable", color = MaxSemanticColors.accentCyan, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
+                    // Permission Warning: Exact Alarms
+                    if (!isExactAlarmGranted) {
+                        Surface(
+                            shape = RoundedCornerShape(MaxDimensions.radiusSm),
+                            color = MaxSemanticColors.accentCyan.copy(alpha = 0.12f),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, MaxSemanticColors.accentCyan.copy(alpha = 0.35f)),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(MaxDimensions.spaceSm),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "Exact alarm access is off. Alarms may be delayed.",
+                                    style = MaxType.Caption,
+                                    color = MaxSemanticColors.textPrimary,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    onClick = {
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                            val intent = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")).apply {
+                                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                            }
+                                            context.startActivity(intent)
+                                        }
+                                    }
+                                ) {
+                                    Text("Allow", color = MaxSemanticColors.accentCyan, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+                    }
+
                     MaxTextField(
                         value = messageInput,
                         onValueChange = { messageInput = it },
@@ -173,25 +264,43 @@ fun RemindersScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
+                    val previewDateText = when {
+                        customPickedMillis != null -> {
+                            "Scheduled for " + SimpleDateFormat("EEE, MMM d 'at' hh:mm a", Locale.getDefault()).format(Date(customPickedMillis!!))
+                        }
+                        selectedMinutesOffset != null -> {
+                            val targetTime = System.currentTimeMillis() + selectedMinutesOffset!! * 60_000L
+                            "Scheduled for " + SimpleDateFormat("EEE, MMM d 'at' hh:mm a", Locale.getDefault()).format(Date(targetTime))
+                        }
+                        editing != null -> {
+                            "Scheduled for " + SimpleDateFormat("EEE, MMM d 'at' hh:mm a", Locale.getDefault()).format(Date(editing.triggerAt))
+                        }
+                        else -> "Remind me in:"
+                    }
+
                     Text(
-                        text = "Remind me in:",
+                        text = previewDateText,
                         style = MaxType.Caption,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaxSemanticColors.textMuted
+                        color = if (customPickedMillis != null || selectedMinutesOffset != null) MaxSemanticColors.accentCyan else MaxSemanticColors.textMuted
                     )
 
+                    // Quick offset presets
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
                     ) {
                         listOf(15 to "15m", 30 to "30m", 60 to "1h", 180 to "3h", 1440 to "1 day").forEach { (mins, label) ->
-                            val isSelected = selectedMinutesOffset == mins
+                            val isSelected = selectedMinutesOffset == mins && customPickedMillis == null
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(MaxDimensions.radiusSm))
                                     .background(if (isSelected) MaxSemanticColors.accentCyan else MaxSemanticColors.surfaceVariant)
-                                    .clickable { selectedMinutesOffset = mins }
+                                    .clickable {
+                                        selectedMinutesOffset = mins
+                                        customPickedMillis = null
+                                    }
                                     .padding(vertical = MaxDimensions.spaceSm),
                                 contentAlignment = Alignment.Center
                             ) {
@@ -205,28 +314,73 @@ fun RemindersScreen(
                         }
                     }
 
+                    // Custom Time Picker Trigger
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        MaxButton(
-                            text = "Cancel",
-                            onClick = { viewModel.dismissEditor() },
-                            variant = MaxButtonVariant.OUTLINE,
-                            modifier = Modifier.padding(end = MaxDimensions.spaceSm)
-                        )
-                        MaxButton(
-                            text = "Save",
+                        OutlinedButton(
                             onClick = {
-                                val trigger = System.currentTimeMillis() + (selectedMinutesOffset * 60 * 1000L)
-                                viewModel.saveReminder(
-                                    message = messageInput,
-                                    triggerAtMillis = trigger
-                                )
+                                val now = Calendar.getInstance()
+                                TimePickerDialog(
+                                    context,
+                                    { _, hourOfDay, minute ->
+                                        val cal = Calendar.getInstance().apply {
+                                            set(Calendar.HOUR_OF_DAY, hourOfDay)
+                                            set(Calendar.MINUTE, minute)
+                                            set(Calendar.SECOND, 0)
+                                            set(Calendar.MILLISECOND, 0)
+                                        }
+                                        if (cal.timeInMillis <= System.currentTimeMillis()) {
+                                            cal.add(Calendar.DAY_OF_YEAR, 1)
+                                        }
+                                        customPickedMillis = cal.timeInMillis
+                                        selectedMinutesOffset = null
+                                    },
+                                    now.get(Calendar.HOUR_OF_DAY),
+                                    now.get(Calendar.MINUTE),
+                                    false
+                                ).show()
                             },
-                            variant = MaxButtonVariant.PRIMARY
-                        )
+                            shape = RoundedCornerShape(MaxDimensions.radiusSm),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (customPickedMillis != null) MaxSemanticColors.accentCyan else MaxSemanticColors.border)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AccessTime,
+                                contentDescription = "Pick Clock Time",
+                                tint = if (customPickedMillis != null) MaxSemanticColors.accentCyan else MaxSemanticColors.textSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (customPickedMillis != null) "Time Selected" else "Pick Clock Time...",
+                                color = if (customPickedMillis != null) MaxSemanticColors.accentCyan else MaxSemanticColors.textSecondary,
+                                style = MaxType.Caption
+                            )
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            MaxButton(
+                                text = "Cancel",
+                                onClick = { viewModel.dismissEditor() },
+                                variant = MaxButtonVariant.OUTLINE,
+                                modifier = Modifier.padding(end = MaxDimensions.spaceSm)
+                            )
+                            MaxButton(
+                                text = "Save",
+                                onClick = {
+                                    val trigger = customPickedMillis
+                                        ?: selectedMinutesOffset?.let { System.currentTimeMillis() + it * 60_000L }
+                                        ?: if (editing == null) (System.currentTimeMillis() + 15 * 60_000L) else null
+                                    viewModel.saveReminder(
+                                        message = messageInput,
+                                        triggerAtMillis = trigger
+                                    )
+                                },
+                                variant = MaxButtonVariant.PRIMARY
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(MaxDimensions.spaceLg))

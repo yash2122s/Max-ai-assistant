@@ -14,6 +14,7 @@ import android.net.NetworkRequest
 import com.example.core.registry.ServiceRegistry
 import com.example.core.registry.ServiceType
 import kotlinx.coroutines.*
+import java.util.ArrayDeque
 
 class ConnectionManager(
     private val context: Context,
@@ -46,6 +47,12 @@ class ConnectionManager(
     private var isExplicitlyDisconnected = true
     private var isNetworkCallbackRegistered = false
     private var connectionGeneration = 0
+    private var configuredLanguage: String? = null
+    private var configuredModel: String? = null
+    private val pendingTextMessages = ArrayDeque<String>()
+    private val pendingAudioChunks = ArrayDeque<ByteArray>()
+    private var pendingAudioStreamEnd = false
+    private val maxPendingAudioChunks = 64
 
     private val connectivityManager by lazy {
         context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -97,7 +104,27 @@ class ConnectionManager(
 
     @Synchronized
     fun forceReconnect() {
+        isExplicitlyDisconnected = false
+        registerNetworkCallback()
         createNewConnection(isNew = false)
+    }
+
+    @Synchronized
+    fun updateLanguage(newLanguage: String): Boolean {
+        // The preference is written by SettingsManager; do not wake an idle/worker session.
+        val latestLanguage = com.example.data.preferences.SettingsManager(context).languagePreference
+        val effectiveLanguage = if (newLanguage == latestLanguage) newLanguage else latestLanguage
+        if (isExplicitlyDisconnected || configuredLanguage == effectiveLanguage) return false
+        val currentModel = webSocketClient?.connectedModelName ?: configuredModel
+        liveSessionState.invalidateResumption()
+        activeHandoffContext = null
+        pendingAudioChunks.clear()
+        pendingAudioStreamEnd = false
+        cancelReconnectJob()
+        reconnectInProgress = false
+        isNewSession = true
+        createNewConnection(isNew = true, forcedModel = currentModel)
+        return true
     }
 
     private val modelRouter: com.example.network.router.ModelRouter = com.example.network.router.DefaultModelRouter()
@@ -105,7 +132,9 @@ class ConnectionManager(
     var currentModelMode: com.example.network.model.GeminiModelMode = com.example.network.model.GeminiModelMode.AUTO
         private set
 
+    @Synchronized
     fun connect() {
+        if (!isExplicitlyDisconnected && (connectionState == ConnectionState.CONNECTING || webSocketClient != null)) return
         liveSessionState.reset()
         ServiceRegistry.register(ServiceType.VOICE, this)
         isExplicitlyDisconnected = false
@@ -138,8 +167,10 @@ class ConnectionManager(
         val savedKey = settings.geminiApiKey.trim()
         val savedVoice = settings.liveVoiceName
         val savedLanguage = settings.languagePreference
+        configuredLanguage = savedLanguage
         val routingPreference = com.example.network.model.GeminiModelMode.fromString(settings.modelRoutingMode)
         val resolvedModel = forcedModel ?: modelRouter.resolveModel(routingPreference, "", null)
+        configuredModel = resolvedModel
         val apiKey = savedKey
 
         val keyPresent = apiKey.isNotEmpty()
@@ -248,9 +279,18 @@ class ConnectionManager(
                                 onInteractionStatusChanged?.invoke(status)
                             }
                         }
-                    }
+                    },
+                    applicationContext = context.applicationContext
                 )
                 webSocketClient?.connect()
+                webSocketClient?.let { client ->
+                    while (pendingTextMessages.isNotEmpty()) client.sendText(pendingTextMessages.removeFirst())
+                    while (pendingAudioChunks.isNotEmpty()) client.sendAudio(pendingAudioChunks.removeFirst())
+                    if (pendingAudioStreamEnd) {
+                        client.sendAudioStreamEnd()
+                        pendingAudioStreamEnd = false
+                    }
+                }
             }
         }
     }
@@ -318,19 +358,34 @@ class ConnectionManager(
     fun sendText(text: String) {
         if (webSocketClient == null) {
             Log.d("ConnectionManager", "WebSocket not connected. Initiating connection for sendText...")
+            pendingTextMessages.addLast(text)
             connect()
+            return
         }
         webSocketClient?.sendText(text)
     }
 
     @Synchronized
     fun sendAudio(audio: ByteArray) {
-        webSocketClient?.sendAudio(audio)
+        val client = webSocketClient
+        if (client == null) {
+            if (pendingAudioChunks.size >= maxPendingAudioChunks) pendingAudioChunks.removeFirst()
+            pendingAudioChunks.addLast(audio)
+            connect()
+            return
+        }
+        client.sendAudio(audio)
     }
 
     @Synchronized
     fun sendAudioStreamEnd() {
-        webSocketClient?.sendAudioStreamEnd()
+        val client = webSocketClient
+        if (client == null) {
+            pendingAudioStreamEnd = true
+            connect()
+            return
+        }
+        client.sendAudioStreamEnd()
     }
 
     @Synchronized
@@ -354,8 +409,8 @@ class ConnectionManager(
     }
 
     @Synchronized
-    fun sendToolResponse(id: String, name: String, responseJsonStr: String) {
-        webSocketClient?.sendToolResponse(id, name, responseJsonStr)
+    fun sendToolResponse(id: String, name: String, responseJsonStr: String, scheduling: String? = null) {
+        webSocketClient?.sendToolResponse(id, name, responseJsonStr, scheduling)
     }
 
     @Synchronized
@@ -364,6 +419,9 @@ class ConnectionManager(
         cancelReconnectJob()
         reconnectInProgress = false
         destroyOldConnection()
+        pendingTextMessages.clear()
+        pendingAudioChunks.clear()
+        pendingAudioStreamEnd = false
         unregisterNetworkCallback()
         handleConnectionStateChange(ConnectionState.DISCONNECTED)
     }
@@ -378,6 +436,17 @@ class ConnectionManager(
     fun resumeFromWorkerMode() {
         isExplicitlyDisconnected = false
         Log.i("ConnectionManager", "[WorkerMode] GEMINI_RESUMED")
+        if (connectionState != ConnectionState.CONNECTED && webSocketClient == null) {
+            registerNetworkCallback()
+            createNewConnection(isNew = false)
+        }
+    }
+
+    fun destroy() {
+        disconnect()
+        memoryJob?.cancel()
+        memoryJob = null
+        scope.cancel()
     }
 
 

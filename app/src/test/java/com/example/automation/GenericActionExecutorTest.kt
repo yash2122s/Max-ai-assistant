@@ -39,6 +39,10 @@ class GenericActionExecutorTest {
             this.className = className
             this.isClickable = isClickable
             this.isEditable = isEditable
+            this.isEnabled = true
+            this.isVisibleToUser = true
+            if (isClickable) addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_CLICK)
+            if (isEditable) addAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_TEXT)
             this.setBoundsInScreen(bounds)
         }
     }
@@ -90,7 +94,7 @@ class GenericActionExecutorTest {
 
         val clickableTarget = LiveNodeResolver.resolveClickableTarget(childText)
         assertEquals(parentButton, clickableTarget)
-        assertTrue(clickableTarget.isClickable)
+        assertTrue(requireNotNull(clickableTarget).isClickable)
     }
 
     @Test

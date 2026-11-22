@@ -213,4 +213,53 @@ class IntentRoutingGuardUnitTest {
         assertEquals("REJECTED", result.optString("executionState"))
         assertEquals("CALL_PHONE_MESSAGING_CONFLICT", result.optJSONObject("error")?.optString("code"))
     }
+
+    @Test
+    fun testTaskCompletedWithoutCorrelatedTaskIsRejected() = runBlocking {
+        val request = JSONObject().apply {
+            put("action", "TASK_COMPLETED")
+            put("summary", "The model says it is done")
+        }
+
+        val result = JSONObject(com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, request))
+
+        assertFalse("A completion claim without a persisted task must not succeed", result.optBoolean("success"))
+        assertEquals("BLOCKED", result.optString("executionState"))
+        assertTrue(result.optString("message").contains("No active task identity"))
+    }
+
+    @Test
+    fun testToolDispatcherMapsAdvertisedSimpleToolsToExecutableActions() {
+        val flashlight = ToolDispatcher.dispatch(
+            FunctionCall("flashlight", com.google.gson.JsonObject().apply { addProperty("enabled", false) }, "flash-1"),
+            "Turn off the flashlight"
+        )
+        assertEquals("FLASHLIGHT_OFF", JSONObject(flashlight).optString("action"))
+
+        val scheduled = ToolDispatcher.dispatch(
+            FunctionCall("schedule_task", com.google.gson.JsonObject(), "schedule-1"),
+            "Schedule this task"
+        )
+        assertEquals("SCHEDULE_TASK", JSONObject(scheduled).optString("action"))
+
+        val cancelled = ToolDispatcher.dispatch(
+            FunctionCall("cancel_task", com.google.gson.JsonObject(), "cancel-1"),
+            "Cancel the task"
+        )
+        assertEquals("CANCEL_TASK", JSONObject(cancelled).optString("action"))
+
+        val listed = ToolDispatcher.dispatch(
+            FunctionCall("list_scheduled_tasks", com.google.gson.JsonObject(), "list-1"),
+            "List scheduled tasks"
+        )
+        assertEquals("LIST_TASKS", JSONObject(listed).optString("action"))
+
+        val automation = ToolDispatcher.dispatch(
+            FunctionCall("execute_automation", com.google.gson.JsonObject().apply {
+                addProperty("goal", "Open Settings")
+            }, "automation-1"),
+            "Open Settings"
+        )
+        assertEquals("EXECUTE_AUTOMATION", JSONObject(automation).optString("action"))
+    }
 }

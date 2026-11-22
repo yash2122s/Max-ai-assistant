@@ -40,24 +40,6 @@ sealed class ContactResolution {
 object ContactResolver {
     private const val TAG = "ContactResolver"
 
-    private val RELATIONSHIP_ALIASES = mapOf(
-        "mom" to listOf("mom", "mother", "amma", "mummy", "mommy", "maa"),
-        "mother" to listOf("mom", "mother", "amma", "mummy", "mommy", "maa"),
-        "amma" to listOf("mom", "mother", "amma", "mummy", "mommy", "maa"),
-        "mummy" to listOf("mom", "mother", "amma", "mummy", "mommy", "maa"),
-        "dad" to listOf("dad", "father", "nanna", "daddy", "papa", "appa"),
-        "father" to listOf("dad", "father", "nanna", "daddy", "papa", "appa"),
-        "nanna" to listOf("dad", "father", "nanna", "daddy", "papa", "appa"),
-        "daddy" to listOf("dad", "father", "nanna", "daddy", "papa", "appa"),
-        "wife" to listOf("wife", "wifey", "bhaarya"),
-        "husband" to listOf("husband", "hubby", "bharta"),
-        "brother" to listOf("brother", "anna", "tammudu", "bro"),
-        "anna" to listOf("brother", "anna", "tammudu", "bro"),
-        "bro" to listOf("brother", "anna", "tammudu", "bro"),
-        "sister" to listOf("sister", "akka", "chelli", "sis"),
-        "akka" to listOf("sister", "akka", "chelli", "sis"),
-        "sis" to listOf("sister", "akka", "chelli", "sis")
-    )
 
     /**
      * Resolves an input string (contact name, phone number, or relationship) to a ContactResolution result.
@@ -161,12 +143,13 @@ object ContactResolver {
         if (exactMatches.isNotEmpty()) return resolved(exactMatches)
 
         // 4. Relationship alias match
-        val aliasKeywords = RELATIONSHIP_ALIASES[query]
+        val aliasKeywords = com.example.automation.actions.ContactAliasResolver.getAliasesFor(query)
         if (aliasKeywords != null) {
             val relationshipMatches = contacts.filter { contact ->
                 val nameLower = contact.name.lowercase(Locale.ROOT)
                 aliasKeywords.any { alias ->
-                    nameLower == alias || nameLower.split("\\s+".toRegex()).contains(alias)
+                    val aLower = alias.lowercase(Locale.ROOT)
+                    nameLower == aLower || nameLower.split("\\s+".toRegex()).contains(aLower)
                 }
             }
             if (relationshipMatches.isNotEmpty()) return resolved(relationshipMatches)

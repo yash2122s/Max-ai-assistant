@@ -378,6 +378,7 @@ abstract class AppDatabase : RoomDatabase() {
             if (!hasOp) {
                 db.execSQL("ALTER TABLE memory_conflicts ADD COLUMN operationId TEXT NOT NULL DEFAULT ''")
             }
+            db.execSQL("UPDATE memory_conflicts SET operationId = conflictId WHERE operationId = ''")
             db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_memory_conflicts_ownerKey_operationId` ON `memory_conflicts` (`ownerKey`,`operationId`)")
             db.execSQL("DROP INDEX IF EXISTS `index_memory_conflicts_ownerKey_state`")
             db.execSQL("DROP INDEX IF EXISTS `index_period_logs_startDate`")

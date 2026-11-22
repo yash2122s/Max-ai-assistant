@@ -63,6 +63,7 @@ class MaxCapsuleOverlayService : Service() {
     private var isMaxForeground = false
 
     private var temporaryErrorJob: Job? = null
+    private var dismissJob: Job? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -151,6 +152,8 @@ class MaxCapsuleOverlayService : Service() {
                 openMaxApp()
             }
             onCloseOverlayRequest = {
+                dismissJob?.cancel()
+                dismissJob = null
                 hudOverlayView?.visibility = View.GONE
             }
             onActivateVoiceLiveRequest = {
@@ -280,6 +283,11 @@ class MaxCapsuleOverlayService : Service() {
                             pushStateUpdate()
                         }
                     }
+                    is AssistantEvent.ToolProgress -> {
+                        activeToolName = event.toolName
+                        activeToolDescription = event.status
+                        pushStateUpdate()
+                    }
                     else -> {}
                 }
             }
@@ -319,6 +327,13 @@ class MaxCapsuleOverlayService : Service() {
                 hudOverlayView?.updateRms(rms)
             }
         }
+
+        // 6. Voice Recording status from ChatViewModel
+        serviceScope.launch {
+            ChatViewModel.instance.uiState.collectLatest {
+                updateOverlayVisibility()
+            }
+        }
     }
 
     private fun pushStateUpdate() {
@@ -348,34 +363,60 @@ class MaxCapsuleOverlayService : Service() {
     private fun updateOverlayVisibility() {
         val view = hudOverlayView ?: return
 
-        // 1. If MAX app itself is in the foreground, hide the system overlay
+        // 1. If MAX app itself is in the foreground, hide the system overlay immediately
         if (isMaxForeground) {
+            dismissJob?.cancel()
+            dismissJob = null
             view.visibility = View.GONE
             return
         }
 
         val settings = SettingsManager(this)
-        if (!settings.overlayOnlyInVoiceMode) {
-            view.visibility = View.VISIBLE
-            return
-        }
+        val shouldBeVisible = shouldOverlayBeVisible(
+            isMaxForeground = isMaxForeground,
+            isOverlayEnabled = settings.isOverlayEnabled,
+            overlayOnlyInVoiceMode = settings.overlayOnlyInVoiceMode,
+            sessionState = currentSessionState,
+            isAiSpeaking = isAiSpeaking || currentSessionState == SessionState.STREAMING_AUDIO,
+            isRecording = ChatViewModel.instance.uiState.value.isRecording || AssistantLifecycleManager.getEngine()?.isRecording() == true,
+            isToolExecuting = activeToolName != null,
+            isAssistantSessionActive = com.example.voice.assistant.AssistantSessionManager.isSystemAssistantSessionActive(),
+            hasActiveError = activeError != null
+        )
 
-        // 2. Only show when voice mode / assistant session is actively engaged
-        val isVoiceActive = currentSessionState != SessionState.IDLE &&
-                currentSessionState != SessionState.DISCONNECTING &&
-                currentSessionState != SessionState.ERROR
-
-        val isSpeaking = isAiSpeaking
-        val isToolExecuting = activeToolName != null
-        val isAssistantSessionActive = com.example.voice.assistant.AssistantSessionManager.isSystemAssistantSessionActive()
-        val isLiveAudioActive = currentRms > 5f
-
-        val shouldBeVisible = isVoiceActive || isSpeaking || isToolExecuting || isAssistantSessionActive || isLiveAudioActive
-
-        val targetVisibility = if (shouldBeVisible) View.VISIBLE else View.GONE
-        if (view.visibility != targetVisibility) {
-            view.visibility = targetVisibility
-            Log.d(TAG, "HUD Overlay visibility transitioned to: ${if (shouldBeVisible) "VISIBLE" else "GONE"} (sessionState=$currentSessionState, isSpeaking=$isSpeaking, tool=$activeToolName)")
+        if (shouldBeVisible) {
+            dismissJob?.cancel()
+            dismissJob = null
+            if (view.visibility != View.VISIBLE) {
+                view.visibility = View.VISIBLE
+                Log.d(TAG, "HUD Overlay visibility transitioned to: VISIBLE (sessionState=$currentSessionState, isSpeaking=$isAiSpeaking, tool=$activeToolName)")
+            }
+        } else {
+            if (view.visibility == View.VISIBLE && dismissJob == null) {
+                // Gentle 1500ms grace period so overlay doesn't flicker between conversational turns
+                dismissJob = serviceScope.launch {
+                    delay(1500)
+                    val recheck = shouldOverlayBeVisible(
+                        isMaxForeground = isMaxForeground,
+                        isOverlayEnabled = settings.isOverlayEnabled,
+                        overlayOnlyInVoiceMode = settings.overlayOnlyInVoiceMode,
+                        sessionState = currentSessionState,
+                        isAiSpeaking = isAiSpeaking || currentSessionState == SessionState.STREAMING_AUDIO,
+                        isRecording = ChatViewModel.instance.uiState.value.isRecording || AssistantLifecycleManager.getEngine()?.isRecording() == true,
+                        isToolExecuting = activeToolName != null,
+                        isAssistantSessionActive = com.example.voice.assistant.AssistantSessionManager.isSystemAssistantSessionActive(),
+                        hasActiveError = activeError != null
+                    )
+                    if (!recheck) {
+                        view.visibility = View.GONE
+                        Log.d(TAG, "HUD Overlay grace period elapsed -> visibility transitioned to: GONE")
+                    }
+                    dismissJob = null
+                }
+            } else if (view.visibility != View.VISIBLE) {
+                dismissJob?.cancel()
+                dismissJob = null
+            }
         }
     }
 
@@ -384,6 +425,8 @@ class MaxCapsuleOverlayService : Service() {
         Log.d(TAG, "Destroying MaxCapsuleOverlayService...")
         serviceScope.cancel()
         temporaryErrorJob?.cancel()
+        dismissJob?.cancel()
+        dismissJob = null
 
         hudOverlayView?.destroy()
         hudOverlayView?.let { view ->
@@ -401,6 +444,35 @@ class MaxCapsuleOverlayService : Service() {
     companion object {
         private const val TAG = "MaxCapsuleOverlay"
         private const val NOTIFICATION_ID = 4040
+
+        fun shouldOverlayBeVisible(
+            isMaxForeground: Boolean,
+            isOverlayEnabled: Boolean,
+            overlayOnlyInVoiceMode: Boolean,
+            sessionState: SessionState,
+            isAiSpeaking: Boolean,
+            isRecording: Boolean,
+            isToolExecuting: Boolean,
+            isAssistantSessionActive: Boolean,
+            hasActiveError: Boolean
+        ): Boolean {
+            if (isMaxForeground) return false
+            if (!isOverlayEnabled) return false
+            if (!overlayOnlyInVoiceMode) return true
+
+            val isVoiceActive = when (sessionState) {
+                SessionState.LISTENING,
+                SessionState.STREAMING_AUDIO,
+                SessionState.STREAMING_TEXT,
+                SessionState.PROCESSING_AUDIO,
+                SessionState.WAITING_FOR_MODEL,
+                SessionState.TOOL_EXECUTION,
+                SessionState.WAITING_TOOL_RESULT -> true
+                else -> false // IDLE, CONNECTED (standby), CONNECTING, RESUMING, DISCONNECTING, ERROR
+            }
+
+            return isVoiceActive || isAiSpeaking || isRecording || isAssistantSessionActive || isToolExecuting || hasActiveError
+        }
 
         fun buildLayoutParams(widthPx: Int, heightPx: Int, yOffsetPx: Int): WindowManager.LayoutParams {
             val layoutFlag = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

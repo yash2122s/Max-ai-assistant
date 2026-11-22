@@ -161,11 +161,19 @@ object NaturalCommandNormalizer {
         if (clean in screenshotPhrases) return NormalizedCommand(FastPathIntent.SCREENSHOT, target = "screenshot")
 
         // 7. VOLUME & RINGER INTENT
-        val volUpPhrases = setOf("volume up", "increase volume", "volume increase", "sound up")
-        if (clean in volUpPhrases) return NormalizedCommand(FastPathIntent.VOLUME_UP, target = "up")
+        val volUpPhrases = setOf(
+            "volume up", "increase volume", "volume increase", "sound up", "sound increase",
+            "volume penchu", "volume pencu", "volume penchandi", "sound penchu", "sound pencu", "sound penchandi",
+            "వాల్యూమ్ పెంచు", "సౌండ్ పెంచు"
+        )
+        if (clean in volUpPhrases || clean.endsWith("volume penchu") || clean.endsWith("sound penchu")) return NormalizedCommand(FastPathIntent.VOLUME_UP, target = "up")
 
-        val volDownPhrases = setOf("volume down", "decrease volume", "volume decrease", "sound down")
-        if (clean in volDownPhrases) return NormalizedCommand(FastPathIntent.VOLUME_DOWN, target = "down")
+        val volDownPhrases = setOf(
+            "volume down", "decrease volume", "volume decrease", "sound down", "sound decrease",
+            "volume tagginchu", "volume taggincu", "volume tagginchandi", "volume thagginchu", "sound tagginchu",
+            "sound taggincu", "sound thagginchu", "వాల్యూమ్ తగ్గించు", "సౌండ్ తగ్గించు"
+        )
+        if (clean in volDownPhrases || clean.endsWith("volume tagginchu") || clean.endsWith("sound tagginchu")) return NormalizedCommand(FastPathIntent.VOLUME_DOWN, target = "down")
 
         val mutePhrases = setOf("mute", "mute phone", "silent mode", "silent mode on", "turn on silent mode", "set to silent")
         if (clean in mutePhrases) return NormalizedCommand(FastPathIntent.MUTE, target = "silent")
@@ -188,8 +196,14 @@ object NaturalCommandNormalizer {
         if (clean in dndOffPhrases) return NormalizedCommand(FastPathIntent.DND_OFF, target = "false")
 
         // 10. STATUS INTENT
-        val batteryPhrases = setOf("battery", "check battery", "battery status", "get battery status", "check battery status", "what is my battery")
-        if (clean in batteryPhrases) return NormalizedCommand(FastPathIntent.GET_BATTERY)
+        val batteryPhrases = setOf(
+            "battery", "check battery", "battery status", "get battery status", "check battery status",
+            "what is my battery", "what is my battery percentage", "what is my battery level",
+            "battery percentage", "battery level", "battery percentage enti", "battery level enti"
+        )
+        if (clean in batteryPhrases || (clean.contains("battery") && (clean.contains("percentage") || clean.contains("level") || clean.contains("status")))) {
+            return NormalizedCommand(FastPathIntent.GET_BATTERY)
+        }
 
         val deviceStatusPhrases = setOf("device status", "check device status", "get device status", "phone status")
         if (clean in deviceStatusPhrases) return NormalizedCommand(FastPathIntent.GET_DEVICE_STATUS)

@@ -54,9 +54,18 @@ class OpenRouterUiAgentProvider : UiAgentProvider {
                 isPreferred = false
             ),
             UiAgentModelInfo(
+                id = "google/gemini-3.8-flash",
+                name = "Gemini 3.8 Flash",
+                description = "Ultra-low latency multimodal visual grounding and function calling",
+                supportsVision = true,
+                supportsToolCalling = true,
+                contextLength = 1000000,
+                isPreferred = false
+            ),
+            UiAgentModelInfo(
                 id = "google/gemini-2.5-flash",
                 name = "Gemini 2.5 Flash",
-                description = "Ultra-low latency multimodal visual grounding and function calling",
+                description = "Legacy multimodal visual grounding and function calling",
                 supportsVision = true,
                 supportsToolCalling = true,
                 contextLength = 1000000,

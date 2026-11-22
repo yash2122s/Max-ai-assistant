@@ -11,6 +11,8 @@ object DirectCallAuthorization {
     private val grants = ConcurrentHashMap<String, Grant>()
     @Volatile var nowMillis: () -> Long = { System.currentTimeMillis() }
 
+    val EMERGENCY_NUMBERS = setOf("112", "911", "100", "101", "102", "108", "000", "999")
+
     fun issue(utterance: String, target: String): String? {
         val normalized = normalize(target) ?: return null
         if (!isTrustedDirectCall(utterance, target)) return null
@@ -31,31 +33,27 @@ object DirectCallAuthorization {
 
     fun normalize(value: String): String? {
         val raw = value.trim()
-        if (!raw.matches(Regex("^\\+?[0-9][0-9\\s().-]*$"))) return null
-        val digits = raw.filter(Char::isDigit)
-        return digits.takeIf { it.length in 7..15 }
+        if (raw.any { it in "*#;," }) return null
+        val digits = SpokenDigits.digitsOnly(raw)
+        if (digits.length !in 7..15) return null
+        if (EMERGENCY_NUMBERS.contains(digits)) return null
+        return digits
     }
 
     private fun isTrustedDirectCall(utterance: String, target: String): Boolean {
-        if (normalize(target) == null || utterance.contains(Regex("[\\*#;,]|\\b(whatsapp|telegram|message|text|sms|maybe|if|quoted|or|either)\\b", RegexOption.IGNORE_CASE))) return false
-        val targetDigits = target.filter(Char::isDigit)
-        if (targetDigits.length !in 7..15) return false
+        if (target.any { it in "*#;," }) return false
+        val targetDigits = SpokenDigits.digitsOnly(target)
+        if (targetDigits.length !in 7..15 || EMERGENCY_NUMBERS.contains(targetDigits)) return false
 
-        val utteranceDigits = utterance.filter(Char::isDigit)
-        if (!utteranceDigits.contains(targetDigits)) return false
+        if (utterance.contains(Regex("[\\*#;,]|\\b(whatsapp|telegram|message|text|sms|maybe|if|quoted|or|either)\\b", RegexOption.IGNORE_CASE))) return false
 
-        val distinctNumbers = Regex("\\b\\d{7,15}\\b").findAll(utterance)
-            .map { it.value }
-            .distinct()
-            .toList()
-        if (distinctNumbers.size > 1) return false
-        if (utteranceDigits.length > targetDigits.length + 3) return false
+        val utteranceDigits = SpokenDigits.digitsOnly(utterance)
+        if (utteranceDigits != targetDigits) return false
 
         val lower = utterance.trim().lowercase()
-        val isPureNumberUtterance = lower.replace(Regex("[\\s()+\\-]"), "").matches(Regex("^\\d{7,15}$"))
-        val hasCallIntent = lower.contains("call") || lower.contains("dial") || lower.contains("phone") || 
-                            lower.contains("chey") || lower.contains("చేయి") || lower.contains("చెయ్") || lower.contains("చేయండి")
-        return isPureNumberUtterance || hasCallIntent
+        val hasCallVerb = Regex("""\b(?:call(?:ing)?|dial(?:ing)?|phone)\b""", RegexOption.IGNORE_CASE).containsMatchIn(lower) ||
+            lower.contains("కాల్") || lower.contains("ఫోన్") || lower.contains("డయల్")
+        return hasCallVerb
     }
 
     private fun purge() { val now = nowMillis(); grants.entries.removeIf { it.value.expiresAt < now } }

@@ -31,7 +31,7 @@ data class PrebuiltVoiceConfig(
 )
 
 data class ThinkingConfig(
-    @SerializedName("thinkingLevel") val thinkingLevel: String? = "HIGH",
+    @SerializedName("thinkingLevel") val thinkingLevel: String? = "LOW",
     @SerializedName("thinkingBudget") val thinkingBudget: Int? = null
 )
 

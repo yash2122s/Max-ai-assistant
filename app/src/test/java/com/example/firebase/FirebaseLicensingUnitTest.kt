@@ -127,7 +127,7 @@ class FirebaseLicensingUnitTest {
 
     // 4. First Trial Creation (7-Day Trial)
     @Test
-    fun testFirstTrialCreation_exact3DaysDuration() {
+    fun testFirstTrialCreation_exact7DaysDuration() {
         val now = 1720000000000L
         val trial = CloudLicense.createTrial("new_user_1", nowEpochMillis = now)
 
@@ -136,10 +136,10 @@ class FirebaseLicensingUnitTest {
         assertEquals(LicenseStatus.TRIAL, trial.status)
         assertEquals(now, trial.trialStartedAtEpochMillis)
 
-        val threeDaysMillis = 3L * 24L * 60L * 60L * 1000L
-        assertEquals(now + threeDaysMillis, trial.trialExpiresAtEpochMillis)
+        val sevenDaysMillis = 7L * 24L * 60L * 60L * 1000L
+        assertEquals(now + sevenDaysMillis, trial.trialExpiresAtEpochMillis)
         assertTrue(trial.isEntitled(now))
-        assertEquals(threeDaysMillis, trial.remainingTrialMillis(now))
+        assertEquals(sevenDaysMillis, trial.remainingTrialMillis(now))
     }
 
     // 5. No Duplicate Trial

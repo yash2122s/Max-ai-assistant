@@ -28,8 +28,8 @@ class PromptBuilderUnitTest {
 
         val content = PromptBuilder.buildPlanningUserContent(goal, payload)
 
-        assertTrue(content.contains("<USER_GOAL>"))
-        assertTrue(content.contains("</USER_GOAL>"))
+        assertTrue(content.contains("<DATA label=\"user_goal\">"))
+        assertTrue(content.contains("</DATA>"))
         assertFalse(content.contains("\u0000"))
         assertTrue(content.length < 2600)
     }
@@ -220,5 +220,41 @@ class PromptBuilderUnitTest {
             "Must NOT contain toxic 'NEVER say I cannot interact' rule",
             instruction.contains("NEVER say 'I cannot interact with the screen'")
         )
+    }
+
+    @Test
+    fun testBuildSystemInstruction_ContainsGeminiLiveUiReasoningContract() {
+        val instruction = PromptBuilder.buildSystemInstruction("TE")
+
+        assertTrue(
+            "Must identify Gemini 3.8 Live as the sole UI task reasoner",
+            instruction.contains("Gemini 3.8 Live is the sole UI task reasoner")
+        )
+        assertTrue(
+            "Must require fresh post-action screen observations",
+            instruction.contains("inspect each fresh post-action screen observation")
+        )
+        assertTrue(
+            "Must require Gemini Live to choose the next concrete UI action",
+            instruction.contains("choose the next concrete click, type, or scroll action yourself")
+        )
+        assertTrue(
+            "Must require waiting for loading and UI updates",
+            instruction.contains("wait for loading, animations, navigation, or content updates to settle")
+        )
+        assertTrue(
+            "Must reject tool returns and model claims as completion proof",
+            instruction.contains("A tool return, tool success/acknowledgement, model claim") &&
+                instruction.contains("is never proof that the user's goal is complete")
+        )
+        assertTrue(
+            "Must gate task_completed on visible goal verification",
+            instruction.contains("You may call 'task_completed' only after you have visibly verified the user's full goal")
+        )
+
+        // Existing safety, approval, and messaging boundaries remain in the prompt.
+        assertTrue(instruction.contains("RULE 9 — BANKING / UPI / OTP"))
+        assertTrue(instruction.contains("WHATSAPP AUTOMATION & MESSAGING DIRECTIVES"))
+        assertTrue(instruction.contains("NEVER include action phrases in 'text'"))
     }
 }

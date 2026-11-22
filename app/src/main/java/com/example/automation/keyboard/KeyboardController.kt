@@ -427,13 +427,42 @@ object KeyboardController {
 
         Log.d(TAG, "pressEnter() called for targetField=\"$targetField\"")
 
-        val rootNode = service?.rootInActiveWindow ?: JarvisAccessibilityService.getActiveRoot()
-        val initialSignature = if (service != null && rootNode != null) service.getScreenSignature(rootNode) else ""
+        val initialRoot = service?.rootInActiveWindow ?: JarvisAccessibilityService.getActiveRoot()
+        val initialSignature = when {
+            initialRoot == null -> ""
+            service != null -> service.getScreenSignature(initialRoot)
+            else -> accessibilityRootSignature(initialRoot)
+        }
+        var dispatchAccepted = false
+        var lastFailure = "No supported Enter/Search action was accepted"
+
+        suspend fun verifiedSubmit(message: String, method: String): ToolResult? {
+            dispatchAccepted = true
+            val verified = initialSignature.isNotBlank() && verifySubmissionTransition(initialSignature, service)
+            if (verified) {
+                Log.i(TAG, "[SUBMIT_VERIFY] status=VERIFIED method=$method targetField=\"$targetField\"")
+                return ToolResult(
+                    success = true,
+                    toolName = "press_enter",
+                    verificationRequired = true,
+                    metadata = org.json.JSONObject().apply {
+                        put("submissionVerified", true)
+                        put("submissionMethod", method)
+                    },
+                    message = message
+                )
+            }
+
+            lastFailure = "$method was dispatched, but no fresh UI transition was observed"
+            Log.w(TAG, "[SUBMIT_VERIFY] status=UNVERIFIED method=$method targetField=\"$targetField\"")
+            return null
+        }
 
         // Tier 1: Focused field IME action (ACTION_IME_ENTER)
-        if (rootNode != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            val rootNode = service?.rootInActiveWindow ?: JarvisAccessibilityService.getActiveRoot()
             val focusedNode = try {
-                rootNode.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                rootNode?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
             } catch (_: Exception) { null }
 
             if (focusedNode != null) {
@@ -441,57 +470,40 @@ object KeyboardController {
                 val success = try { focusedNode.performAction(imeAction.id) } catch (_: Exception) { false }
                 if (success) {
                     Log.d(TAG, "Triggered ACTION_IME_ENTER on focused node")
-                    if (service != null) {
-                        InputVerifier.verifyKeyboardActionExecuted(initialSignature, service)
-                    }
-                    return ToolResult(
-                        success = true,
-                        toolName = "press_enter",
-                        verificationRequired = true,
-                        message = "Triggered IME enter action on focused field"
-                    )
+                    verifiedSubmit("Triggered IME enter action on focused field", "FOCUSED_IME")?.let { return it }
                 }
             }
 
             // Check all editable nodes
-            val editables = InputTargetResolver.findAllEditableNodes(rootNode)
-            for (node in editables) {
-                val success = try {
-                    node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
-                } catch (_: Exception) { false }
-                if (success) {
-                    Log.d(TAG, "Triggered ACTION_IME_ENTER on editable node")
-                    if (service != null) {
-                        InputVerifier.verifyKeyboardActionExecuted(initialSignature, service)
+            if (rootNode != null) {
+                val editables = InputTargetResolver.findAllEditableNodes(rootNode)
+                for (node in editables) {
+                    val success = try {
+                        node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
+                    } catch (_: Exception) { false }
+                    if (success) {
+                        Log.d(TAG, "Triggered ACTION_IME_ENTER on editable node")
+                        verifiedSubmit("Triggered IME enter action on editable node", "EDITABLE_IME")?.let { return it }
                     }
-                    return ToolResult(
-                        success = true,
-                        toolName = "press_enter",
-                        verificationRequired = true,
-                        message = "Triggered IME enter action on editable node"
-                    )
                 }
             }
         }
 
         // Tier 2: Grounded on-screen Search / Go / Done / Submit button
-        if (rootNode != null && service != null) {
+        val buttonRoot = service?.rootInActiveWindow ?: JarvisAccessibilityService.getActiveRoot()
+        if (buttonRoot != null && service != null) {
             val searchButtons = listOf("Search", "Go", "Done", "Submit", "OK", "Enter", "వెతుకు", "శోధించు")
             for (label in searchButtons) {
-                val res = UiTargetResolver.resolve(query = label, rootNode = rootNode)
+                val res = UiTargetResolver.resolve(query = label, rootNode = buttonRoot)
                 if (res.success && res.matchedNode != null) {
                     val btnNode = res.matchedNode
                     if (btnNode.isClickable || btnNode.parent?.isClickable == true) {
                         val clickResult = service.performClickWithEscalation(btnNode)
-                        if (clickResult != ClickEscalationResult.FAILED) {
+                        if (clickResult == ClickEscalationResult.ACCESSIBILITY_CONFIRMED ||
+                            clickResult == ClickEscalationResult.GESTURE_CONFIRMED
+                        ) {
                             Log.d(TAG, "Clicked grounded submit action '$label'")
-                            InputVerifier.verifyKeyboardActionExecuted(initialSignature, service)
-                            return ToolResult(
-                                success = true,
-                                toolName = "press_enter",
-                                verificationRequired = true,
-                                message = "Clicked grounded submit button: $label"
-                            )
+                            verifiedSubmit("Clicked grounded submit button: $label", "SUBMIT_BUTTON")?.let { return it }
                         }
                     }
                 }
@@ -503,42 +515,63 @@ object KeyboardController {
             val serviceSuccess = service.pressImeAction()
             if (serviceSuccess) {
                 Log.d(TAG, "Executed service generic pressImeAction()")
-                InputVerifier.verifyKeyboardActionExecuted(initialSignature, service)
-                return ToolResult(
-                    success = true,
-                    toolName = "press_enter",
-                    verificationRequired = true,
-                    message = "Executed generic IME enter action"
-                )
+                verifiedSubmit("Executed generic IME enter action", "SERVICE_IME")?.let { return it }
             }
         }
 
         // Tier 4: Shell Input Keyevent 66 Fallback
         if (JarvisAccessibilityService.runShell("input keyevent 66")) {
             Log.d(TAG, "Dispatched KEYCODE_ENTER via Shell keyevent 66")
-            if (service != null) {
-                InputVerifier.verifyKeyboardActionExecuted(initialSignature, service)
-            }
-            return ToolResult(
-                success = true,
-                toolName = "press_enter",
-                verificationRequired = true,
-                message = "Dispatched Enter key via shell"
-            )
+            verifiedSubmit("Dispatched Enter key via shell", "SHELL_KEYEVENT")?.let { return it }
         }
 
         return ToolResult(
             success = false,
             toolName = "press_enter",
-            errorCode = "ENTER_DISPATCH_FAILED",
+            errorCode = if (dispatchAccepted) "SUBMISSION_NOT_VERIFIED" else "ENTER_DISPATCH_FAILED",
             verificationRequired = true,
-            message = "Could not execute enter action on active field"
+            message = lastFailure
         )
     }
 
     private fun isLockScreen(root: AccessibilityNodeInfo): Boolean {
         val pkg = try { root.packageName?.toString() ?: "" } catch (_: Exception) { "" }
         return pkg.contains("keyguard", ignoreCase = true) || pkg.contains("lockscreen", ignoreCase = true)
+    }
+
+    private suspend fun verifySubmissionTransition(
+        initialSignature: String,
+        service: JarvisAccessibilityService?
+    ): Boolean {
+        if (service != null) {
+            return InputVerifier.verifyKeyboardActionExecuted(
+                initialSignature = initialSignature,
+                service = service,
+                timeoutMs = 900L
+            )
+        }
+
+        // Test/embedded providers may expose a live root without a service
+        // instance. They still need the same truth requirement: dispatch is
+        // not success until a fresh root signature changes.
+        val start = System.currentTimeMillis()
+        while (System.currentTimeMillis() - start < 900L) {
+            val root = JarvisAccessibilityService.getActiveRoot()
+            if (root != null && accessibilityRootSignature(root) != initialSignature) return true
+            delay(100L)
+        }
+        return false
+    }
+
+    private fun accessibilityRootSignature(root: AccessibilityNodeInfo): String {
+        val builder = StringBuilder()
+        builder.append(root.packageName ?: "unknown")
+            .append(':').append(root.windowId)
+            .append(':').append(root.className ?: "")
+            .append(':').append(root.text ?: "")
+            .append(':').append(root.contentDescription ?: "")
+            .append(':').append(root.childCount)
+        return builder.toString()
     }
 
     private fun isNodeSecure(node: AccessibilityNodeInfo): Boolean {

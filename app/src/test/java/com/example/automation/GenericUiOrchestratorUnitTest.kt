@@ -8,6 +8,7 @@ import com.example.automation.models.UiStep
 import com.example.automation.state.WorldStateManager
 import com.example.core.lifecycle.MaxRuntimeManager
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -28,6 +29,15 @@ class GenericUiOrchestratorUnitTest {
         context = ApplicationProvider.getApplicationContext()
         WorldStateManager.reset()
         MaxRuntimeManager.setGlobalEnabled(context, true)
+        val root = android.view.accessibility.AccessibilityNodeInfo.obtain().apply {
+            packageName = "com.google.android.apps.maps"
+        }
+        com.example.service.JarvisAccessibilityService.testRootProvider = { root }
+    }
+
+    @After
+    fun tearDown() {
+        com.example.service.JarvisAccessibilityService.testRootProvider = null
     }
 
     @Test

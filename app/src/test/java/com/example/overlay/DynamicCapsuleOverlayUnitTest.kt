@@ -204,4 +204,98 @@ class DynamicCapsuleOverlayUnitTest {
         assertEquals(CapsuleState.EXPANDED, view.currentState)
         view.destroy()
     }
+
+    @Test
+    fun test14_OverlayHiddenWhenConnectedStandbyInVoiceOnlyMode() {
+        // Core bug fix: When connected in background, overlay must NOT show on screen
+        val isVisible = MaxCapsuleOverlayService.shouldOverlayBeVisible(
+            isMaxForeground = false,
+            isOverlayEnabled = true,
+            overlayOnlyInVoiceMode = true,
+            sessionState = SessionState.CONNECTED,
+            isAiSpeaking = false,
+            isRecording = false,
+            isToolExecuting = false,
+            isAssistantSessionActive = false,
+            hasActiveError = false
+        )
+        assertFalse("Overlay must stay hidden in standby CONNECTED state to save battery", isVisible)
+    }
+
+    @Test
+    fun test15_OverlayVisibleDuringActiveVoiceConversation() {
+        // Listening
+        val listeningVisible = MaxCapsuleOverlayService.shouldOverlayBeVisible(
+            isMaxForeground = false,
+            isOverlayEnabled = true,
+            overlayOnlyInVoiceMode = true,
+            sessionState = SessionState.LISTENING,
+            isAiSpeaking = false,
+            isRecording = true,
+            isToolExecuting = false,
+            isAssistantSessionActive = false,
+            hasActiveError = false
+        )
+        assertTrue("Overlay must be visible when listening", listeningVisible)
+
+        // Streaming audio (speaking)
+        val speakingVisible = MaxCapsuleOverlayService.shouldOverlayBeVisible(
+            isMaxForeground = false,
+            isOverlayEnabled = true,
+            overlayOnlyInVoiceMode = true,
+            sessionState = SessionState.STREAMING_AUDIO,
+            isAiSpeaking = true,
+            isRecording = false,
+            isToolExecuting = false,
+            isAssistantSessionActive = false,
+            hasActiveError = false
+        )
+        assertTrue("Overlay must be visible when model is speaking", speakingVisible)
+
+        // Waiting for model (thinking)
+        val thinkingVisible = MaxCapsuleOverlayService.shouldOverlayBeVisible(
+            isMaxForeground = false,
+            isOverlayEnabled = true,
+            overlayOnlyInVoiceMode = true,
+            sessionState = SessionState.WAITING_FOR_MODEL,
+            isAiSpeaking = false,
+            isRecording = false,
+            isToolExecuting = false,
+            isAssistantSessionActive = false,
+            hasActiveError = false
+        )
+        assertTrue("Overlay must be visible when waiting for model", thinkingVisible)
+    }
+
+    @Test
+    fun test16_OverlayHiddenWhenMasterSwitchDisabled() {
+        val isVisible = MaxCapsuleOverlayService.shouldOverlayBeVisible(
+            isMaxForeground = false,
+            isOverlayEnabled = false,
+            overlayOnlyInVoiceMode = true,
+            sessionState = SessionState.LISTENING,
+            isAiSpeaking = true,
+            isRecording = true,
+            isToolExecuting = false,
+            isAssistantSessionActive = false,
+            hasActiveError = false
+        )
+        assertFalse("Overlay must never be visible if isOverlayEnabled is false", isVisible)
+    }
+
+    @Test
+    fun test17_OverlayHiddenWhenAppInForeground() {
+        val isVisible = MaxCapsuleOverlayService.shouldOverlayBeVisible(
+            isMaxForeground = true,
+            isOverlayEnabled = true,
+            overlayOnlyInVoiceMode = true,
+            sessionState = SessionState.LISTENING,
+            isAiSpeaking = true,
+            isRecording = true,
+            isToolExecuting = false,
+            isAssistantSessionActive = false,
+            hasActiveError = false
+        )
+        assertFalse("Overlay must be hidden when MAX app is foreground", isVisible)
+    }
 }

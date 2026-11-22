@@ -26,6 +26,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.*
 import com.example.ui.theme.*
+import com.example.domain.policy.AssistantLanguage
+import com.example.domain.policy.LanguagePolicy
 
 /**
  * Flagship MAX Settings Screen — Apple Inset Grouped Redesign.
@@ -37,6 +39,7 @@ fun SettingsScreen(
     onNavigateBack: () -> Unit,
     onNavigateToSkills: () -> Unit = {},
     onNavigateToLicense: () -> Unit = {},
+    onNavigateToWebDashboard: () -> Unit = {},
     viewModel: SettingsViewModel = viewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -287,6 +290,52 @@ fun SettingsScreen(
             }
 
             // ================================================================
+            // SECTION: DYNAMIC ISLAND OVERLAY
+            // ================================================================
+            SettingsSection(
+                title = "Dynamic Island HUD Overlay",
+                footer = "Controls the floating Dynamic Island HUD capsule. Keeping 'Only in Voice Conversation' enabled prevents battery drain by hiding it completely when idle."
+            ) {
+                SettingsRow(
+                    title = "Dynamic Island Overlay",
+                    subtitle = "Floating capsule HUD for real-time AI states",
+                    icon = Icons.Default.Layers,
+                    iconBg = MaxSemanticColors.primaryRoyal,
+                    trailingContent = {
+                        Switch(
+                            checked = uiState.isOverlayEnabled,
+                            onCheckedChange = { viewModel.updateIsOverlayEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaxSemanticColors.primaryRoyal
+                            )
+                        )
+                    },
+                    showDivider = uiState.isOverlayEnabled
+                )
+
+                if (uiState.isOverlayEnabled) {
+                    SettingsRow(
+                        title = "Only in Voice Conversation",
+                        subtitle = "వాయిస్ మాట్లాడేటప్పుడు మాత్రమే స్క్రీన్ మీద ఉంచు (Saves battery by staying hidden when idle)",
+                        icon = Icons.Default.BatterySaver,
+                        iconBg = MaxSemanticColors.success,
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.overlayOnlyInVoiceMode,
+                                onCheckedChange = { viewModel.updateOverlayOnlyInVoiceMode(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = Color.White,
+                                    checkedTrackColor = MaxSemanticColors.success
+                                )
+                            )
+                        },
+                        showDivider = false
+                    )
+                }
+            }
+
+            // ================================================================
             // SECTION: AUTOMATION & SKILLS
             // ================================================================
             SettingsSection(title = "Automation & Workflows") {
@@ -384,12 +433,9 @@ fun SettingsScreen(
                         placeholder = "Autonomous High-Intelligence Companion",
                         leadingIcon = { Icon(Icons.Default.Psychology, contentDescription = null, tint = MaxSemanticColors.primaryRoyal, modifier = Modifier.size(MaxIconTokens.Medium)) }
                     )
-                    MaxTextField(
-                        value = uiState.languagePreference,
-                        onValueChange = { viewModel.updateLanguagePreference(it) },
-                        label = "Language Policy",
-                        placeholder = "English / Telugu",
-                        leadingIcon = { Icon(Icons.Default.Translate, contentDescription = null, tint = MaxSemanticColors.accentCyan, modifier = Modifier.size(MaxIconTokens.Medium)) }
+                    ReplyLanguageSelector(
+                        selectedLanguage = uiState.languagePreference,
+                        onSelectLanguage = viewModel::updateLanguagePreference
                     )
                 }
             }
@@ -479,6 +525,122 @@ fun SettingsScreen(
                         }
                     }
                 }
+            }
+
+            // ================================================================
+            // SECTION: SECOND BRAIN TABLET SYNC (ADVANCED)
+            // ================================================================
+            SettingsSection(
+                title = "Second Brain Tablet Sync",
+                footer = "Sync memories to your home tablet server (Markdown & Cosmic Knowledge Graph). When disabled, MAX uses local storage only."
+            ) {
+                SettingsRow(
+                    title = "Second Brain Integration",
+                    subtitle = "Dual-save memories & bidirectional auto-linking",
+                    icon = Icons.Default.Share,
+                    iconBg = MaxSemanticColors.accentCyan,
+                    trailingContent = {
+                        Switch(
+                            checked = uiState.isSecondBrainEnabled,
+                            onCheckedChange = { viewModel.updateIsSecondBrainEnabled(it) },
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = Color.White,
+                                checkedTrackColor = MaxSemanticColors.accentCyan
+                            )
+                        )
+                    },
+                    showDivider = uiState.isSecondBrainEnabled
+                )
+
+                if (uiState.isSecondBrainEnabled) {
+                    Column(modifier = Modifier.padding(MaxDimensions.spaceMd)) {
+                        Text(
+                            text = "Server URL (Termux / Home Tablet)",
+                            style = MaxType.Caption,
+                            color = MaxSemanticColors.textSecondary
+                        )
+                        Spacer(modifier = Modifier.height(MaxDimensions.spaceXs))
+                        MaxTextField(
+                            value = uiState.secondBrainUrl,
+                            onValueChange = { viewModel.updateSecondBrainUrl(it) },
+                            placeholder = "http://192.168.0.116:3000",
+                            modifier = Modifier.fillMaxWidth()
+                        )
+
+                        if (uiState.secondBrainStatus.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
+                            Text(
+                                text = uiState.secondBrainStatus,
+                                style = MaxType.Caption,
+                                color = if (uiState.secondBrainStatus.contains("Connected") || uiState.secondBrainStatus.contains("Successfully"))
+                                    MaxSemanticColors.success
+                                else
+                                    MaxSemanticColors.textSecondary
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(MaxDimensions.spaceSm)
+                        ) {
+                            MaxButton(
+                                text = "Test Connection",
+                                onClick = { viewModel.testSecondBrainConnection() },
+                                variant = MaxButtonVariant.SECONDARY,
+                                modifier = Modifier.weight(1f)
+                            )
+                            MaxButton(
+                                text = "Sync All Memories",
+                                onClick = { viewModel.syncAllToSecondBrain() },
+                                variant = MaxButtonVariant.PRIMARY,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+            }
+
+            // ================================================================
+            // SECTION: WEB DASHBOARD & PORTAL
+            // ================================================================
+            SettingsSection(
+                title = "Web Dashboard & Portal",
+                footer = "Access MAX AI web dashboard, tasks, and memory from your browser"
+            ) {
+                SettingsRow(
+                    title = "Web Console Hub",
+                    subtitle = "Open interactive in-app dashboard & controls",
+                    icon = Icons.Default.Language,
+                    iconBg = MaxSemanticColors.accentCyan,
+                    onClick = onNavigateToWebDashboard,
+                    showDivider = true
+                )
+                SettingsRow(
+                    title = "Launch External Browser",
+                    subtitle = uiState.webDashboardUrl,
+                    icon = Icons.Default.OpenInBrowser,
+                    iconBg = MaxSemanticColors.primaryRoyal,
+                    trailingContent = {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                            contentDescription = "Open in browser",
+                            tint = MaxSemanticColors.textMuted
+                        )
+                    },
+                    onClick = {
+                        try {
+                            val intent = Intent(
+                                Intent.ACTION_VIEW,
+                                Uri.parse(uiState.webDashboardUrl)
+                            )
+                            context.startActivity(intent)
+                        } catch (e: Exception) {
+                            Toast.makeText(context, "Cannot open browser: ${e.message}", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    showDivider = false
+                )
             }
 
             // ================================================================
@@ -612,6 +774,34 @@ private fun SettingsRow(
                 thickness = MaxDimensions.borderHairline,
                 modifier = Modifier.padding(start = if (icon != null) 58.dp else MaxDimensions.spaceMd)
             )
+        }
+    }
+}
+
+@Composable
+internal fun ReplyLanguageSelector(
+    selectedLanguage: String,
+    onSelectLanguage: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val canonicalSelection = LanguagePolicy.canonicalPreference(selectedLanguage)
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text("Reply & voice language", style = MaxType.Body, color = MaxSemanticColors.textPrimary)
+        Text(
+            "Applies to MAX replies and voice, not app labels.",
+            style = MaxType.Caption, color = MaxSemanticColors.textSecondary
+        )
+        AssistantLanguage.entries.chunked(2).forEach { languages ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                languages.forEach { language ->
+                    FilterChip(
+                        selected = canonicalSelection == language.displayName,
+                        onClick = { onSelectLanguage(language.displayName) },
+                        label = { Text(language.displayName) },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
         }
     }
 }

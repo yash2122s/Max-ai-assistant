@@ -137,14 +137,14 @@ data class CloudLicense(
         }
 
         fun createTrial(userId: String, nowEpochMillis: Long = System.currentTimeMillis()): CloudLicense {
-            val threeDaysMillis = 3L * 24L * 60L * 60L * 1000L
+            val sevenDaysMillis = 7L * 24L * 60L * 60L * 1000L
             return CloudLicense(
                 userId = userId,
                 plan = LicensePlan.TRIAL,
                 status = LicenseStatus.TRIAL,
                 trialStartedAtEpochMillis = nowEpochMillis,
-                trialExpiresAtEpochMillis = nowEpochMillis + threeDaysMillis,
-                expiresAtEpochMillis = nowEpochMillis + threeDaysMillis,
+                trialExpiresAtEpochMillis = nowEpochMillis + sevenDaysMillis,
+                expiresAtEpochMillis = nowEpochMillis + sevenDaysMillis,
                 issuedAtEpochMillis = nowEpochMillis,
                 updatedAtEpochMillis = nowEpochMillis
             )

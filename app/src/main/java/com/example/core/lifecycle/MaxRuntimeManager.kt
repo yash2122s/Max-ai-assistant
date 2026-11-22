@@ -33,6 +33,8 @@ import kotlinx.coroutines.launch
 object MaxRuntimeManager {
     private const val TAG = "MaxRuntimeManager"
     private val scope = CoroutineScope(Dispatchers.IO)
+    private val transitionLock = Any()
+    @Volatile private var transitionGeneration = 0L
 
     private val _isMaxEnabledFlow = MutableStateFlow(true)
     val isMaxEnabledFlow: StateFlow<Boolean> = _isMaxEnabledFlow.asStateFlow()
@@ -73,9 +75,15 @@ object MaxRuntimeManager {
         _isMaxEnabledFlow.value = true
         Log.i(TAG, "MAX master state changed -> ENABLED")
 
-        // Resume required services asynchronously
+        val generation = synchronized(transitionLock) { ++transitionGeneration }
+        // Resume required services asynchronously, but ignore stale work when
+        // the user toggles MAX again before the previous transition runs.
         scope.launch {
-            startRequiredServices(appContext)
+            synchronized(transitionLock) {
+                if (generation == transitionGeneration && _isMaxEnabledFlow.value) {
+                    startRequiredServices(appContext)
+                }
+            }
         }
     }
 
@@ -89,9 +97,15 @@ object MaxRuntimeManager {
         _isMaxEnabledFlow.value = false
         Log.i(TAG, "MAX master state changed -> DISABLED (Halting all MAX-owned runtime work)")
 
-        // Stop active non-essential services safely
+        val generation = synchronized(transitionLock) { ++transitionGeneration }
+        // Stop active non-essential services safely. A queued stop must not
+        // turn MAX off after a newer enable request.
         scope.launch {
-            stopActiveServices(appContext)
+            synchronized(transitionLock) {
+                if (generation == transitionGeneration && !_isMaxEnabledFlow.value) {
+                    stopActiveServices(appContext)
+                }
+            }
         }
     }
 
@@ -114,8 +128,13 @@ object MaxRuntimeManager {
         }
 
         Log.i(TAG, "MAX is ENABLED; restoring runtime services on boot/init")
+        val generation = synchronized(transitionLock) { ++transitionGeneration }
         scope.launch {
-            startRequiredServices(appContext)
+            synchronized(transitionLock) {
+                if (generation == transitionGeneration && _isMaxEnabledFlow.value) {
+                    startRequiredServices(appContext)
+                }
+            }
         }
     }
 
@@ -151,8 +170,8 @@ object MaxRuntimeManager {
             }
         }
 
-        // 3. Dynamic Capsule Overlay Service (only if permission granted)
-        if (Settings.canDrawOverlays(context)) {
+        // 3. Dynamic Capsule Overlay Service (only if permission granted and overlay enabled)
+        if (settings.isOverlayEnabled && Settings.canDrawOverlays(context)) {
             try {
                 val overlayIntent = Intent(context, MaxCapsuleOverlayService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

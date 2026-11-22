@@ -59,11 +59,11 @@ fun MaxButton(
         MaxButtonVariant.PRIMARY -> Triple(
             Modifier.background(
                 Brush.horizontalGradient(
-                    colors = if (isDark) listOf(MaxPrimaryRoyal, Color(0xFF0070E0)) else listOf(NeonPink, MagentaRose)
+                    colors = listOf(MaxPrimaryRoyal, Color(0xFF0080FF))
                 )
             ),
             Color.White,
-            Modifier.border(MaxDimensions.borderHairline, if (isDark) Color(0x6600D2FF) else SoftRoseBorderStrong, cornerShape)
+            Modifier.border(MaxDimensions.borderHairline, Color(0x6600D2FF), cornerShape)
         )
         MaxButtonVariant.ROYAL_GOLD -> Triple(
             Modifier.background(
@@ -75,14 +75,14 @@ fun MaxButton(
             Modifier.border(MaxDimensions.borderHairline, Color(0x66FFE600), cornerShape)
         )
         MaxButtonVariant.SECONDARY -> Triple(
-            Modifier.background(if (isDark) MaxSurfaceElevated else SoftRoseTint),
-            if (isDark) MaxTextPrimary else SlateInkPrimary,
-            Modifier.border(MaxDimensions.borderHairline, if (isDark) MaxBorderHairline else SoftRoseBorder, cornerShape)
+            Modifier.background(if (isDark) MaxSurfaceElevated else MaxSurfaceCard),
+            if (isDark) MaxTextPrimary else Color.White,
+            Modifier.border(MaxDimensions.borderHairline, if (isDark) MaxBorderHairline else MaxBorderHairline, cornerShape)
         )
         MaxButtonVariant.OUTLINE -> Triple(
             Modifier.background(Color.Transparent),
-            if (isDark) MaxPrimaryRoyal else NeonPink,
-            Modifier.border(MaxDimensions.borderStandard, if (isDark) MaxPrimaryRoyal.copy(alpha = 0.6f) else NeonPink.copy(alpha = 0.6f), cornerShape)
+            MaxPrimaryRoyal,
+            Modifier.border(MaxDimensions.borderStandard, MaxPrimaryRoyal.copy(alpha = 0.6f), cornerShape)
         )
         MaxButtonVariant.DANGER -> Triple(
             Modifier.background(MaxDestructiveApple.copy(alpha = 0.15f)),

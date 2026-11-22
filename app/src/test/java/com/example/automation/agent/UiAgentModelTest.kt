@@ -29,9 +29,9 @@ class UiAgentModelTest {
     @Test
     fun testCentralizedModelDefaults() {
         // Verify UI Agent models
-        assertEquals("gemini-2.5-flash", UiAgentModels.GEMINI_UI_AGENT_DEFAULT)
+        assertEquals("gemini-3.8-flash", UiAgentModels.GEMINI_UI_AGENT_DEFAULT)
         assertEquals("gemini-3.5-flash", UiAgentModels.GEMINI_UI_AGENT_FALLBACK)
-        assertEquals("gemini-2.5-flash", GeminiUiAgentProvider.DEFAULT_MODEL)
+        assertEquals("gemini-3.8-flash", GeminiUiAgentProvider.DEFAULT_MODEL)
         assertEquals("gemini-3.5-flash", GeminiUiAgentProvider.FALLBACK_MODEL)
 
         // Verify Live voice models remain isolated and distinct
@@ -43,6 +43,8 @@ class UiAgentModelTest {
     @Test
     fun testObsoleteGemini20And15ModelsDisallowedAndSanitized() {
         val obsoleteInputs = listOf(
+            "gemini-2.5-flash",
+            "models/gemini-2.5-flash",
             "gemini-2.0-flash",
             "gemini-2.0-flash-001",
             "gemini-2.0-flash-exp",
@@ -62,19 +64,19 @@ class UiAgentModelTest {
         for (input in obsoleteInputs) {
             val sanitized = UiAgentModels.sanitizeModelName(input)
             assertEquals(
-                "Input '$input' should be sanitized to default 'gemini-2.5-flash'",
+                "Input '$input' should be sanitized to default 'gemini-3.8-flash'",
                 UiAgentModels.GEMINI_UI_AGENT_DEFAULT,
                 sanitized
             )
         }
         val nullSanitized = UiAgentModels.sanitizeModelName(null)
-        assertEquals("Null input should be sanitized to default 'gemini-2.5-flash'", UiAgentModels.GEMINI_UI_AGENT_DEFAULT, nullSanitized)
+        assertEquals("Null input should be sanitized to default 'gemini-3.8-flash'", UiAgentModels.GEMINI_UI_AGENT_DEFAULT, nullSanitized)
     }
 
     @Test
     fun testValidModelsPreservedBySanitizer() {
         val validInputs = listOf(
-            "gemini-2.5-flash",
+            "gemini-3.8-flash",
             "gemini-3.5-flash",
             "gemini-2.5-pro",
             "stealth/ox-alpha",
@@ -94,7 +96,7 @@ class UiAgentModelTest {
         val models = provider.getCompatibleModels(context = context, apiKey = "")
 
         assertFalse("Compatible models list should not be empty", models.isEmpty())
-        assertTrue("Should contain gemini-2.5-flash", models.any { it.id == "gemini-2.5-flash" && it.isPreferred })
+        assertTrue("Should contain gemini-3.8-flash", models.any { it.id == "gemini-3.8-flash" && it.isPreferred })
         assertTrue("Should contain gemini-3.5-flash fallback", models.any { it.id == "gemini-3.5-flash" && !it.isPreferred })
         assertFalse("Must NOT contain gemini-2.0-flash", models.any { it.id.contains("2.0-flash") })
         assertFalse("Must NOT contain gemini-1.5-flash", models.any { it.id.contains("1.5-flash") })
@@ -104,12 +106,12 @@ class UiAgentModelTest {
     fun testOpenRouterCuratedModelsExcludesObsoleteGemini20() {
         val models = OpenRouterUiAgentProvider.CURATED_COMPATIBLE_MODELS
         assertTrue("Should contain stealth/ox-alpha", models.any { it.id == "stealth/ox-alpha" && it.isPreferred })
-        assertTrue("Should contain google/gemini-2.5-flash", models.any { it.id == "google/gemini-2.5-flash" })
+        assertTrue("Should contain google/gemini-3.8-flash", models.any { it.id == "google/gemini-3.8-flash" })
         assertFalse("Must NOT contain google/gemini-2.0-flash-001", models.any { it.id.contains("2.0-flash") })
     }
 
     @Test
-    fun testUiAgentRouterFallbackToGemini25Flash() {
+    fun testUiAgentRouterFallbackToGemini38Flash() {
         val settings = SettingsManager(context)
         settings.uiAgentApiKey = "" // Unconfigured OpenRouter
         settings.geminiApiKey = "test-gemini-key"
@@ -118,7 +120,7 @@ class UiAgentModelTest {
         val selected = router.selectProvider(context)
 
         assertEquals("Should route to Gemini provider", GeminiUiAgentProvider.PROVIDER_ID, selected.provider.id)
-        assertEquals("Should route to gemini-2.5-flash", "gemini-2.5-flash", selected.model)
+        assertEquals("Should route to gemini-3.8-flash", "gemini-3.8-flash", selected.model)
         assertEquals("test-gemini-key", selected.apiKey)
     }
 
@@ -132,7 +134,7 @@ class UiAgentModelTest {
     @Test
     fun testGeminiApiKeyUsesHeaderAndNeverAppearsInEndpoint() {
         val secret = "test-secret-key"
-        val url = GeminiUiAgentProvider.buildGenerateContentUrl("gemini-2.5-flash")
+        val url = GeminiUiAgentProvider.buildGenerateContentUrl("gemini-3.8-flash")
         assertFalse(url.contains(secret))
         assertFalse(url.contains("?key="))
 

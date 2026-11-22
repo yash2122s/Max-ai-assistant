@@ -1,6 +1,11 @@
 package com.example.data.repository
 
 import android.content.Context
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.Intent
+import androidx.room.withTransaction
+import com.example.receiver.ReminderReceiver
 import com.example.data.local.AppDatabase
 import com.example.data.local.AutoReplyRule
 import com.example.data.local.ChatMessage
@@ -70,12 +75,47 @@ class JarvisRepository(private val context: Context) {
         scheduleSystemAlarm(id.toInt(), message, triggerAtMillis)
     }
 
-    suspend fun deleteReminder(id: Int) = withContext(Dispatchers.IO) {
-        reminderDao.deleteReminderById(id)
+    suspend fun saveReminder(id: Int?, message: String, triggerAt: Long?) = db.withTransaction {
+        val current = id?.let { checkNotNull(reminderDao.getReminderById(it)) { "Reminder was deleted" } }
+        val updated = if (current == null) {
+            Reminder(message = message, triggerAt = requireNotNull(triggerAt))
+        } else {
+            current.copy(
+                message = message,
+                triggerAt = triggerAt ?: current.triggerAt,
+                status = if (triggerAt != null) "pending" else current.status
+            )
+        }
+        val savedId = reminderDao.insertReminder(updated).toInt()
+        if (updated.status == "pending" && updated.isEnabled) {
+            check(scheduleSystemAlarm(savedId, updated.message, updated.triggerAt)) { "Could not schedule alarm" }
+        }
     }
 
-    suspend fun markReminderCompleted(id: Int) = withContext(Dispatchers.IO) {
+    suspend fun deleteReminder(id: Int) = db.withTransaction {
+        reminderDao.deleteReminderById(id)
+        cancelReminderAlarm(id)
+    }
+
+    suspend fun markReminderCompleted(id: Int) = db.withTransaction {
         reminderDao.updateReminderStatus(id, "completed")
+        cancelReminderAlarm(id)
+    }
+
+    suspend fun reopenReminder(id: Int): Boolean = db.withTransaction {
+        val reminder = reminderDao.getReminderById(id) ?: return@withTransaction false
+        if (!reminder.isEnabled || reminder.triggerAt <= System.currentTimeMillis()) return@withTransaction false
+        if (!scheduleSystemAlarm(id, reminder.message, reminder.triggerAt)) return@withTransaction false
+        reminderDao.updateReminderStatus(id, "pending")
+        true
+    }
+
+    private fun cancelReminderAlarm(id: Int) {
+        val pending = PendingIntent.getBroadcast(
+            context, id, Intent(context, ReminderReceiver::class.java),
+            PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+        ) ?: return
+        context.getSystemService(AlarmManager::class.java).cancel(pending)
     }
 
     suspend fun forgetMemory(keyword: String): String = withContext(Dispatchers.IO) {
@@ -90,7 +130,7 @@ class JarvisRepository(private val context: Context) {
         true
     }
 
-    suspend fun scheduleSystemAlarm(id: Int, message: String, triggerAt: Long) = withContext(Dispatchers.IO) {
+    suspend fun scheduleSystemAlarm(id: Int, message: String, triggerAt: Long): Boolean = withContext(Dispatchers.IO) {
         try {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
             val intent = android.content.Intent(context, com.example.receiver.ReminderReceiver::class.java).apply {
@@ -113,8 +153,10 @@ class JarvisRepository(private val context: Context) {
             } else {
                 alarmManager.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, triggerAt, pendingIntent)
             }
+            true
         } catch(e: Exception) {
             android.util.Log.e("JarvisRepository", "Error scheduling alarm", e)
+            false
         }
     }
 
@@ -128,10 +170,12 @@ class JarvisRepository(private val context: Context) {
             status = "pending",
             automationType = type.uppercase(),
             automationTarget = target,
-            automationMessage = msgContent
+            automationMessage = msgContent,
+            repeatType = repeatType,
+            isEnabled = isEnabled
         )
         val id = reminderDao.insertReminder(reminder)
-        scheduleSystemAlarm(id.toInt(), message, triggerAtMillis)
+        !isEnabled || scheduleSystemAlarm(id.toInt(), message, triggerAtMillis)
     }
 
 }

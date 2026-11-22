@@ -23,7 +23,7 @@ class GeminiPlanningProvider(
 ) : LLMPlanningProvider {
 
     override val providerId: String = "gemini"
-    override val defaultModel: String = "gemini-2.5-flash"
+    override val defaultModel: String = com.example.network.model.UiAgentModels.GEMINI_UI_AGENT_DEFAULT
 
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
@@ -141,13 +141,14 @@ class GeminiPlanningProvider(
                 add("generationConfig", generationConfig)
             }
 
-            val targetModel = request.modelName?.takeIf { it.isNotBlank() } ?: run {
+            var targetModel = request.modelName?.takeIf { it.isNotBlank() } ?: run {
                 try {
                     com.example.network.model.GeminiModelResolver.resolveBestUiModel(apiKey, defaultModel)
                 } catch (e: Exception) {
                     defaultModel
                 }
             }
+            targetModel = com.example.network.model.UiAgentModels.sanitizeModelName(targetModel)
 
             val url = "https://generativelanguage.googleapis.com/v1beta/models/$targetModel:generateContent"
             val body = requestJson.toString().toRequestBody(JSON_MEDIA_TYPE)
@@ -158,17 +159,33 @@ class GeminiPlanningProvider(
                 .post(body)
                 .build()
 
-
             Log.d(TAG, "Sending REST planning request for goal: '${request.goal}' to model '$targetModel'...")
-            val response = client.newCall(httpRequest).execute()
+            var response = client.newCall(httpRequest).execute()
+
+            if (!response.isSuccessful && response.code == 404 && targetModel != com.example.network.model.UiAgentModels.GEMINI_UI_AGENT_FALLBACK) {
+                Log.w(TAG, "Model '$targetModel' returned 404. Falling back to ${com.example.network.model.UiAgentModels.GEMINI_UI_AGENT_FALLBACK}...")
+                val fallbackUrl = "https://generativelanguage.googleapis.com/v1beta/models/${com.example.network.model.UiAgentModels.GEMINI_UI_AGENT_FALLBACK}:generateContent"
+                val fallbackRequest = Request.Builder()
+                    .url(fallbackUrl)
+                    .addHeader("x-goog-api-key", apiKey)
+                    .post(body)
+                    .build()
+                response = client.newCall(fallbackRequest).execute()
+            }
+
             val durationMs = (System.currentTimeMillis() - startTime).coerceAtLeast(0L)
 
             if (!response.isSuccessful) {
                 val errorBody = try { response.body?.string() } catch (e: Exception) { "" } ?: ""
                 Log.e(TAG, "HTTP planning error ${response.code}: $errorBody")
+                val cleanError = try {
+                    org.json.JSONObject(errorBody).getJSONObject("error").getString("message")
+                } catch (e: Exception) {
+                    errorBody.take(150)
+                }
                 return@withContext PlanningResponse(
                     success = false,
-                    errorMessage = if (errorBody.isNotBlank()) "Gemini API error (${response.code}): $errorBody" else "HTTP ${response.code} error from Gemini API.",
+                    errorMessage = if (cleanError.isNotBlank()) "Gemini planning error (${response.code}): $cleanError" else "HTTP ${response.code} error from Gemini API.",
                     durationMs = durationMs
                 )
             }

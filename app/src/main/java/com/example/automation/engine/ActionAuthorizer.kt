@@ -96,10 +96,11 @@ object ActionAuthorizer {
     /** Words that mark an utterance as a direct command (not chatter). */
     private val DIRECT_COMMAND_VERBS = listOf(
         "run", "send", "pay", "enter", "type", "execute", "open", "create",
-        "start", "launch", "do ", "command", "shell", "adb", "set", "call",
+        "start", "launch", "do ", "command", "shell", "adb", "set", "call", "dial", "phone",
         "message", "sms", "whatsapp", "వాట్సాప్", "unlock", "submit", "transfer", "enable",
         "disable", "turn", "play", "search", "delete", "click", "scroll", "install",
         "pampu", "pettu", "rayi", "chey", "cheyyi", "vellu", "ఓపెన్",
+        "కాల్", "ఫోన్", "డయల్", "చేయి", "చెయ్యి", "చేయ్", "చేయండి",
         "wait", "sleep", "delay", "aagu", "aagali", "ఆగు", "వెయిట్"
     )
 
@@ -225,7 +226,7 @@ object ActionAuthorizer {
             }
 
             "YOUTUBE_SEARCH" -> {
-                val ytKeywords = listOf("youtube", "play", "song", "music", "video", "recipe", "పాట", "సాంగ్", "ప్లే", "యూట్యూబ్")
+                val ytKeywords = listOf("youtube", "play", "song", "songs", "music", "video", "recipe", "paata", "paatalu", "పాట", "సాంగ్", "ప్లే", "యూట్యూబ్")
                 val isYtRequested = ytKeywords.any { intent.contains(it) }
                 if (isYtRequested) {
                     AuthorizationResult(true, "YouTube/media action requested by user.")
@@ -548,9 +549,17 @@ object ActionAuthorizer {
                 val isExplicitVoiceCall = com.example.automation.engine.ActionDispatcher.isExplicitCallUtterance(intent)
                 val isMessagingUtterance = com.example.automation.engine.ActionDispatcher.isMessagingUtterance(intent)
 
-                if (isMessagingUtterance && !isExplicitVoiceCall) {
+                // Reject non-call phrases like "recall", "callback", "what's the call log"
+                val isExcludedPhrase = intent.contains("callback") || intent.contains("recall") ||
+                    Regex("""\b(?:call\s*(?:log|history|records|details)|logs?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(intent)
+
+                val hasBoundedCallOrDial = Regex("""\b(?:call(?:ing)?|dial(?:ing)?)\b""", RegexOption.IGNORE_CASE).containsMatchIn(intent)
+
+                if (isExcludedPhrase) {
+                    AuthorizationResult(false, "CALL_PHONE rejected: intent is not a call placement command ('$userIntent').")
+                } else if (isMessagingUtterance && !isExplicitVoiceCall) {
                     AuthorizationResult(false, "CALL_PHONE rejected: user intent is a messaging command, not a phone call.")
-                } else if (isExplicitVoiceCall || intent.contains("call") || intent.contains("dial")) {
+                } else if (isExplicitVoiceCall || hasBoundedCallOrDial) {
                     AuthorizationResult(true, "Phone call requested by user.")
                 } else {
                     AuthorizationResult(false, "Phone call not requested in '$userIntent'.")
@@ -579,9 +588,9 @@ object ActionAuthorizer {
 
         val hasActionVerb = listOf(
             "open", "search", "play", "send", "click", "tap", "type", "enter", "clear", "press", "scroll", "swipe",
-            "turn on", "turn off", "turn", "set", "call", "whatsapp", "వాట్సాప్", "message", "msg", "pampu",
+            "turn on", "turn off", "turn", "set", "call", "dial", "phone", "whatsapp", "వాట్సాప్", "message", "msg", "pampu",
             "pampinchu", "pettu", "rayi", "chey", "cheyyi", "vellu", "kottu", "తెరువు", "పంపు", "పెట్టు", "రాయి",
-            "ఓపెన్", "గొట్టు", "కొట్టు", "టైప్", "ఎంటర్", "flashlight", "torch", "wifi", "bluetooth",
+            "ఓపెన్", "గొట్టు", "కొట్టు", "టైప్", "ఎంటర్", "కాల్", "ఫోన్", "డయల్", "చేయి", "చెయ్యి", "చేయ్", "చేయండి", "flashlight", "torch", "wifi", "bluetooth",
             "dnd", "alarm", "timer", "reminder", "brightness", "volume", "routine", "unlock", "lock",
             "wait", "sleep", "delay", "aagu", "ఆగు",
             "contact", "sms", "notification", "quick settings", "home", "recent", "back"

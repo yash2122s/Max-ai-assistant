@@ -14,7 +14,7 @@ object MemoryCryptography {
     private const val KEY_ALIAS = "max_memory_crypto_key"
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
-    private const val VERSION_PREFIX = "enc_v1:"
+    internal const val VERSION_PREFIX = "enc_v1:"
 
     private val isTesting: Boolean by lazy {
         try {

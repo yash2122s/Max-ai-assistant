@@ -21,5 +21,6 @@ data class AutomationTask(
     var startTime: Long = System.currentTimeMillis(),
     val isScheduled: Boolean = false,
     val phone: String? = null,
-    val contactDisplayName: String? = null
+    val contactDisplayName: String? = null,
+    val taskId: String = "legacy_${System.currentTimeMillis()}"
 ) : Serializable

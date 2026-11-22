@@ -273,15 +273,16 @@ class CompanionConnectionService : Service() {
                             if (primaryClip != null && primaryClip.itemCount > 0) {
                                 val currentText = primaryClip.getItemAt(0).text?.toString() ?: ""
                                 if (currentText.isNotEmpty() && currentText.length <= 1000 && !currentText.contains("Imported Permanent Memories") && currentText != lastSyncedClipboardText) {
-                                    lastSyncedClipboardText = currentText
-                                    serviceScope.launch(Dispatchers.IO) {
+                                    val result = withContext(Dispatchers.IO) {
                                         WindowsToolExecutor.executeTool(
                                             tool = "windows_agent",
                                             action = "core.clipboard:set",
                                             arguments = mapOf("message" to currentText),
                                             onProgress = {}
                                         )
-                                        Log.d("CompanionConnectionService", "Auto-synced Android clipboard to Windows Laptop: ${currentText.take(20)}...")
+                                    }
+                                    if (org.json.JSONObject(result).optString("status") == "success") {
+                                        lastSyncedClipboardText = currentText
                                     }
                                 }
                             }

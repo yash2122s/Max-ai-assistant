@@ -59,13 +59,17 @@ enum class LiveThinkingLevel { LOW, MEDIUM, HIGH }
  */
 object UiAgentModels {
     /** Primary Gemini REST model for fast multimodal visual grounding and function calling. */
-    const val GEMINI_UI_AGENT_DEFAULT = "gemini-2.5-flash"
+    const val GEMINI_UI_AGENT_DEFAULT = "gemini-3.8-flash"
 
     /** Fallback Gemini REST model if the default is unavailable on the account. */
     const val GEMINI_UI_AGENT_FALLBACK = "gemini-3.5-flash"
 
     /** List of obsolete/retired model identifiers that must never be dispatched for UI Agent. */
     val DISALLOWED_OBSOLETE_MODELS = setOf(
+        "gemini-2.5-flash",
+        "models/gemini-2.5-flash",
+        "google/gemini-2.5-flash",
+        "2.5-flash",
         "gemini-2.0-flash",
         "gemini-2.0-flash-001",
         "gemini-2.0-flash-exp",
@@ -99,6 +103,7 @@ object UiAgentModels {
 
         if (DISALLOWED_OBSOLETE_MODELS.contains(lower) || 
             DISALLOWED_OBSOLETE_MODELS.contains(withoutPrefix) ||
+            lower.contains("2.5-flash") ||
             lower.contains("2.0-flash") ||
             lower.contains("1.5-flash") ||
             lower.contains("1.5-pro")) {

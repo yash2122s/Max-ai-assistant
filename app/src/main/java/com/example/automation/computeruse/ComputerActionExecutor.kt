@@ -43,6 +43,8 @@ object ComputerActionExecutor {
                     message = action.message,
                     methodUsed = "NOOP"
                 )
+                is ComputerAction.TypeText -> executeTypeText(context, action)
+                is ComputerAction.PressEnter -> executePressEnter(context)
                 else -> {
                     // Primary Generic Path: Route all UI interactions through GenericActionExecutor & LiveNodeResolver
                     val genResult = com.example.automation.engine.GenericActionExecutor.executeComputerAction(action)
@@ -52,6 +54,16 @@ object ComputerActionExecutor {
                             actionType = action.actionName,
                             message = genResult.message,
                             methodUsed = genResult.tier.name
+                        )
+                    } else if (action is ComputerAction.TapElement) {
+                        // A rejected semantic target must not be reinterpreted by the
+                        // looser legacy resolver (or tapped again at old coordinates).
+                        ActionResult(
+                            success = false,
+                            actionType = action.actionName,
+                            errorCode = ComputerUseErrorCode.STALE_TARGET.name,
+                            message = genResult.message,
+                            methodUsed = "GROUNDING_REJECTED"
                         )
                     } else {
                         // Fallback to legacy implementation if GenericActionExecutor was unable to complete
@@ -399,12 +411,22 @@ object ComputerActionExecutor {
             pressEnterAfter = action.pressEnterAfter
         )
 
+        val submissionVerified = !action.pressEnterAfter || typeRes.metadata.optBoolean("submissionVerified", false)
         return ActionResult(
-            success = typeRes.success,
+            success = typeRes.success && submissionVerified,
             actionType = action.actionName,
-            errorCode = if (!typeRes.success) "TYPE_FAILED" else null,
-            message = if (typeRes.success) "Typed '${action.text}'" else typeRes.message,
-            methodUsed = if (typeRes.success) "KEYBOARD_CONTROLLER" else "FAILED"
+            errorCode = when {
+                !typeRes.success -> typeRes.errorCode ?: "TYPE_FAILED"
+                action.pressEnterAfter && !submissionVerified -> "SUBMISSION_NOT_VERIFIED"
+                else -> null
+            },
+            message = when {
+                !typeRes.success -> typeRes.message
+                action.pressEnterAfter && !submissionVerified -> "Text entered, but search submission was not verified"
+                else -> "Typed '${action.text}'"
+            },
+            methodUsed = if (typeRes.success) "KEYBOARD_CONTROLLER" else "FAILED",
+            submissionVerified = submissionVerified
         )
     }
 
@@ -426,7 +448,8 @@ object ComputerActionExecutor {
             actionType = ComputerAction.PressEnter.actionName,
             errorCode = if (!res.success) "ENTER_FAILED" else null,
             message = if (res.success) "Pressed Enter" else res.message,
-            methodUsed = "IME_ENTER"
+            methodUsed = "IME_ENTER",
+            submissionVerified = res.metadata.optBoolean("submissionVerified", false)
         )
     }
 
@@ -496,4 +519,3 @@ object ComputerActionExecutor {
         )
     }
 }
-

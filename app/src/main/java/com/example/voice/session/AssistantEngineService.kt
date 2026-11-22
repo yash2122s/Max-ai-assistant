@@ -21,6 +21,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 
 class AssistantEngineService : Service() {
     private val binder = LocalBinder()
@@ -115,6 +116,7 @@ class AssistantEngineService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d("AssistantEngineService", "Destroying AssistantEngineService...")
+        scope.cancel()
         engine.destroy()
     }
 }

@@ -179,6 +179,52 @@ class JarvisAccessibilityService : AccessibilityService() {
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private var isWaiting = false
     private var directClickTime = 0L
+    private var genericStepCallback: Runnable? = null
+    private var genericWatchdogCallback: Runnable? = null
+    private var genericWatchdogTask: AutomationTask? = null
+
+    private fun cancelGenericCallbacks() {
+        genericStepCallback?.let(handler::removeCallbacks)
+        genericWatchdogCallback?.let(handler::removeCallbacks)
+        genericStepCallback = null
+        genericWatchdogCallback = null
+        genericWatchdogTask = null
+        isWaiting = false
+    }
+
+    private fun terminatePendingAutomation(task: AutomationTask?, status: String, reason: String) {
+        if (task != null && pendingTask !== task) return
+        val active = task ?: pendingTask
+        if (active != null) {
+            Log.w(
+                "JarvisAccessibility",
+                "[TASK_TERMINAL] taskId=${active.taskId} type=${active.type} status=$status " +
+                    "step=${active.currentStepIndex} elapsedMs=${System.currentTimeMillis() - active.startTime} reason=$reason"
+            )
+        }
+        cancelGenericCallbacks()
+        clearPendingTask(active)
+        directClickTime = 0L
+    }
+
+    private fun ensureGenericWatchdog(task: AutomationTask) {
+        if (genericWatchdogTask === task) return
+        genericWatchdogCallback?.let(handler::removeCallbacks)
+        genericWatchdogTask = task
+        val watchdog = object : Runnable {
+            override fun run() {
+                if (pendingTask !== task) return
+                val elapsed = System.currentTimeMillis() - task.startTime
+                if (elapsed >= 20_000L) {
+                    terminatePendingAutomation(task, "TIMEOUT", "No terminal UI result within 20000ms")
+                } else {
+                    handler.postDelayed(this, (20_000L - elapsed).coerceAtLeast(100L))
+                }
+            }
+        }
+        genericWatchdogCallback = watchdog
+        handler.postDelayed(watchdog, 20_000L)
+    }
 
     override fun onKeyEvent(event: android.view.KeyEvent?): Boolean {
         if (event == null) return super.onKeyEvent(event)
@@ -203,7 +249,20 @@ class JarvisAccessibilityService : AccessibilityService() {
         Log.d("JarvisAccessibility", "Accessibility service connected successfully.")
     }
 
+    /**
+     * Entry point for legacy generic step producers. It installs the task and
+     * starts the watchdog immediately, so a task that receives no accessibility
+     * events still reaches a terminal timeout.
+     */
+    fun submitAutomationTask(task: AutomationTask): Boolean {
+        if (!setPendingTaskSafely(task)) return false
+        if (task.type == "GENERIC") ensureGenericWatchdog(task)
+        Log.i("JarvisAccessibility", "[TASK_START] taskId=${task.taskId} type=${task.type} steps=${task.steps.size}")
+        return true
+    }
+
     override fun onUnbind(intent: Intent?): Boolean {
+        terminatePendingAutomation(pendingTask, "CANCELLED", "ACCESSIBILITY_SERVICE_UNBOUND")
         if (instance == this) {
             instance = null
         }
@@ -232,7 +291,7 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (!com.example.core.lifecycle.MaxRuntimeManager.isMaxEnabled(this)) {
-            pendingTask = null
+            terminatePendingAutomation(pendingTask, "CANCELLED", "MAX_DISABLED")
             return
         }
 
@@ -285,8 +344,8 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
 
         val task = pendingTask ?: return
-        if (isWaiting) {
-            return
+        if (task.type == "GENERIC") {
+            ensureGenericWatchdog(task)
         }
         val packageName = event?.packageName?.toString() ?: return
         val eventType = event?.eventType
@@ -296,14 +355,17 @@ class JarvisAccessibilityService : AccessibilityService() {
             Log.d("WA_DEBUG", "onAccessibilityEvent: pkg=$packageName eventType=$eventType STEP=${task.step} elapsed=${System.currentTimeMillis()-task.startTime}")
         }
 
-        // 1. Failsafe timeout check (20 seconds)
+        // 1. Failsafe timeout check (20 seconds). This check must run before
+        // the delay gate; otherwise a task that stops producing events while
+        // isWaiting=true can remain pending indefinitely.
         if (System.currentTimeMillis() - task.startTime > 20000L) {
-            Log.w("JarvisAccessibility", "Failsafe: Automation has timed out (20s limit). Cancelling.")
+            Log.w("JarvisAccessibility", "[TASK_TERMINAL] taskId=${task.taskId} status=TIMEOUT elapsedMs=${System.currentTimeMillis() - task.startTime} reason=EVENT_FAILSAFE")
             Toast.makeText(this, "MAX Automation Timed Out ⚠️", Toast.LENGTH_SHORT).show()
-            pendingTask = null
-            directClickTime = 0L
+            terminatePendingAutomation(task, "TIMEOUT", "EVENT_FAILSAFE")
             return
         }
+
+        if (isWaiting) return
 
         // 2. Event Optimization: Wake up on window state, window list, or window content changes
         if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED && 
@@ -315,6 +377,21 @@ class JarvisAccessibilityService : AccessibilityService() {
         Log.d("JarvisAccessibility", "Processing event for package: $packageName, type: $eventType, task: ${task.type}")
 
         if (task.type == "GENERIC") {
+            val currentStep = task.steps.getOrNull(task.currentStepIndex)
+            val expectedPackage = currentStep?.pkg
+            val isInputMethodEvent = packageName.contains("inputmethod", ignoreCase = true) ||
+                packageName.contains("keyboard", ignoreCase = true)
+            if (!expectedPackage.isNullOrBlank() &&
+                !com.example.automation.AppPackageMatcher.matches(packageName, expectedPackage) &&
+                !isInputMethodEvent
+            ) {
+                Log.d(
+                    "JarvisAccessibility",
+                    "[UI_READY] taskId=${task.taskId} step=${task.currentStepIndex} " +
+                        "ignoredPackage=$packageName expectedPackage=$expectedPackage"
+                )
+                return
+            }
             handleGenericAutomation(task)
             return
         }
@@ -1036,46 +1113,50 @@ class JarvisAccessibilityService : AccessibilityService() {
         }
     }
 
-    private var currentIndexedMap: Map<Int, AccessibilityNodeInfo> = emptyMap()
-    private var currentIndexedElements: List<IndexedUiElement> = emptyList()
-    private var currentIndexedSignature: String = ""
+    private class IndexedSnapshot(
+        val elements: List<IndexedUiElement> = emptyList(),
+        val nodeMap: Map<Int, AccessibilityNodeInfo> = emptyMap(),
+        val signature: String = ""
+    )
 
-    @Synchronized
+    private val indexedSnapshotRef = java.util.concurrent.atomic.AtomicReference(IndexedSnapshot())
+    private val indexingLock = Any()
+
     fun invalidateIndexedElements() {
-        currentIndexedElements = emptyList()
-        currentIndexedMap = emptyMap()
-        currentIndexedSignature = ""
+        indexedSnapshotRef.set(IndexedSnapshot())
         Log.d("JarvisAccessibility", "Invalidated indexed UI elements snapshot")
     }
 
-    @Synchronized
     fun updateIndexedElements(root: AccessibilityNodeInfo? = rootInActiveWindow): List<IndexedUiElement> {
         val rootNode = root ?: rootInActiveWindow ?: return emptyList()
-        val (elements, nodeMap) = AccessibilityTreePruner.pruneAndIndexTree(rootNode)
-        currentIndexedElements = elements
-        currentIndexedMap = nodeMap
-        currentIndexedSignature = getScreenSignature(rootNode)
-        Log.d("JarvisAccessibility", "Updated indexed UI elements: count=${elements.size}, signature=${currentIndexedSignature.take(40)}")
-        return elements
+        synchronized(indexingLock) {
+            val (elements, nodeMap) = AccessibilityTreePruner.pruneAndIndexTree(rootNode)
+            val signature = getScreenSignature(rootNode)
+            val snapshot = IndexedSnapshot(elements, nodeMap, signature)
+            indexedSnapshotRef.set(snapshot)
+            Log.d("JarvisAccessibility", "Updated indexed UI elements: count=${elements.size}, signature=${signature.take(40)}")
+            return elements
+        }
     }
 
-    @Synchronized
     fun getIndexedElements(): List<IndexedUiElement> {
-        return if (currentIndexedElements.isNotEmpty() && getScreenSignature() == currentIndexedSignature) {
-            currentIndexedElements
+        val snapshot = indexedSnapshotRef.get()
+        return if (snapshot.elements.isNotEmpty() && getScreenSignature() == snapshot.signature) {
+            snapshot.elements
         } else {
             updateIndexedElements()
         }
     }
 
-    @Synchronized
     fun resolveIndexedNode(index: Int): AccessibilityNodeInfo? {
         val currentSig = getScreenSignature()
-        if (currentSig != currentIndexedSignature) {
-            Log.w("UI_INDEX_INVALID", "[UI_INDEX_INVALID] reason=SCREEN_CHANGED (cached=${currentIndexedSignature.take(30)}..., current=${currentSig.take(30)}...)")
+        var snapshot = indexedSnapshotRef.get()
+        if (currentSig != snapshot.signature) {
+            Log.w("UI_INDEX_INVALID", "[UI_INDEX_INVALID] reason=SCREEN_CHANGED (cached=${snapshot.signature.take(30)}..., current=${currentSig.take(30)}...)")
             updateIndexedElements()
+            snapshot = indexedSnapshotRef.get()
         }
-        return currentIndexedMap[index]
+        return snapshot.nodeMap[index]
     }
 
     fun clickIndexedElement(index: Int): Pair<Boolean, String> {
@@ -1143,11 +1224,11 @@ class JarvisAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        terminatePendingAutomation(pendingTask, "CANCELLED", "ACCESSIBILITY_SERVICE_DESTROYED")
         if (instance == this) {
             instance = null
         }
         ServiceRegistry.unregister(com.example.core.registry.ServiceType.ACCESSIBILITY)
-        pendingTask = null
         handler.removeCallbacksAndMessages(null)
         Log.d("JarvisAccessibility", "Accessibility service destroyed and cleaned up.")
     }
@@ -2778,7 +2859,8 @@ class JarvisAccessibilityService : AccessibilityService() {
     }
 
     override fun onInterrupt() {
-        Log.d("JarvisAccessibility", "Accessibility service interrupted.")
+        Log.w("JarvisAccessibility", "Accessibility service interrupted; cancelling pending automation.")
+        terminatePendingAutomation(pendingTask, "CANCELLED", "ACCESSIBILITY_SERVICE_INTERRUPTED")
     }
 
 }

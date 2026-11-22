@@ -179,6 +179,7 @@ class MaxLicenseManager(
             _dailyUsageCount.value = 0L
             _syncState.value = LicenseSyncState.Idle
             _currentDevice.value = null
+            com.example.analytics.MaxActivityTracker.trackAuth(context, com.example.analytics.ActivityEventType.AUTH_LOGOUT, true)
         }
         return result
     }
@@ -303,11 +304,11 @@ class MaxLicenseManager(
         _dailyUsageCount.value = newLocal
 
         if (user == null) {
-            val allowed = newLocal <= 20L
+            val allowed = newLocal <= EntitlementGate.DEFAULT_DAILY_LIMIT
             return@withContext Result.success(Pair(newLocal, allowed))
         }
 
-        val cloudResult = firestoreRepo.consumeDailyMessage(user.uid)
+        val cloudResult = firestoreRepo.consumeDailyMessage(user.uid, maxDailyLimit = EntitlementGate.DEFAULT_DAILY_LIMIT)
         if (!isValidSession(user.uid, session)) return@withContext Result.failure(IllegalStateException("Authenticated session changed"))
         if (cloudResult.isSuccess) {
             val (cloudCount, allowed) = cloudResult.getOrNull()!!
@@ -318,7 +319,7 @@ class MaxLicenseManager(
         } else {
             // An unbound legacy device counter cannot be assigned to this UID.
             // Without a known account counter, fail closed until cloud refresh.
-            val allowed = knownUsage && newLocal <= 20L
+            val allowed = knownUsage && newLocal <= EntitlementGate.DEFAULT_DAILY_LIMIT
             Result.success(Pair(newLocal, allowed))
         }
     }

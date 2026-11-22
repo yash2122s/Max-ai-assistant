@@ -21,7 +21,8 @@ import com.example.ui.theme.*
 @Composable
 fun AboutScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToPrivacy: () -> Unit
+    onNavigateToPrivacy: () -> Unit,
+    onNavigateToWebDashboard: () -> Unit = {}
 ) {
     MaxScreen(
         title = "About System",
@@ -174,7 +175,23 @@ fun AboutScreen(
                 tint = MaxSemanticColors.warning
             )
 
+            FeatureCard(
+                icon = Icons.Default.Language,
+                title = "MAX Official Website & Portal",
+                description = "Official 3D web experience with real-time Three.js WebGL animations at max-ai-agent-official.vercel.app.",
+                tint = MaxSemanticColors.accentCyan
+            )
+
             Spacer(modifier = Modifier.height(MaxDimensions.spaceSm))
+
+            MaxButton(
+                text = "Open Official Website & Portal",
+                onClick = onNavigateToWebDashboard,
+                variant = MaxButtonVariant.SECONDARY,
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(MaxDimensions.spaceXs))
 
             MaxButton(
                 text = "View Privacy Policy",

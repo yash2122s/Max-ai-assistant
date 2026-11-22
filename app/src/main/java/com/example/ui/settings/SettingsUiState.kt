@@ -35,7 +35,13 @@ data class SettingsUiState(
     val isSaved: Boolean = false,
     val saveMessage: String? = null,
     val isDefaultAssistant: Boolean = false,
-    val wakeWordStatus: String = "Requires system support"
+    val wakeWordStatus: String = "Requires system support",
+    val isOverlayEnabled: Boolean = true,
+    val overlayOnlyInVoiceMode: Boolean = true,
+    val webDashboardUrl: String = "https://max-ai-agent-official.vercel.app/",
+    val isSecondBrainEnabled: Boolean = false,
+    val secondBrainUrl: String = "http://192.168.0.116:3000",
+    val secondBrainStatus: String = ""
 )
 
 sealed interface SettingsUiEvent {

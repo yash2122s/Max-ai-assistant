@@ -37,7 +37,7 @@ class AgentVerificationRegressionTest {
         val before = screen()
         val result = ActionResult(success = true, actionType = "PRESS_ENTER")
         assertFalse(ActionVerifier.verify(ComputerAction.PressEnter, result, before, before.copy(observationId = "new")).first)
-        assertTrue(ActionVerifier.verify(ComputerAction.PressEnter, result, before, before.copy(visibleTexts = listOf("Results"))).first)
+        assertTrue(ActionVerifier.verify(ComputerAction.PressEnter, result.copy(submissionVerified = true), before, before.copy(visibleTexts = listOf("Results"))).first)
     }
 
     @Test fun signaturesDetectStateAndBoundsBeyondFirstTwentyNodes() {

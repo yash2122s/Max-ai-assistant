@@ -75,7 +75,8 @@ class ScreenContextTool : Tool {
                 put("interactive_elements", elementsArray)
                 
                 if (payload.visibleText.isNotEmpty()) {
-                    put("visible_text_excerpt", payload.visibleText.take(2000))
+                    put("visible_text_excerpt", payload.visibleText.take(4000))
+                    put("full_visible_text", payload.visibleText)
                 }
             }
 
@@ -88,10 +89,10 @@ class ScreenContextTool : Tool {
                     append(" Visual frame transmitted to Gemini Live.")
                 }
                 if (payload.visibleText.isNotEmpty()) {
-                    append(" Extracted ${payload.prunedNodes.size} UI nodes.")
+                    append("\nVisible text on display:\n${payload.visibleText.take(3000)}")
                 }
                 if (payload.clickableElements.isNotEmpty()) {
-                    append(" Found ${payload.clickableElements.size} interactive elements.")
+                    append("\nFound ${payload.clickableElements.size} interactive elements.")
                 }
             }
 

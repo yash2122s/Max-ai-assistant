@@ -4,6 +4,7 @@ package com.example.network
 class LiveSessionState {
     private var model: String? = null
     private var handle: String? = null
+    private var resumptionVersion = 0L
     private val calls = linkedMapOf<String, String>()
     private val results = mutableMapOf<String, String>()
 
@@ -11,6 +12,23 @@ class LiveSessionState {
     fun updateResumption(modelName: String, update: SessionResumptionUpdate) {
         model = modelName
         handle = update.newHandle?.takeIf { update.resumable && it.isNotBlank() }
+    }
+
+    @Synchronized
+    fun resumptionVersion(): Long = resumptionVersion
+
+    /** A late update from a socket created before a configuration change must not restore its handle. */
+    @Synchronized
+    fun updateResumptionIfCurrent(version: Long, modelName: String, update: SessionResumptionUpdate) {
+        if (version == resumptionVersion) updateResumption(modelName, update)
+    }
+
+    /** Keep executed-call IDs/results across configuration changes to avoid replaying side effects. */
+    @Synchronized
+    fun invalidateResumption() {
+        resumptionVersion++
+        model = null
+        handle = null
     }
 
     @Synchronized
@@ -34,6 +52,7 @@ class LiveSessionState {
 
     @Synchronized
     fun reset() {
+        resumptionVersion++
         model = null
         handle = null
         calls.clear()

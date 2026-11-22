@@ -25,6 +25,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         handleTriggerIntent(intent)
+        handleNavigationIntent(intent)
 
         setContent {
             MaxAppTheme {
@@ -37,6 +38,15 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleTriggerIntent(intent)
+        handleNavigationIntent(intent)
+    }
+
+    private fun handleNavigationIntent(intent: Intent?) {
+        if (intent == null) return
+        val destination = intent.getStringExtra("destination")
+        if (!destination.isNullOrBlank()) {
+            homeViewModel.navigateTo(destination)
+        }
     }
 
     private fun handleTriggerIntent(intent: Intent?) {

@@ -167,7 +167,15 @@ object GenericUiStepOrchestrator {
                 )
                 val toolResult = ExecutionEngine.execute(context, request)
                 if (toolResult.success) {
-                    RuntimeStepVerifier.verifyUiTransition(context, preObservation.screenSignature, timeoutMs = 1500L)
+                    val verified = RuntimeStepVerifier.verifyUiTransition(context, preObservation.screenSignature, timeoutMs = 1500L)
+                    if (!verified) {
+                        return ToolResult(
+                            success = false,
+                            toolName = "tap",
+                            errorCode = "UI_TRANSITION_NOT_VERIFIED",
+                            message = "Tap dispatched but no fresh UI transition was observed"
+                        )
+                    }
                 }
                 toolResult
             }
@@ -186,7 +194,15 @@ object GenericUiStepOrchestrator {
                 )
                 val toolResult = ExecutionEngine.execute(context, request)
                 if (toolResult.success) {
-                    RuntimeStepVerifier.verifyTextEntered(context, step.text, timeoutMs = 1000L)
+                    val verified = RuntimeStepVerifier.verifyTextEntered(context, step.text, timeoutMs = 1000L)
+                    if (!verified) {
+                        return ToolResult(
+                            success = false,
+                            toolName = "type_text",
+                            errorCode = "TEXT_NOT_VERIFIED",
+                            message = "Text dispatch completed but the expected text was not observed in the target field"
+                        )
+                    }
                 }
                 toolResult
             }
@@ -216,7 +232,15 @@ object GenericUiStepOrchestrator {
                 )
                 val toolResult = ExecutionEngine.execute(context, request)
                 if (toolResult.success) {
-                    RuntimeStepVerifier.verifyUiTransition(context, preObservation.screenSignature, timeoutMs = 1500L)
+                    val verified = RuntimeStepVerifier.verifyUiTransition(context, preObservation.screenSignature, timeoutMs = 1500L)
+                    if (!verified) {
+                        return ToolResult(
+                            success = false,
+                            toolName = "press_key",
+                            errorCode = "UI_TRANSITION_NOT_VERIFIED",
+                            message = "Key dispatch completed but no fresh UI transition was observed"
+                        )
+                    }
                 }
                 toolResult
             }
@@ -229,7 +253,15 @@ object GenericUiStepOrchestrator {
                 )
                 val toolResult = ExecutionEngine.execute(context, request)
                 if (toolResult.success) {
-                    RuntimeStepVerifier.verifyUiTransition(context, preObservation.screenSignature, timeoutMs = 2000L)
+                    val verified = RuntimeStepVerifier.verifyUiTransition(context, preObservation.screenSignature, timeoutMs = 2000L)
+                    if (!verified) {
+                        return ToolResult(
+                            success = false,
+                            toolName = "press_enter",
+                            errorCode = "SUBMISSION_NOT_VERIFIED",
+                            message = "Enter/Search was dispatched but no fresh post-submit state was observed"
+                        )
+                    }
                 }
                 toolResult
             }
@@ -237,7 +269,15 @@ object GenericUiStepOrchestrator {
             is UiStep.PressBack -> {
                 val ok = service?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK) ?: false
                 if (ok) {
-                    RuntimeStepVerifier.verifyUiTransition(context, preObservation.screenSignature, timeoutMs = 1500L)
+                    val verified = RuntimeStepVerifier.verifyUiTransition(context, preObservation.screenSignature, timeoutMs = 1500L)
+                    if (!verified) {
+                        return ToolResult(
+                            success = false,
+                            toolName = "press_back",
+                            errorCode = "UI_TRANSITION_NOT_VERIFIED",
+                            message = "Back was dispatched but no fresh UI transition was observed"
+                        )
+                    }
                 }
                 ToolResult(success = ok, toolName = "press_back", message = if (ok) "Back pressed" else "Back failed")
             }

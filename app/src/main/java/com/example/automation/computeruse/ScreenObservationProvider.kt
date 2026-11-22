@@ -62,7 +62,7 @@ object ScreenObservationProvider {
                 ?: service?.windows?.firstOrNull { it.isActive }?.root?.packageName?.toString()
                 ?: service?.windows?.firstOrNull { it.isFocused }?.root?.packageName?.toString()
                 ?: com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot().packageName.takeIf { it.isNotBlank() }
-                ?: com.example.automation.state.WorldStateManager.getCurrentState().currentApp
+                ?: com.example.automation.state.WorldStateManager.getCurrentState().currentApp.takeIf { it.contains('.') && !it.contains(' ') }
                 ?: ""
             val currentActivity = rootNode?.className?.toString()?.takeIf { it.contains("Activity") }
                 ?: com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot().activityName
@@ -72,10 +72,11 @@ object ScreenObservationProvider {
             if (rootNode == null) {
                 val snapshot = com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot()
                 if (!snapshot.isFresh(2000L) || snapshot.packageName.isBlank()) {
+                    val safePkg = com.example.automation.state.WorldStateManager.getCurrentState().currentApp.takeIf { it.contains('.') && !it.contains(' ') } ?: ""
                     return@withTimeoutOrNull ScreenObservation(observationId = obsId, timestamp = snapshot.timestamp,
                         taskId = taskId, stepId = stepId, executionId = executionId,
                         causedByAction = causedByAction, expectedPostcondition = expectedPostcondition,
-                        foregroundPackage = com.example.automation.state.WorldStateManager.getCurrentState().currentApp)
+                        foregroundPackage = safePkg)
                 }
                 val snapshotInteractive = snapshot.nodes.filter { it.isVisibleToUser && (it.isClickable || it.isEditable || it.isFocusable || it.isScrollable) }.map {
                     InteractiveElement(
@@ -135,12 +136,13 @@ object ScreenObservationProvider {
                 val isFocused = node.isFocused
                 val isEnabled = node.isEnabled
                 val isSelected = node.isSelected
+                val isPassword = try { node.isPassword } catch (_: Exception) { false }
 
                 if (node.isVisibleToUser && !text.isNullOrBlank() && !visibleTexts.contains(text)) {
                     visibleTexts.add(text)
                 }
 
-                val isInteractive = isClickable || isEditable || isScrollable || isFocused || !desc.isNullOrBlank() || !id.isNullOrBlank()
+                val isInteractive = isClickable || isEditable || isScrollable || isFocused || !desc.isNullOrBlank() || !id.isNullOrBlank() || isPassword
                 if (node.isVisibleToUser && isInteractive && (bounds.width() > 0 && bounds.height() > 0)) {
                     val element = InteractiveElement(
                         id = id,
@@ -153,7 +155,8 @@ object ScreenObservationProvider {
                         isScrollable = isScrollable,
                         isFocused = isFocused,
                         isEnabled = isEnabled,
-                        isSelected = isSelected
+                        isSelected = isSelected,
+                        isPassword = isPassword
                     )
                     interactiveList.add(element)
                     if (isEditable) editableList.add(element)

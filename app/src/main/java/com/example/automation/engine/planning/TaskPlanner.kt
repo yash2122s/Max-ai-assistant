@@ -160,10 +160,10 @@ class TaskPlanner(
 
             return listOf(
                 TaskStep("maps_1", UiStep.OpenApp(appName = "Google Maps", packageName = targetApp), ExpectedOutcome.PackageForeground(targetApp)),
-                TaskStep("maps_2", UiStep.Tap(target = "Search here"), ExpectedOutcome.ElementPresent("Search here")),
-                TaskStep("maps_3", UiStep.TypeText(text = destination, target = "Search here"), ExpectedOutcome.TextContentEquals(destination)),
-                TaskStep("maps_4", UiStep.PressEnter, ExpectedOutcome.ElementPresent("Directions")),
-                TaskStep("maps_5", UiStep.Tap(target = "Directions"), ExpectedOutcome.ElementPresent("Start"))
+                TaskStep("maps_2", UiStep.Tap(target = "Search here"), ExpectedOutcome.ElementPresent("Search here", expectedPackage = targetApp)),
+                TaskStep("maps_3", UiStep.TypeText(text = destination, target = "Search here"), ExpectedOutcome.TextContentEquals(destination, expectedPackage = targetApp)),
+                TaskStep("maps_4", UiStep.PressEnter, ExpectedOutcome.ElementPresent("Directions", expectedPackage = targetApp)),
+                TaskStep("maps_5", UiStep.Tap(target = "Directions"), ExpectedOutcome.ElementPresent("Start", expectedPackage = targetApp))
             )
         }
 

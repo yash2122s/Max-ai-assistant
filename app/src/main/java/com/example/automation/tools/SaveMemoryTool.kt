@@ -72,9 +72,11 @@ class SaveMemoryTool : Tool {
 
             return@withContext when (result) {
                 is com.example.memory.data.MemoryValidationResult.Success -> {
+                    com.example.memory.secondbrain.SecondBrainBridge.syncMemoryAsync(context, memory)
                     ToolResult(
                         success = true,
                         toolName = name,
+                        verificationRequired = false,
                         message = "Memory successfully saved: '$title - $content'"
                     )
                 }
@@ -82,6 +84,7 @@ class SaveMemoryTool : Tool {
                     ToolResult(
                         success = false,
                         toolName = name,
+                        verificationRequired = false,
                         errorCode = "VALIDATION_FAILED",
                         message = result.message
                     )
@@ -91,6 +94,7 @@ class SaveMemoryTool : Tool {
             return@withContext ToolResult(
                 success = false,
                 toolName = name,
+                verificationRequired = false,
                 errorCode = "SAVE_FAILED",
                 message = "Failed to save memory: ${e.message}"
             )

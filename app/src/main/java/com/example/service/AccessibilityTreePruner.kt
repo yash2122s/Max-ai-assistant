@@ -70,7 +70,8 @@ data class PrunedNode(
     val isClickable: Boolean = false,
     val isEditable: Boolean = false,
     val isScrollable: Boolean = false,
-    val boundsInScreen: Rect = Rect()
+    val boundsInScreen: Rect = Rect(),
+    val isFocused: Boolean = false
 ) {
     fun toJsonObject(): JSONObject {
         val json = JSONObject()
@@ -82,6 +83,7 @@ data class PrunedNode(
         if (isClickable) json.put("clickable", true)
         if (isEditable) json.put("editable", true)
         if (isScrollable) json.put("scrollable", true)
+        if (isFocused) json.put("focused", true)
         json.put("bounds", "[${boundsInScreen.left},${boundsInScreen.top},${boundsInScreen.right},${boundsInScreen.bottom}]")
         return json
     }
@@ -249,7 +251,8 @@ object AccessibilityTreePruner {
                     isClickable = isClickable,
                     isEditable = isEditable,
                     isScrollable = isScrollable,
-                    boundsInScreen = rect
+                    boundsInScreen = rect,
+                    isFocused = node.isFocused
                 )
                 result.add(prunedNode)
             }
@@ -294,4 +297,3 @@ object AccessibilityTreePruner {
         return jsonArray
     }
 }
-

@@ -117,8 +117,9 @@ object GeminiModelResolver {
                         val rawName = item.optString("name", "")
                         val modelId = rawName.removePrefix("models/").trim()
 
-                        // Check if model is blacklisted/disallowed (Gemini 1.5, 2.0, or Live voice)
+                        // Check if model is blacklisted/disallowed (Gemini 1.5, 2.0, 2.5, or Live voice)
                         if (UiAgentModels.DISALLOWED_OBSOLETE_MODELS.contains(modelId.lowercase()) ||
+                            modelId.contains("2.5-flash") ||
                             modelId.contains("2.0-flash") ||
                             modelId.contains("1.5-flash") ||
                             modelId.contains("3.8-live")) {

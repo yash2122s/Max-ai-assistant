@@ -3,9 +3,11 @@ package com.example.automation.engine
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import com.example.automation.keyboard.KeyboardController
 import com.example.automation.state.SemanticNode
@@ -75,15 +77,28 @@ object GenericActionExecutor {
         return when (action) {
             is com.example.automation.computeruse.ComputerAction.TapElement -> {
                 val snapshot = com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot()
+                val expectedPackage = action.grounding?.packageName?.takeIf { it.isNotBlank() }
+                    ?: snapshot.packageName.takeIf { snapshot.nodes.isNotEmpty() && !snapshot.isStale && it.isNotBlank() }
+                if (!matchesActivePackage(expectedPackage)) {
+                    return ActionResult(false, ExecutionTier.NONE, "Target package is no longer active")
+                }
                 val targetQuery = action.targetText.ifBlank { action.contentDescription ?: action.resourceId ?: "" }
                 val grounded = if (targetQuery.isNotBlank() && snapshot.nodes.isNotEmpty()) {
-                    com.example.automation.grounding.ScoredTargetGroundingEngine.groundTarget(snapshot, targetQuery).bestCandidate
+                    val result = com.example.automation.grounding.ScoredTargetGroundingEngine.groundTarget(snapshot, targetQuery)
+                    result.bestCandidate?.takeIf { candidate ->
+                        !result.isAmbiguous &&
+                            (action.resourceId.isNullOrBlank() || candidate.resourceId == action.resourceId) &&
+                            (action.contentDescription.isNullOrBlank() || candidate.contentDescription == action.contentDescription) &&
+                            (action.targetText.isBlank() || candidate.text == action.targetText ||
+                                candidate.contentDescription == action.targetText || candidate.resourceId == action.targetText)
+                    }
                 } else null
 
                 val target = grounded ?: SemanticNode(
                     id = action.resourceId ?: "target_${targetQuery.hashCode()}",
-                    text = action.targetText.takeIf { it.isNotBlank() },
+                    text = action.targetText.takeIf { it.isNotBlank() && it != action.contentDescription },
                     contentDescription = action.contentDescription,
+                    resourceId = action.resourceId,
                     bounds = action.grounding?.bounds ?: android.graphics.Rect(),
                     isClickable = true
                 )
@@ -116,19 +131,60 @@ object GenericActionExecutor {
                 val fieldQuery = action.targetField
                 val targetNode = if (!fieldQuery.isNullOrBlank()) {
                     val snapshot = com.example.automation.state.CurrentUiStateStore.getCurrentSnapshot()
-                    com.example.automation.grounding.ScoredTargetGroundingEngine.groundTarget(snapshot, fieldQuery).bestCandidate
+                    val expectedPackage = action.grounding?.packageName?.takeIf { it.isNotBlank() }
+                        ?: snapshot.packageName.takeIf { snapshot.nodes.isNotEmpty() && !snapshot.isStale && it.isNotBlank() }
+                    if (!matchesActivePackage(expectedPackage)) {
+                        return ActionResult(false, ExecutionTier.NONE, "Input target package is no longer active")
+                    }
+                    val result = com.example.automation.grounding.ScoredTargetGroundingEngine.groundTarget(snapshot, fieldQuery)
+                    result.bestCandidate?.takeIf { candidate ->
+                        !result.isAmbiguous && candidate.isEditable &&
+                            (candidate.text == fieldQuery || candidate.contentDescription == fieldQuery ||
+                                candidate.resourceId == fieldQuery)
+                    }
                 } else null
 
                 if (targetNode != null) {
                     val res = executeSetTextNode(targetNode, action.text)
                     if (res.success && action.pressEnterAfter) {
-                        executeKeyPress("ENTER")
+                        val enterResult = executeKeyPress("ENTER")
+                        if (!enterResult.success) {
+                            return ActionResult(
+                                success = false,
+                                tier = res.tier,
+                                message = "Text was entered, but Enter submission failed: ${enterResult.message}"
+                            )
+                        }
                     }
                     res
                 } else {
+                    if (!fieldQuery.isNullOrBlank()) {
+                        return ActionResult(false, ExecutionTier.NONE, "Input target could not be resolved: $fieldQuery")
+                    }
+                    if (action.grounding != null) {
+                        val focused = try {
+                            LiveNodeResolver.rootProvider.invoke()?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+                        } catch (_: Exception) { null }
+                        val bounds = Rect()
+                        val validBounds = try {
+                            focused?.getBoundsInScreen(bounds)
+                            !bounds.isEmpty && bounds == action.grounding.bounds
+                        } catch (_: Exception) { false }
+                        if (!matchesActivePackage(action.grounding.packageName) ||
+                            focused == null || !validBounds) {
+                            return ActionResult(false, ExecutionTier.NONE, "Grounded input field is not focused")
+                        }
+                    }
                     val res = executeTypeText(action.text)
                     if (res.success && action.pressEnterAfter) {
-                        executeKeyPress("ENTER")
+                        val enterResult = executeKeyPress("ENTER")
+                        if (!enterResult.success) {
+                            return ActionResult(
+                                success = false,
+                                tier = res.tier,
+                                message = "Text was entered, but Enter submission failed: ${enterResult.message}"
+                            )
+                        }
                     }
                     res
                 }
@@ -157,8 +213,9 @@ object GenericActionExecutor {
     private fun executeClickNode(target: SemanticNode): ActionResult {
         // Tier 1: Accessibility Action API
         val liveNode = LiveNodeResolver.resolveLiveNode(target)
-        if (liveNode != null) {
-            val clickableTarget = LiveNodeResolver.resolveClickableTarget(liveNode)
+            ?: return ActionResult(false, ExecutionTier.NONE, "No unique live target for ${target.id}")
+        val clickableTarget = LiveNodeResolver.resolveClickableTarget(liveNode)
+        if (clickableTarget != null) {
             try {
                 if (clickableTarget.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
                     Log.d(TAG, "Tier 1: Clicked ${target.id} via Accessibility ACTION_CLICK")
@@ -170,9 +227,18 @@ object GenericActionExecutor {
         }
 
         // Tier 2: Gesture Dispatch
-        val cx = target.bounds.centerX()
-        val cy = target.bounds.centerY()
-        if (cx > 0 && cy > 0) {
+        val currentTarget = LiveNodeResolver.resolveLiveNode(target)
+            ?: return ActionResult(false, ExecutionTier.NONE, "Target changed before gesture fallback")
+        val liveBounds = Rect()
+        try {
+            if (!currentTarget.isVisibleToUser || !currentTarget.isEnabled) return ActionResult(false, ExecutionTier.NONE, "Live target is no longer actionable")
+            currentTarget.getBoundsInScreen(liveBounds)
+        } catch (_: Exception) {
+            return ActionResult(false, ExecutionTier.NONE, "Live target vanished before gesture")
+        }
+        val cx = liveBounds.centerX()
+        val cy = liveBounds.centerY()
+        if (!liveBounds.isEmpty && cx >= 0 && cy >= 0) {
             if (dispatchTap(cx, cy)) {
                 Log.d(TAG, "Tier 2: Tapped bounds center ($cx, $cy) for ${target.id}")
                 return ActionResult(true, ExecutionTier.TIER_2_GESTURE, "Tapped ($cx, $cy) via Gesture")
@@ -180,7 +246,7 @@ object GenericActionExecutor {
         }
 
         // Tier 3: Shell Fallback
-        if (cx > 0 && cy > 0) {
+        if (!liveBounds.isEmpty && cx >= 0 && cy >= 0) {
             if (JarvisAccessibilityService.runShell("input tap $cx $cy")) {
                 Log.d(TAG, "Tier 3: Tapped ($cx, $cy) via Shell")
                 return ActionResult(true, ExecutionTier.TIER_3_SHELL, "Tapped via Shell")
@@ -192,8 +258,9 @@ object GenericActionExecutor {
 
     private fun executeLongClickNode(target: SemanticNode): ActionResult {
         val liveNode = LiveNodeResolver.resolveLiveNode(target)
-        if (liveNode != null) {
-            val clickableTarget = LiveNodeResolver.resolveClickableTarget(liveNode)
+            ?: return ActionResult(false, ExecutionTier.NONE, "No unique live target for ${target.id}")
+        val clickableTarget = LiveNodeResolver.resolveClickableTarget(liveNode, AccessibilityNodeInfo.ACTION_LONG_CLICK)
+        if (clickableTarget != null) {
             try {
                 if (clickableTarget.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)) {
                     return ActionResult(true, ExecutionTier.TIER_1_ACCESSIBILITY_API, "Long clicked ${target.id} via ACTION_LONG_CLICK")
@@ -201,9 +268,18 @@ object GenericActionExecutor {
             } catch (_: Exception) {}
         }
 
-        val cx = target.bounds.centerX()
-        val cy = target.bounds.centerY()
-        if (cx > 0 && cy > 0) {
+        val currentTarget = LiveNodeResolver.resolveLiveNode(target)
+            ?: return ActionResult(false, ExecutionTier.NONE, "Target changed before long-press fallback")
+        val liveBounds = Rect()
+        try {
+            if (!currentTarget.isVisibleToUser || !currentTarget.isEnabled) return ActionResult(false, ExecutionTier.NONE, "Live target is no longer actionable")
+            currentTarget.getBoundsInScreen(liveBounds)
+        } catch (_: Exception) {
+            return ActionResult(false, ExecutionTier.NONE, "Live target vanished before long press")
+        }
+        val cx = liveBounds.centerX()
+        val cy = liveBounds.centerY()
+        if (!liveBounds.isEmpty && cx >= 0 && cy >= 0) {
             if (dispatchLongPress(cx, cy, 1000L)) {
                 return ActionResult(true, ExecutionTier.TIER_2_GESTURE, "Long pressed ($cx, $cy) via Gesture")
             }
@@ -214,7 +290,8 @@ object GenericActionExecutor {
 
     private fun executeSetTextNode(target: SemanticNode, text: String): ActionResult {
         val liveNode = LiveNodeResolver.resolveLiveNode(target)
-        if (liveNode != null) {
+        if (liveNode != null && liveNode.isEditable && !liveNode.isPassword && liveNode.isEnabled && liveNode.isVisibleToUser &&
+            liveNode.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT }) {
             try {
                 val args = Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
@@ -224,20 +301,6 @@ object GenericActionExecutor {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Tier 1 set text failed", e)
-            }
-        }
-
-        // Fallback: click target to focus, then input
-        val clickRes = executeClickNode(target)
-        if (clickRes.success) {
-            if (text.any { it in ";|`$\\<>\n\r\"'" }) {
-                Log.w(TAG, "[SECURITY_REJECT] Text contains prohibited shell metacharacters; rejected for shell input")
-                return ActionResult(false, ExecutionTier.NONE, "Unsafe text rejected for shell execution")
-            }
-            val safeText = text.replace(" ", "%s")
-            val cmd = "input text $safeText"
-            if (JarvisAccessibilityService.runShell(cmd)) {
-                return ActionResult(true, ExecutionTier.TIER_3_SHELL, "Text entered via Shell input")
             }
         }
 
@@ -326,18 +389,35 @@ object GenericActionExecutor {
     }
 
     private fun executeKeyPress(keyName: String): ActionResult {
-        val code = KeyboardController.KEY_MAP[keyName.uppercase()] ?: 66
+        val code = KeyboardController.KEY_MAP[keyName.trim().uppercase()] ?: keyName.trim().toIntOrNull()
+        if (code == null || code !in 1..KeyEvent.getMaxKeyCode()) {
+            return ActionResult(false, ExecutionTier.NONE, "Unsupported key $keyName")
+        }
         if (JarvisAccessibilityService.runShell("input keyevent $code")) {
             return ActionResult(true, ExecutionTier.TIER_3_SHELL, "Key $keyName pressed via Shell")
         }
         return ActionResult(false, ExecutionTier.NONE, "Failed to press key $keyName")
     }
 
+    private fun matchesActivePackage(expected: String?): Boolean {
+        if (expected.isNullOrBlank()) return true
+        val actual = LiveNodeResolver.rootProvider.invoke()?.packageName?.toString()
+        return !actual.isNullOrBlank() && actual == expected
+    }
+
     private fun executeTypeText(text: String): ActionResult {
         // Try Tier 1 accessibility on focused input node first
-        val root = JarvisAccessibilityService.getActiveRoot()
-        val focused = root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
-        if (focused != null) {
+        val root = LiveNodeResolver.rootProvider.invoke()
+        val focused = try { root?.findFocus(AccessibilityNodeInfo.FOCUS_INPUT) } catch (_: Exception) { null }
+        val bounds = Rect()
+        val validFocus = try {
+            focused != null && focused.isFocused && focused.isEditable && !focused.isPassword && focused.isEnabled &&
+                focused.isVisibleToUser && focused.actionList.any { it.id == AccessibilityNodeInfo.ACTION_SET_TEXT } &&
+                (root?.packageName?.toString().isNullOrBlank() || focused.packageName?.toString().isNullOrBlank() ||
+                    root?.packageName?.toString() == focused.packageName?.toString()) &&
+                run { focused.getBoundsInScreen(bounds); !bounds.isEmpty }
+        } catch (_: Exception) { false }
+        if (validFocus && focused != null) {
             val args = Bundle().apply {
                 putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
             }
@@ -350,17 +430,7 @@ object GenericActionExecutor {
             }
         }
 
-        if (text.any { it in ";|`$\\<>\n\r\"'" }) {
-            Log.w(TAG, "[SECURITY_REJECT] Text contains prohibited shell metacharacters; rejected for shell input")
-            return ActionResult(false, ExecutionTier.NONE, "Unsafe text rejected for shell execution")
-        }
-
-        val safeText = text.replace(" ", "%s")
-        val cmd = "input text $safeText"
-        if (JarvisAccessibilityService.runShell(cmd)) {
-            return ActionResult(true, ExecutionTier.TIER_3_SHELL, "Typed text via Shell")
-        }
-        return ActionResult(false, ExecutionTier.NONE, "Failed to type text")
+        return ActionResult(false, ExecutionTier.NONE, "No verified editable focused target for text input")
     }
 
     private fun dispatchTap(x: Int, y: Int): Boolean {

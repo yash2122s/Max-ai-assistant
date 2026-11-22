@@ -54,7 +54,12 @@ class LiveProtocolRegressionTest {
             val setup = JSONObject(client(level = level).buildSetupMessage()).getJSONObject("setup")
             assertEquals("models/gemini-3.8-live-extended-thinking", setup.getString("model"))
             val thinking = setup.getJSONObject("generationConfig").getJSONObject("thinkingConfig")
-            assertEquals(level.name, thinking.getString("thinkingLevel"))
+            val expectedBudget = when (level) {
+                LiveThinkingLevel.LOW -> 512
+                LiveThinkingLevel.MEDIUM -> 1024
+                LiveThinkingLevel.HIGH -> 2048
+            }
+            assertEquals(expectedBudget, thinking.getInt("thinkingBudget"))
             assertFalse(thinking.getBoolean("includeThoughts"))
             val declarations = setup.getJSONArray("tools").getJSONObject(0).getJSONArray("functionDeclarations")
             assertTrue(declarations.length() > 0)

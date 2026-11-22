@@ -71,11 +71,14 @@ fun isTeluguGoal(goal: String): Boolean {
     if (Regex("""[\u0C00-\u0C7F]""").containsMatchIn(goal)) return true
     val lower = goal.lowercase()
     val teluguKeywords = listOf(
-        "cheyyi", "chey", "chesanu", "pettandi", "pettu", "chudu", "ayindho", "ayyindi",
-        "open cheyyi", "open chey", "kani", "lo", "ki", "kosam", "naaku", "cheppu",
-        "teeyi", "teesey", "vellu", "pencu", "taggincu"
+        "cheyyi", "chey", "chesanu", "chesi", "pettandi", "pettu", "chudu", "ayindho", "ayyindi",
+        "open cheyyi", "open chey", "kani", "kosam", "naaku", "cheppu",
+        "teeyi", "teesey", "vellu", "pencu", "taggincu", "nundi", "nunchi", "meeda"
     )
-    return teluguKeywords.any { lower.contains(it) }
+    if (teluguKeywords.any { lower.contains(it) }) return true
+    // Word boundary check for 2-letter particles so words like "hello", "look", "skip" are not false positives
+    val particlePattern = Regex("""\b(?:lo|ki)\b""", RegexOption.IGNORE_CASE)
+    return particlePattern.containsMatchIn(goal)
 }
 
 /**
@@ -110,6 +113,7 @@ enum class ComputerUseErrorCode {
     SECURITY_BLOCKED,
     CONCURRENCY_BLOCKED,
     SHELL_COMMAND_REJECTED,
+    PERMISSION_REQUIRED,
     INSUFFICIENT_EVIDENCE
 }
 

@@ -38,9 +38,9 @@ private val RoyalDarkColorScheme = darkColorScheme(
 )
 
 private val RoyalLightColorScheme = lightColorScheme(
-    primary = NeonPink,
+    primary = MaxPrimaryRoyal,
     onPrimary = Color.White,
-    secondary = MagentaRose,
+    secondary = MaxAccentCyan,
     onSecondary = Color.White,
     tertiary = MaxRoyalGoldLight,
     onTertiary = Color.White,
@@ -48,10 +48,10 @@ private val RoyalLightColorScheme = lightColorScheme(
     onBackground = SlateInkPrimary,       // Slate 900 Primary Text (#0F172A)
     surface = LuminousWhite,              // Pure White Card Surface (#FFFFFF)
     onSurface = SlateInkPrimary,          // Slate 900 Primary Text (#0F172A)
-    surfaceVariant = SoftRoseTint,        // Soft Rose Elevated Surface (#FFF1F2)
+    surfaceVariant = MaxSurfaceElevated,  // Elevated Surface
     onSurfaceVariant = SlateInkSecondary, // Slate 600 Secondary Text (#475569)
-    outline = SoftRoseBorder,             // Soft Rose Hairline Border (#FCE7F3)
-    outlineVariant = SoftRoseBorderStrong,// Focused Rose Border (#FBCFE8)
+    outline = MaxBorderHairline,          // Hairline Border
+    outlineVariant = MaxBorderSpecular,   // Specular Border
     error = MaxDestructiveApple,
     onError = Color.White
 )
@@ -63,6 +63,7 @@ private val RoyalLightColorScheme = lightColorScheme(
 @Composable
 fun MaxTheme(
     darkTheme: Boolean = false,
+    useSurface: Boolean = true,
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) RoyalDarkColorScheme else RoyalLightColorScheme
@@ -77,11 +78,15 @@ fun MaxTheme(
             colorScheme = colorScheme,
             typography = Typography
         ) {
-            androidx.compose.material3.Surface(
-                color = colorScheme.background,
-                contentColor = colorScheme.onBackground,
-                content = content
-            )
+            if (useSurface) {
+                androidx.compose.material3.Surface(
+                    color = colorScheme.background,
+                    contentColor = colorScheme.onBackground,
+                    content = content
+                )
+            } else {
+                content()
+            }
         }
     }
 }
@@ -93,7 +98,8 @@ fun MaxTheme(
 fun MyApplicationTheme(
     darkTheme: Boolean = false,
     dynamicColor: Boolean = false,
+    useSurface: Boolean = true,
     content: @Composable () -> Unit,
 ) {
-    MaxTheme(darkTheme = darkTheme, content = content)
+    MaxTheme(darkTheme = darkTheme, useSurface = useSurface, content = content)
 }

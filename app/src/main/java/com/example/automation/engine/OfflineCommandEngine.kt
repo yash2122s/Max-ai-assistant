@@ -102,13 +102,31 @@ object OfflineCommandEngine {
         }
 
         // 5. Volume Controls (Percent & Direction in English, Telugu, Tenglish)
-        val volumePatternPercent = Regex("set\\s+volume\\s+to\\s+(\\d+)(?:%|\\s+percent)?")
-        val volumePatternUp = Regex("(?:increase|raise|volume|sound)\\s+(?:up|volume|sound|pencu|penchandi)")
-        val volumePatternDown = Regex("(?:decrease|lower|volume|sound)\\s+(?:down|volume|sound|taggincu|tagginchandi)")
+        val volumePatternPercent = Regex(
+            """(?:set\s+)?(?:volume|sound|audio|వాల్యూమ్|సౌండ్)\s*(?:ni|nu|ki|to|lo)?\s*(?:adjust\s+chey\s*)?(\d{1,3})\s*(?:%|percent|shatham|శాతం)?(?:\s*(?:pe\s*to|pettu|petu|lo\s*pettu|ki\s*pettu|lo\s*unsu|ki\s*set\s*chey|set\s*chey|chey|ki|lo|to))?""",
+            RegexOption.IGNORE_CASE
+        )
+        val volumePatternPercentLeading = Regex(
+            """(\d{1,3})\s*(?:%|percent|shatham|శాతం)\s*(?:volume|sound|audio|వాల్యూమ్|సౌండ్)(?:\s*(?:pe\s*to|pettu|petu|lo\s*pettu|ki\s*pettu|set\s*chey|chey))?""",
+            RegexOption.IGNORE_CASE
+        )
+        val volumePatternUp = Regex(
+            """(?:increase|raise|up)\s*(?:the\s*)?(?:volume|sound)|(?:volume|sound|audio|వాల్యూమ్|సౌండ్)\s*(?:ni|nu)?\s*(?:increase|raise|up|penchu|pencu|penchandi|ekkuva|పెంచు|పెంచండి)(?:\s*(?:chey|cheyi|చేయి|చెయ్))?""",
+            RegexOption.IGNORE_CASE
+        )
+        val volumePatternDown = Regex(
+            """(?:decrease|lower|down|reduce)\s*(?:the\s*)?(?:volume|sound)|(?:volume|sound|audio|వాల్యూమ్|సౌండ్)\s*(?:ni|nu)?\s*(?:decrease|lower|down|reduce|tagginchu|taggincu|tagginchandi|thagginchu|thaggincu|thagginchandi|thakkuva|తగ్గించు|తగ్గించండి)(?:\s*(?:chey|cheyi|చేయి|చెయ్))?""",
+            RegexOption.IGNORE_CASE
+        )
+        val volumePatternAdjust = Regex(
+            """(?:volume|sound|audio|వాల్యూమ్|సౌండ్)\s*(?:ni|nu)?\s*(?:adjust\s*chey|adjust\s*cheyi|adjust\s*cheyyi|control|సర్దుబాటు\s*చేయి)""",
+            RegexOption.IGNORE_CASE
+        )
 
         val volMatchPercent = volumePatternPercent.find(cleanedText)
-        if (volMatchPercent != null) {
-            val percentVal = volMatchPercent.groupValues[1].toIntOrNull() ?: 50
+            ?: volumePatternPercentLeading.find(cleanedText)
+        if (volMatchPercent != null && volMatchPercent.groupValues[1].isNotEmpty()) {
+            val percentVal = (volMatchPercent.groupValues[1].toIntOrNull() ?: 50).coerceIn(0, 100)
             val args = JsonObject().apply { addProperty("percent", percentVal) }
             Log.d(TAG, "Matched Offline Action: SET_VOLUME ($percentVal%)")
             val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
@@ -123,6 +141,11 @@ object OfflineCommandEngine {
             Log.d(TAG, "Matched Offline Action: SET_VOLUME (down)")
             val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
             return if (res.message.isNullOrEmpty()) res.copy(message = "Volume decreased.") else res
+        } else if (volumePatternAdjust.containsMatchIn(cleanedText)) {
+            val args = JsonObject().apply { addProperty("direction", "show") }
+            Log.d(TAG, "Matched Offline Action: SET_VOLUME (show slider)")
+            val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
+            return if (res.message.isNullOrEmpty()) res.copy(message = "Volume slider opened.") else res
         }
 
         // 6. Brightness Controls (Percent & Direction in English, Telugu, Tenglish)
@@ -325,17 +348,46 @@ object OfflineCommandEngine {
         }
 
         // 12. YouTube Search / Play
-        val youtubePattern1 = Regex("(?:play|search)\\s+(.+?)\\s+on\\s+youtube")
-        val youtubePattern2 = Regex("youtube\\s+(?:lo|search)\\s+(.+?)(?:\\s+play\\s+chey|\\s+play\\s+cheyyi|\\s+open\\s+chey|\\s+open\\s+cheyyi)?")
-        val youtubePattern3 = Regex("యూట్యూబ్‌లో\\s+(.+?)\\s+ప్లే\\s+చేయి")
+        // Handles:
+        // - "youtube lo pubg songs play chey / cheyyi / pettu"
+        // - "youtube lo pubg songs"
+        // - "play pubg songs on youtube / in youtube"
+        // - "search pubg songs on youtube"
+        // - "యూట్యూబ్‌లో pubg songs ప్లే చేయి"
+        val isYoutubeIntent = cleanedText.contains("youtube") || cleanedText.contains("యూట్యూబ్") || cleanedText.contains("yt")
+        if (isYoutubeIntent) {
+            val hasPlayOrSearch = cleanedText.contains("play") || cleanedText.contains("search") || cleanedText.contains("watch") ||
+                    cleanedText.contains("song") || cleanedText.contains("songs") || cleanedText.contains("పాట") ||
+                    cleanedText.contains("ప్లే") || cleanedText.contains("వెతుకు") || cleanedText.contains("చూడు") ||
+                    cleanedText.contains("lo") || cleanedText.contains("లో") || cleanedText.contains("chey") || cleanedText.contains("cheyyi") ||
+                    cleanedText.contains("pettu")
 
-        val matchYt = youtubePattern1.find(cleanedText) ?: youtubePattern2.find(cleanedText) ?: youtubePattern3.find(cleanedText)
-        if (matchYt != null) {
-            val youtubeQuery = matchYt.groupValues[1].trim()
-            val args = JsonObject().apply { addProperty("query", youtubeQuery) }
-            Log.d(TAG, "Matched Offline Action: YOUTUBE_SEARCH ($youtubeQuery)")
-            val res = ExecutionEngine.execute(context, ExecutionRequest(action = "YOUTUBE_SEARCH", arguments = args))
-            return if (res.message.isNullOrEmpty()) res.copy(message = "Searching YouTube for '$youtubeQuery'...") else res
+            if (hasPlayOrSearch) {
+                var extractedQuery = cleanedText
+                    // Remove prefixes
+                    .replace(Regex("""(?i)^(?:play|search|watch|listen\s+to|listen)\s+"""), "")
+                    .replace(Regex("""(?i)^(?:యూట్యూబ్‌లో|యూట్యూబ్\s*లో|యూట్యూబ్లో|యూట్యూబ్)\s*"""), "")
+                    .replace(Regex("""(?i)^(?:youtube|yt)\s+(?:lo|search|in|open)?\s*"""), "")
+                    // Remove target platform indicators
+                    .replace(Regex("""(?i)\b(?:on|in)\s+youtube\b"""), "")
+                    .replace(Regex("""(?i)\byoutube\s+lo\b"""), "")
+                    .replace(Regex("""(?i)\byoutube\b"""), "")
+                    .replace(Regex("""(?i)\byt\b"""), "")
+                    .replace(Regex("""(?i)(?:యూట్యూబ్‌లో|యూట్యూబ్\s*లో|యూట్యూబ్లో|యూట్యూబ్)"""), "")
+                    // Remove action verbs and helper words at start or end
+                    .replace(Regex("""(?i)\b(?:play|search|watch|sing|listen\s+to|listen)\b"""), "")
+                    .replace(Regex("""(?i)\b(?:play\s+chey|play\s+cheyyi|play\s+pettu|open\s+chey|open\s+cheyyi|chey|cheyyi|pettu)\b"""), "")
+                    .replace(Regex("""(?i)(?:ప్లే\s*చేయి|ప్లే\s*చెయ్|ప్లే|వెతుకు|చూడు|చేయి|చెయ్|పెట్టు)"""), "")
+                    .replace(Regex("""\s+"""), " ")
+                    .trim()
+
+                if (extractedQuery.isNotBlank() && extractedQuery !in listOf("open", "launch", "app", "video", "videos")) {
+                    Log.d(TAG, "Matched Offline Action: YOUTUBE_SEARCH ($extractedQuery)")
+                    val args = JsonObject().apply { addProperty("query", extractedQuery) }
+                    val res = ExecutionEngine.execute(context, ExecutionRequest(action = "YOUTUBE_SEARCH", arguments = args))
+                    return if (res.message.isNullOrEmpty()) res.copy(message = "Searching YouTube for '$extractedQuery'...") else res
+                }
+            }
         }
 
         // 13. Open App Patterns (Single app only, compound commands handled by GoalPlanner)

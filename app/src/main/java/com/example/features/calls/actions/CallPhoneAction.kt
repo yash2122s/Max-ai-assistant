@@ -41,6 +41,12 @@ class CallPhoneAction : BaseAction<JSONObject>() {
             }
         }.trim()
 
+        if (contactParam.any { it in "*#;," }) {
+            val msg = "Special characters and USSD codes are not permitted in phone calls."
+            logError(msg)
+            throw IllegalArgumentException(msg)
+        }
+
         // Fix for LLM context hallucination: If the LLM re-submits an old contactId from a previous 
         // AwaitingConfirmation turn, but the user changed the target (e.g., 'sai2' instead of 'sriramulu'),
         // the contactParam will not match the pending display name. We must clear the IDs to force resolution.
@@ -241,7 +247,11 @@ class CallPhoneAction : BaseAction<JSONObject>() {
             }
 
             PendingCallManager.setCalling()
-            startCallOrDial(context, validatedNumber)
+            val callResult = startCallOrDial(context, validatedNumber)
+            payload.put("callResult", callResult)
+            if (callResult == "Opened the dialer") {
+                payload.put("dialerOpened", true)
+            }
         } catch (e: Exception) {
             logError("Failed to make call for contactId: $contactId", e)
             throw e
@@ -291,19 +301,64 @@ class CallPhoneAction : BaseAction<JSONObject>() {
         return null
     }
 
-    private fun startCallOrDial(context: Context, phoneNumber: String) {
-        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-            val callIntent = Intent(Intent.ACTION_CALL).apply {
+    private fun isEmergencyNumber(context: Context, phoneNumber: String): Boolean {
+        val cleanNumber = phoneNumber.replace(Regex("[^0-9+]"), "")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+            try {
+                val isEmerg = telephonyManager?.isEmergencyNumber(cleanNumber)
+                if (isEmerg == true) return true
+            } catch (_: Exception) {}
+        }
+        val fallbackEmergency = DirectCallAuthorization.EMERGENCY_NUMBERS
+        val digits = cleanNumber.filter(Char::isDigit)
+        return fallbackEmergency.contains(digits) || fallbackEmergency.contains(cleanNumber)
+    }
+
+    private fun startCallOrDial(context: Context, phoneNumber: String): String {
+        if (phoneNumber.any { it in "*#;," }) {
+            val msg = "Special characters and USSD codes are not permitted in phone calls."
+            logError(msg)
+            throw IllegalArgumentException(msg)
+        }
+
+        if (isEmergencyNumber(context, phoneNumber)) {
+            val dialIntent = Intent(Intent.ACTION_DIAL).apply {
                 data = Uri.parse("tel:${Uri.encode(phoneNumber)}")
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK
             }
-            context.startActivity(callIntent)
-        } else {
-            // ACTION_DIAL only opens a pre-filled dialer and does not place the
-            // requested call. Treating it as success caused the assistant to
-            // report a call that was never made.
+            context.startActivity(dialIntent)
+            com.example.automation.engine.truth.ExecutionTruthCoordinator.clearTurnExecution()
+            log("Emergency number requested; opened the dialer without placing direct call.")
+            return "Opened the dialer"
+        }
+
+        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
             logError("CALL_PHONE permission not granted; refusing to downgrade to ACTION_DIAL")
             throw CallPermissionRequiredException()
         }
+
+        val uri = Uri.fromParts("tel", phoneNumber, null)
+        val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+        var placed = false
+        if (telecomManager != null) {
+            try {
+                telecomManager.placeCall(uri, android.os.Bundle())
+                placed = true
+            } catch (se: SecurityException) {
+                logError("TelecomManager.placeCall SecurityException, falling back to ACTION_CALL", se)
+            } catch (e: Exception) {
+                logError("TelecomManager.placeCall failed, falling back to ACTION_CALL", e)
+            }
+        }
+
+        if (!placed) {
+            val callIntent = Intent(Intent.ACTION_CALL).apply {
+                data = uri
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(callIntent)
+        }
+        return "Call placed"
     }
 }

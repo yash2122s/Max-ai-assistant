@@ -4,7 +4,13 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
+import com.example.domain.policy.LanguagePolicy
 import java.util.UUID
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class SettingsManager(private val context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("app_settings", Context.MODE_PRIVATE)
@@ -33,26 +39,8 @@ class SettingsManager(private val context: Context) {
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 )
             } catch (e: Exception) {
-                android.util.Log.e("SettingsManager", "Encrypted preferences initialization failed; attempting encrypted recovery")
-                try {
-                    // Try to delete corrupted shared prefs file and recreate
-                    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
-                        context.deleteSharedPreferences("jarvis_secure_settings")
-                    } else {
-                        context.getSharedPreferences("jarvis_secure_settings", Context.MODE_PRIVATE).edit().clear().apply()
-                    }
-                    val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-                    EncryptedSharedPreferences.create(
-                        "jarvis_secure_settings",
-                        masterKeyAlias,
-                        context.applicationContext,
-                        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                    )
-                } catch (recreateException: Exception) {
-                    android.util.Log.e("SettingsManager", "Encrypted preferences recovery failed")
-                    throw IllegalStateException("Unable to initialize encrypted preferences", recreateException)
-                }
+                android.util.Log.e("SettingsManager", "Encrypted preferences initialization failed", e)
+                throw IllegalStateException("Unable to initialize encrypted preferences", e)
             }
         }
     }
@@ -103,10 +91,29 @@ class SettingsManager(private val context: Context) {
         private const val KEY_UI_AGENT_API_KEY = "ui_agent_api_key"
         private const val KEY_UI_AGENT_MODEL = "ui_agent_model"
         private const val KEY_CLOUD_MEMORY_SYNC = "cloud_memory_sync_enabled"
+        private const val KEY_WEB_DASHBOARD_URL = "web_dashboard_url"
+        private const val KEY_SECOND_BRAIN_ENABLED = "second_brain_enabled"
+        private const val KEY_SECOND_BRAIN_URL = "second_brain_url"
+        const val DEFAULT_SECOND_BRAIN_URL = "http://192.168.0.116:3000"
 
         private const val DEFAULT_BACKEND_URL = "https://your-jarvis-backend.onrender.com"
+        const val DEFAULT_WEB_DASHBOARD_URL = "https://max-ai-agent-official.vercel.app/"
         const val DEFAULT_UI_AGENT_PROVIDER = "openrouter"
         const val DEFAULT_UI_AGENT_MODEL = "stealth/ox-alpha"
+
+        @Volatile
+        private var instance: SettingsManager? = null
+
+        fun getInstance(context: Context): SettingsManager {
+            return instance ?: synchronized(this) {
+                instance ?: SettingsManager(context.applicationContext).also { instance = it }
+            }
+        }
+
+        @androidx.annotation.VisibleForTesting
+        fun setInstanceForTesting(manager: SettingsManager?) {
+            instance = manager
+        }
     }
 
     var backendUrl: String
@@ -161,8 +168,24 @@ class SettingsManager(private val context: Context) {
         set(value) = prefs.edit().putBoolean("is_dark_mode", value).apply()
 
     var languagePreference: String
-        get() = prefs.getString("language_preference", "Tinglish") ?: "Tinglish"
-        set(value) = prefs.edit().putString("language_preference", value).apply()
+        get() = LanguagePolicy.canonicalPreference(prefs.getString("language_preference", LanguagePolicy.DEFAULT_LANGUAGE))
+        set(value) {
+            val canonical = LanguagePolicy.canonicalPreference(value)
+            if (canonical != languagePreference || prefs.getString("language_preference", null) != canonical) {
+                prefs.edit().putString("language_preference", canonical).apply()
+            }
+        }
+
+    /** SharedPreferences notifications reach every SettingsManager instance, not only the writer. */
+    val languagePreferenceFlow: Flow<String>
+        get() = callbackFlow {
+            val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+                if (key == null || key == "language_preference") trySend(languagePreference)
+            }
+            prefs.registerOnSharedPreferenceChangeListener(listener)
+            trySend(languagePreference)
+            awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        }.distinctUntilChanged().conflate()
 
     var botPersona: String
         get() = prefs.getString("bot_persona", "Human Type Talking") ?: "Human Type Talking"
@@ -302,6 +325,11 @@ class SettingsManager(private val context: Context) {
         get() = prefs.getString("approval_allowlist", "") ?: ""
         set(value) = prefs.edit().putString("approval_allowlist", value).apply()
 
+    /** Master toggle for Dynamic Island HUD overlay (default true). */
+    var isOverlayEnabled: Boolean
+        get() = prefs.getBoolean("is_overlay_enabled", true)
+        set(value) = prefs.edit().putBoolean("is_overlay_enabled", value).apply()
+
     /** Whether Dynamic HUD overlay only shows during active voice/assistant sessions (default true). */
     var overlayOnlyInVoiceMode: Boolean
         get() = prefs.getBoolean("overlay_only_in_voice_mode", true)
@@ -372,8 +400,8 @@ class SettingsManager(private val context: Context) {
 
     var liveThinkingLevel: com.example.network.model.LiveThinkingLevel
         get() = runCatching {
-            com.example.network.model.LiveThinkingLevel.valueOf(prefs.getString("live_thinking_level", "HIGH") ?: "HIGH")
-        }.getOrDefault(com.example.network.model.LiveThinkingLevel.HIGH)
+            com.example.network.model.LiveThinkingLevel.valueOf(prefs.getString("live_thinking_level", "LOW") ?: "LOW")
+        }.getOrDefault(com.example.network.model.LiveThinkingLevel.LOW)
         set(value) = prefs.edit().putString("live_thinking_level", value.name).apply()
 
     /** Voice persona for Gemini Live audio output. Options: Sulafat, Aoede, Kore, Fenrir, Puck, Algieba, etc. */
@@ -413,6 +441,14 @@ class SettingsManager(private val context: Context) {
     var whatsappSelectedContacts: Set<String>
         get() = prefs.getStringSet("whatsapp_selected_contacts", emptySet()) ?: emptySet()
         set(value) = prefs.edit().putStringSet("whatsapp_selected_contacts", value).apply()
+
+    var isAutoSendWithoutConfirmation: Boolean
+        get() = prefs.getBoolean("auto_send_without_confirmation", false)
+        set(value) = prefs.edit().putBoolean("auto_send_without_confirmation", value).apply()
+
+    var isAnalyticsEnabled: Boolean
+        get() = prefs.getBoolean("analytics_enabled", true)
+        set(value) = prefs.edit().putBoolean("analytics_enabled", value).apply()
 
     // --- UI Automation Agent Settings (OpenRouter Primary / Ox Alpha / Gemini Fallback) ---
 
@@ -456,4 +492,26 @@ class SettingsManager(private val context: Context) {
     var isMaxEnabled: Boolean
         get() = prefs.getBoolean(KEY_MAX_ENABLED, true)
         set(value) { prefs.edit().putBoolean(KEY_MAX_ENABLED, value).commit() }
+
+    // --- Web Dashboard & Portal URL ---
+
+    var webDashboardUrl: String
+        get() {
+            val url = prefs.getString(KEY_WEB_DASHBOARD_URL, DEFAULT_WEB_DASHBOARD_URL) ?: DEFAULT_WEB_DASHBOARD_URL
+            return if (url.isBlank() || url == "http://localhost:8000") DEFAULT_WEB_DASHBOARD_URL else url
+        }
+        set(value) = prefs.edit().putString(KEY_WEB_DASHBOARD_URL, value.trim()).apply()
+
+    // --- Second Brain Server Bridge ---
+
+    var isSecondBrainEnabled: Boolean
+        get() = prefs.getBoolean(KEY_SECOND_BRAIN_ENABLED, false)
+        set(value) = prefs.edit().putBoolean(KEY_SECOND_BRAIN_ENABLED, value).apply()
+
+    var secondBrainUrl: String
+        get() {
+            val url = prefs.getString(KEY_SECOND_BRAIN_URL, DEFAULT_SECOND_BRAIN_URL) ?: DEFAULT_SECOND_BRAIN_URL
+            return if (url.isBlank()) DEFAULT_SECOND_BRAIN_URL else url.trimEnd('/')
+        }
+        set(value) = prefs.edit().putString(KEY_SECOND_BRAIN_URL, value.trim().trimEnd('/')).apply()
 }

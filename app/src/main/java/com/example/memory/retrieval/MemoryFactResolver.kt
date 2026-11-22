@@ -27,20 +27,36 @@ object MemoryFactResolver {
         if (lower in setOf(
             "who am i", "what is my name", "naa peru enti", "na peru enti", "na peru",
             "na name enti", "naa name enti", "naa peru cheppu", "na peru cheppu",
+            "నా పేరు ఏంటి", "నా పేరు చెప్పు", "నా పేరు ఏమిటి", "నా పేరు గుర్తుందా", "నా గురించి చెప్పు",
+            "నా మెమరీస్ ఏంటి", "నా పేరు", "ఎవరు నేను",
             "gurthupettukonna name enti", "gurtupettukunna name enti", "gurthupettukonna name",
             "mera naam kya hai", "what do you know about me", "what do you remember about me",
             "naa gurinchi em thelusu", "na gurinchi em thelusu", "na gurinchi cheppu",
             "list my memories", "my memories", "na memories enti"
         )) return true
 
+        // Device & hardware state queries must NEVER be intercepted as personal memories!
+        val isDeviceQuery = lower.contains("battery") || lower.contains("charge") || lower.contains("charging") ||
+                            lower.contains("percentage") || lower.contains("flashlight") || lower.contains("torch") ||
+                            lower.contains("bluetooth") || lower.contains("wifi") || lower.contains("wi-fi") ||
+                            lower.contains("volume") || lower.contains("brightness") || lower.contains("screen") ||
+                            lower.contains("display") || lower.contains("storage") || lower.contains("ram") ||
+                            lower.contains("settings") || lower.contains("location") || lower.contains("ip address")
+        if (isDeviceQuery) return false
+
         // Flexible query detection for user name / identity
-        val hasNameInquiry = lower.contains("na peru") || lower.contains("naa peru") || lower.contains("na name") || lower.contains("naa name") || lower.contains("my name")
+        val hasNameInquiry = lower.contains("na peru") || lower.contains("naa peru") || lower.contains("na name") || lower.contains("naa name") || lower.contains("my name") || lower.contains("నా పేరు") || lower.contains("నా నేమ్")
         val hasInquiryWord = lower.contains("enti") || lower.contains("emiti") || lower.contains("cheppu") || 
                              lower.contains("gurthunda") || lower.contains("gurtunda") || lower.contains("telusa") || 
-                             lower.contains("thelusu") || lower.contains("what") || lower.endsWith("?")
+                             lower.contains("thelusu") || lower.contains("what") || lower.contains("ఏంటి") || lower.contains("చెప్పు") || lower.endsWith("?")
         if (hasNameInquiry && hasInquiryWord) return true
 
         // Question patterns: "what is my ...", "which ... do i ...", "naa ... enti", "tell me my ...", etc.
+        if (lower.startsWith("who is ") || lower.startsWith("tell me about ") ||
+            lower.contains("evaru") || lower.contains("gurinchi cheppu") ||
+            lower.contains("sarika") || lower.contains("second brain")
+        ) return true
+
         if (lower.startsWith("what is my ") || lower.startsWith("what's my ") ||
             lower.startsWith("tell me my ") || lower.startsWith("tell me about my ") ||
             lower.startsWith("do you know my ") || lower.startsWith("do you remember my ") ||
@@ -49,8 +65,8 @@ object MemoryFactResolver {
             (lower.startsWith("what ") && (lower.contains("do i have") || lower.contains("do i use") || lower.contains("is my")))
         ) return true
 
-        if ((lower.startsWith("naa ") || lower.startsWith("na ") || lower.startsWith("my ")) &&
-            (lower.endsWith("enti") || lower.endsWith("enti?") || lower.endsWith("emiti") || lower.endsWith("emiti?") || lower.endsWith("cheppu") || lower.endsWith("gurthunda") || lower.endsWith("gurtunda") || lower.endsWith("telusa") || lower.endsWith("name") || lower.endsWith("peru"))
+        if ((lower.startsWith("naa ") || lower.startsWith("na ") || lower.startsWith("my ") || lower.startsWith("నా ")) &&
+            (lower.endsWith("enti") || lower.endsWith("enti?") || lower.endsWith("emiti") || lower.endsWith("emiti?") || lower.endsWith("cheppu") || lower.endsWith("gurthunda") || lower.endsWith("gurtunda") || lower.endsWith("telusa") || lower.endsWith("name") || lower.endsWith("peru") || lower.endsWith("ఏంటి") || lower.endsWith("చెప్పు"))
         ) return true
 
         if (lower.startsWith("mera ") || lower.startsWith("meri ")) {
@@ -66,6 +82,24 @@ object MemoryFactResolver {
     suspend fun resolve(context: Context, userText: String): MemoryFactResult? {
         if (!isMemoryQuery(userText)) return null
 
+        val settings = com.example.data.preferences.SettingsManager(context)
+        val targetLang = com.example.domain.policy.LanguagePolicy.resolveResponseLanguage(userText, settings.languagePreference)
+
+        // Query Second Brain Server if enabled (performs real-time visual file reading on HUD)
+        if (com.example.memory.secondbrain.SecondBrainBridge.isConfigured(context)) {
+            val sbResult = com.example.memory.secondbrain.SecondBrainBridge.queryMemoriesWithVisualFeedback(
+                context,
+                userText,
+                targetLang
+            )
+            if (sbResult != null && sbResult.found) {
+                return MemoryFactResult(
+                    found = true,
+                    responseText = sbResult.responseText
+                )
+            }
+        }
+
         val repository = MemoryRepository.getInstance(context)
         val memories = repository.getAllEnabled().filter { !it.isPrivate }
 
@@ -75,17 +109,30 @@ object MemoryFactResolver {
         val isSummaryQuery = lower in setOf(
             "what do you know about me", "what do you remember about me",
             "naa gurinchi em thelusu", "na gurinchi em thelusu", "na gurinchi cheppu",
-            "list my memories", "my memories", "na memories enti", "tell me everything you know about me"
+            "list my memories", "my memories", "na memories enti", "tell me everything you know about me",
+            "నా గురించి చెప్పు", "నా మెమరీస్ ఏంటి"
         )
 
         if (isSummaryQuery) {
             if (memories.isEmpty()) {
+                val notFoundText = when (targetLang) {
+                    com.example.domain.policy.AssistantLanguage.TELUGU -> "సార్, నా దగ్గర మీకు సంబంధించిన పర్మనెంట్ మెమరీలు ఏమీ లేవు."
+                    com.example.domain.policy.AssistantLanguage.ENGLISH -> "Sir, I don't have any permanent memories saved for you."
+                    com.example.domain.policy.AssistantLanguage.HINDI -> "सर, मेरे पास आपसे संबंधित कोई स्थायी मेमोरी नहीं है।"
+                    com.example.domain.policy.AssistantLanguage.TINGLISH -> "Sir, naa daggara meeku sambandhinchina permanent memories emi levu."
+                }
                 return MemoryFactResult(
                     found = false,
-                    responseText = "Sir, naa daggara meeku sambandhinchina permanent memories emi levu."
+                    responseText = notFoundText
                 )
             }
-            val sb = StringBuilder("Mee gurinchi naa memory lo unnavi:\n")
+            val header = when (targetLang) {
+                com.example.domain.policy.AssistantLanguage.TELUGU -> "మీ గురించి నా మెమరీలో ఉన్నవి:\n"
+                com.example.domain.policy.AssistantLanguage.ENGLISH -> "Here is what I remember about you:\n"
+                com.example.domain.policy.AssistantLanguage.HINDI -> "मुझे आपके बारे में यह याद है:\n"
+                com.example.domain.policy.AssistantLanguage.TINGLISH -> "Mee gurinchi naa memory lo unnavi:\n"
+            }
+            val sb = StringBuilder(header)
             memories.take(5).forEach { mem ->
                 sb.append("• ${mem.title}: ${mem.content}\n")
             }
@@ -97,9 +144,15 @@ object MemoryFactResolver {
 
         // 2. Specific fact inquiry (e.g. "What is my favourite food?", "What is my name?")
         if (memories.isEmpty()) {
+            val notFoundText = when (targetLang) {
+                com.example.domain.policy.AssistantLanguage.TELUGU -> "సార్, అది నా మెమరీలో లేదు."
+                com.example.domain.policy.AssistantLanguage.ENGLISH -> "Sir, that is not in my memory."
+                com.example.domain.policy.AssistantLanguage.HINDI -> "सर, यह मेरी मेमोरी में नहीं है।"
+                com.example.domain.policy.AssistantLanguage.TINGLISH -> "Sir, adi naa memory lo ledu."
+            }
             return MemoryFactResult(
                 found = false,
-                responseText = "Sir, adi naa memory lo ledu."
+                responseText = notFoundText
             )
         }
 
@@ -154,7 +207,7 @@ object MemoryFactResolver {
         }
 
         if (bestMatch != null && highestScore >= 3) {
-            val formattedResponse = formatMemoryFactResponse(bestMatch, userText)
+            val formattedResponse = formatMemoryFactResponse(bestMatch, userText, targetLang)
             return MemoryFactResult(
                 found = true,
                 matchedMemory = bestMatch,
@@ -162,27 +215,80 @@ object MemoryFactResolver {
             )
         }
 
+        val notFoundText = when (targetLang) {
+            com.example.domain.policy.AssistantLanguage.TELUGU -> "సార్, అది నా మెమరీలో లేదు."
+            com.example.domain.policy.AssistantLanguage.ENGLISH -> "Sir, that is not in my memory."
+            com.example.domain.policy.AssistantLanguage.HINDI -> "सर, यह मेरी मेमोरी में नहीं है।"
+            com.example.domain.policy.AssistantLanguage.TINGLISH -> "Sir, adi naa memory lo ledu."
+        }
         return MemoryFactResult(
             found = false,
-            responseText = "Sir, adi naa memory lo ledu."
+            responseText = notFoundText
         )
     }
 
-    private fun formatMemoryFactResponse(memory: PermanentMemory, userQuery: String): String {
+    private fun formatMemoryFactResponse(
+        memory: PermanentMemory,
+        userQuery: String,
+        targetLang: com.example.domain.policy.AssistantLanguage = com.example.domain.policy.AssistantLanguage.TINGLISH
+    ): String {
         val title = memory.title.trim()
         val content = memory.content.trim()
 
+        val isName = title.contains("name", ignoreCase = true) || title.contains("peru", ignoreCase = true) || content.contains("User name", ignoreCase = true)
+
+        if (isName) {
+            val nameValue = content.replace(Regex("(?i)^User name is\\s*"), "")
+                .replace(Regex("(?i)^User is\\s*"), "")
+                .replace(Regex("(?i)^Mee peru\\s*"), "")
+                .trim()
+            return when (targetLang) {
+                com.example.domain.policy.AssistantLanguage.TELUGU -> "మీ పేరు $nameValue, సార్."
+                com.example.domain.policy.AssistantLanguage.ENGLISH -> "Your name is $nameValue, sir."
+                com.example.domain.policy.AssistantLanguage.HINDI -> "सर, आपका नाम $nameValue है।"
+                com.example.domain.policy.AssistantLanguage.TINGLISH -> "Mee peru $nameValue, sir."
+            }
+        }
+
         // If content already forms a complete sentence (e.g. "User name is Yashwanth" or "Yashwanth")
         if (content.contains("is ", ignoreCase = true) || content.contains("are ", ignoreCase = true)) {
-            val clean = content.replace("User name is ", "Mee peru ", ignoreCase = true)
-                .replace("User is ", "Meeru ", ignoreCase = true)
-                .replace("User loves ", "Meeku ", ignoreCase = true)
-                .replace("User prefers ", "Meeku ", ignoreCase = true)
-            return "$clean, sir."
+            return when (targetLang) {
+                com.example.domain.policy.AssistantLanguage.TELUGU -> {
+                    val clean = content.replace("User name is ", "మీ పేరు ", ignoreCase = true)
+                        .replace("User is ", "మీరు ", ignoreCase = true)
+                        .replace("User loves ", "మీకు ", ignoreCase = true)
+                        .replace("User prefers ", "మీకు ", ignoreCase = true)
+                    "$clean, సార్."
+                }
+                com.example.domain.policy.AssistantLanguage.ENGLISH -> {
+                    val clean = content.replace("User name is ", "Your name is ", ignoreCase = true)
+                        .replace("User is ", "You are ", ignoreCase = true)
+                        .replace("User loves ", "You love ", ignoreCase = true)
+                        .replace("User prefers ", "You prefer ", ignoreCase = true)
+                    "$clean, sir."
+                }
+                com.example.domain.policy.AssistantLanguage.HINDI -> {
+                    val clean = content.replace("User name is ", "आपका नाम ", ignoreCase = true)
+                        .replace("User is ", "आप ", ignoreCase = true)
+                    "सर, $clean।"
+                }
+                com.example.domain.policy.AssistantLanguage.TINGLISH -> {
+                    val clean = content.replace("User name is ", "Mee peru ", ignoreCase = true)
+                        .replace("User is ", "Meeru ", ignoreCase = true)
+                        .replace("User loves ", "Meeku ", ignoreCase = true)
+                        .replace("User prefers ", "Meeku ", ignoreCase = true)
+                    "$clean, sir."
+                }
+            }
         }
 
         // Title-value formatting (e.g. Title: "Favourite Food", Content: "Dilkush Biryani")
-        return "Mee $title $content, sir."
+        return when (targetLang) {
+            com.example.domain.policy.AssistantLanguage.TELUGU -> "మీ $title $content, సార్."
+            com.example.domain.policy.AssistantLanguage.ENGLISH -> "Your $title is $content, sir."
+            com.example.domain.policy.AssistantLanguage.HINDI -> "सर, आपका $title $content है।"
+            com.example.domain.policy.AssistantLanguage.TINGLISH -> "Mee $title $content, sir."
+        }
     }
 
     /**
@@ -197,6 +303,9 @@ object MemoryFactResolver {
         if (isMemoryQuery(trimmed) || trimmed.endsWith("?") || lower.endsWith("enti") || lower.endsWith("enti?") || lower.endsWith("telusa")) {
             return null
         }
+
+        val settings = com.example.data.preferences.SettingsManager(context)
+        val targetLang = com.example.domain.policy.LanguagePolicy.resolveResponseLanguage(text, settings.languagePreference)
 
         val hasRememberIntent = lower.contains("gurthu") ||
                                 lower.contains("gurtu") ||
@@ -213,9 +322,9 @@ object MemoryFactResolver {
         // 1. Personal Name Extraction
         val namePatterns = listOf(
             // "cheppu gurthu pettuko na peru Ashwin", "gurthu pettuko na peru Ashwin", "gurthupettuko na peru Ashwin"
-            Regex("(?i)(?:cheppu\\s+)?(?:gurthu\\s*pettuko|gurtu\\s*pettuko|gurthunchuko|gurtunchuko|gurthupettukonna|gurtupettukonna|remember|save|note).*?(?:naa|na|my|mera)\\s+(?:peru|name|naam)\\s+(?:is\\s+|enti\\s+ante\\s+|ani\\s+)?([a-zA-Z0-9_]+)"),
+            Regex("(?i)(?:cheppu\\s+)?(?:gurthu\\s*pettuko|gurtu\\s*pettuko|gurthunchuko|gurtunchuko|gurthupettukonna|gurtupettukonna|remember|save|note).*?(?:naa|na|my|mera|నా)\\s+(?:peru|name|naam|పేరు)\\s+(?:is\\s+|enti\\s+ante\\s+|ani\\s+)?([a-zA-Z0-9_\\u0C00-\\u0C7F]+)"),
             // "naa peru Ashwin ani gurthu pettuko", "na peru Ashwin gurthu pettuko", "na peru Ashwin"
-            Regex("(?i)(?:naa|na|my|mera)\\s+(?:peru|name|naam)\\s+(?:is\\s+|enti\\s+ante\\s+|ani\\s+)?([a-zA-Z0-9_]+)[\\.\\s,]*(?:ani\\s+)?(?:gurthu\\s*pettuko|gurtu\\s*pettuko|gurthunchuko|remember|save|note|chesu?ko)?"),
+            Regex("(?i)(?:naa|na|my|mera|నా)\\s+(?:peru|name|naam|పేరు)\\s+(?:is\\s+|enti\\s+ante\\s+|ani\\s+)?([a-zA-Z0-9_\\u0C00-\\u0C7F]+)[\\.\\s,]*(?:ani\\s+)?(?:gurthu\\s*pettuko|gurtu\\s*pettuko|gurthunchuko|remember|save|note|chesu?ko)?"),
             // "my name is Ashwin"
             Regex("(?i)my\\s+name\\s+is\\s+([a-zA-Z0-9_]+)[\\.\\s,]*(?:remember|save|note)?"),
             // "mera naam Ashwin hai"
@@ -246,7 +355,12 @@ object MemoryFactResolver {
                         tags = "name,identity,personal"
                     )
                     repository.addMemory(mem)
-                    return "Sure sir, mee peru gurthupettukuntaanu."
+                    return when (targetLang) {
+                        com.example.domain.policy.AssistantLanguage.TELUGU -> "ఖచ్చితంగా సార్, మీ పేరు $candidateName అని గుర్తుపెట్టుకున్నాను."
+                        com.example.domain.policy.AssistantLanguage.ENGLISH -> "Sure sir, I will remember that your name is $candidateName."
+                        com.example.domain.policy.AssistantLanguage.HINDI -> "ज़रूर सर, मैंने याद रख लिया कि आपका नाम $candidateName है।"
+                        com.example.domain.policy.AssistantLanguage.TINGLISH -> "Sure sir, mee peru gurthupettukuntaanu."
+                    }
                 }
             }
         }
@@ -270,16 +384,21 @@ object MemoryFactResolver {
                         tags = "project,work,max"
                     )
                     repository.addMemory(mem)
-                    return "Sure sir, mee project $rawProj ani gurthupettukunnanu."
+                    return when (targetLang) {
+                        com.example.domain.policy.AssistantLanguage.TELUGU -> "ఖచ్చితంగా సార్, మీ ప్రాజెక్ట్ $rawProj అని గుర్తుపెట్టుకున్నాను."
+                        com.example.domain.policy.AssistantLanguage.ENGLISH -> "Sure sir, I will remember that your project is $rawProj."
+                        com.example.domain.policy.AssistantLanguage.HINDI -> "ज़रूर सर, आपका प्रोजेक्ट $rawProj याद रख लिया।"
+                        com.example.domain.policy.AssistantLanguage.TINGLISH -> "Sure sir, mee project $rawProj ani gurthupettukunnanu."
+                    }
                 }
             }
         }
 
         // 3. Laptop / Device Extraction
         if ((lower.contains("laptop") || lower.contains("mobile") || lower.contains("phone")) &&
-            (hasRememberIntent || lower.startsWith("my laptop") || lower.startsWith("na laptop") || lower.startsWith("naa laptop") || lower.startsWith("my phone") || lower.startsWith("na phone"))
+            (hasRememberIntent || lower.contains("favorite") || lower.contains("favourite") || lower.startsWith("my laptop") || lower.startsWith("na laptop") || lower.startsWith("naa laptop") || lower.startsWith("my phone") || lower.startsWith("na phone"))
         ) {
-            val devRegex = Regex("(?i)(?:my|na|naa|mera)\\s+(?:laptop|mobile|phone)\\s+(?:is\\s+|enti\\s+ante\\s+|ani\\s+)?([a-zA-Z0-9_\\-\\s]+)", RegexOption.IGNORE_CASE)
+            val devRegex = Regex("(?i)(?:my|na|naa|mera)?\\s*(?:favorite\\s+|favourite\\s+|main\\s+)?(?:laptop|mobile|phone)\\s*(?:is\\s+|enti\\s+ante\\s+|ani\\s+)?([a-zA-Z0-9_\\-\\s]+)", RegexOption.IGNORE_CASE)
             val matchDev = devRegex.find(trimmed)
             if (matchDev != null) {
                 val rawDev = matchDev.groupValues[1]
@@ -296,16 +415,58 @@ object MemoryFactResolver {
                         source = com.example.memory.data.MemorySource.AUTO,
                         tags = "${memTitle.lowercase()},hardware"
                     )
-                    repository.addMemory(mem)
-                    return "Sure sir, mee ${memTitle.lowercase()} $rawDev ani gurthupettukunnanu."
+                    try {
+                        repository.addMemory(mem)
+                    } catch (e: Exception) {
+                        android.util.Log.e("MemoryFactResolver", "Failed to add memory: ${e.message}", e)
+                    }
+                    return when (targetLang) {
+                        com.example.domain.policy.AssistantLanguage.TELUGU -> "ఖచ్చితంగా సార్, మీ ${memTitle.lowercase()} $rawDev అని గుర్తుపెట్టుకున్నాను."
+                        com.example.domain.policy.AssistantLanguage.ENGLISH -> "Sure sir, I will remember your ${memTitle.lowercase()} is $rawDev."
+                        com.example.domain.policy.AssistantLanguage.HINDI -> "ज़रूर सर, आपका ${memTitle.lowercase()} $rawDev याद रख लिया।"
+                        com.example.domain.policy.AssistantLanguage.TINGLISH -> "Sure sir, mee ${memTitle.lowercase()} $rawDev ani gurthupettukunnanu."
+                    }
                 }
             }
         }
 
-        // 4. Explicit Memory Command (e.g. "idi memory lo save chey: <fact>")
-        if (hasRememberIntent && (lower.contains("memory lo") || lower.contains("note down") || lower.startsWith("save that") || lower.startsWith("remember that"))) {
+        // 4. Preferences / Likes (e.g. "Note down that I like black coffee", "I like black coffee")
+        if (lower.contains("like") || lower.contains("love") || lower.contains("ishtam") || lower.contains("pasand")) {
+            val likeRegex = Regex("(?i)(?:i\\s+like|i\\s+love|naaku\\s+ishtam|pasand\\s+hai)\\s+([a-zA-Z0-9_\\-\\s]+)", RegexOption.IGNORE_CASE)
+            val matchLike = likeRegex.find(trimmed)
+            if (matchLike != null) {
+                val rawPref = matchLike.groupValues[1]
+                    .replace(Regex("(?i)[\\.\\s,]*(remember|gurthu\\s*pettuko|gurtu\\s*pettuko|save|note|chesuko).*"), "")
+                    .trim()
+                if (rawPref.length >= 2) {
+                    val repository = MemoryRepository.getInstance(context)
+                    val mem = PermanentMemory(
+                        title = "User Preference",
+                        content = "User likes $rawPref",
+                        category = "Preferences",
+                        type = com.example.memory.data.MemoryType.PREFERENCE,
+                        source = com.example.memory.data.MemorySource.AUTO,
+                        tags = "preference,like"
+                    )
+                    try {
+                        repository.addMemory(mem)
+                    } catch (e: Exception) {
+                        android.util.Log.e("MemoryFactResolver", "Failed to add preference memory: ${e.message}", e)
+                    }
+                    return when (targetLang) {
+                        com.example.domain.policy.AssistantLanguage.TELUGU -> "ఖచ్చితంగా సార్, మీకు $rawPref ఇష్టం అని గుర్తుపెట్టుకున్నాను."
+                        com.example.domain.policy.AssistantLanguage.ENGLISH -> "Sure sir, I will remember that you like $rawPref."
+                        com.example.domain.policy.AssistantLanguage.HINDI -> "ज़रूर सर, याद रख लिया कि आपको $rawPref पसंद है।"
+                        com.example.domain.policy.AssistantLanguage.TINGLISH -> "Sure sir, meeku $rawPref ishtam ani gurthupettukunnanu."
+                    }
+                }
+            }
+        }
+
+        // 5. Explicit Memory Command (e.g. "idi memory lo save chey: <fact>", "Remember that my favorite laptop is HP Victus", "Note down that I like black coffee")
+        if (hasRememberIntent && (lower.contains("memory lo") || lower.contains("note down") || lower.contains("remember that") || lower.startsWith("save that") || lower.startsWith("remember that") || lower.startsWith("note down"))) {
             val contentFact = trimmed
-                .replace(Regex("(?i)^.*?(?:save chey|save chesko|save chesuko|gurthupettuko|gurtupettuko|note down|remember that|remember this)[:\\s-]*"), "")
+                .replace(Regex("(?i)^.*?(?:save chey|save chesko|save chesuko|gurthupettuko|gurtupettuko|note down that|note down|remember that|remember this)[:\\s-]*"), "")
                 .trim()
             if (contentFact.length >= 3) {
                 val repository = MemoryRepository.getInstance(context)
@@ -317,8 +478,17 @@ object MemoryFactResolver {
                     source = com.example.memory.data.MemorySource.AUTO,
                     tags = "user,fact"
                 )
-                repository.addMemory(mem)
-                return "Sure sir, gurthupettukunnanu: '$contentFact'."
+                try {
+                    repository.addMemory(mem)
+                } catch (e: Exception) {
+                    android.util.Log.e("MemoryFactResolver", "Failed to add explicit memory fact: ${e.message}", e)
+                }
+                return when (targetLang) {
+                    com.example.domain.policy.AssistantLanguage.TELUGU -> "ఖచ్చితంగా సార్, గుర్తుపెట్టుకున్నాను: '$contentFact'."
+                    com.example.domain.policy.AssistantLanguage.ENGLISH -> "Sure sir, I have remembered: '$contentFact'."
+                    com.example.domain.policy.AssistantLanguage.HINDI -> "ज़रूर सर, याद रख लिया: '$contentFact'."
+                    com.example.domain.policy.AssistantLanguage.TINGLISH -> "Sure sir, gurthupettukunnanu: '$contentFact'."
+                }
             }
         }
 

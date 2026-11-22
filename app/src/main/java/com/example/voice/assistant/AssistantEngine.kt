@@ -13,6 +13,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancelChildren
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.collect
 
 class AssistantEngine(private val context: Context) {
     val stateMachine = SessionStateMachine()
@@ -37,10 +39,13 @@ class AssistantEngine(private val context: Context) {
 
     // Connection manager and Streaming Response Manager as lateinit to resolve circular reference
     lateinit var connectionManager: ConnectionManager
-    lateinit var streamingResponseManager: StreamingResponseManager
+    @Volatile lateinit var streamingResponseManager: StreamingResponseManager
     private var responseTimeoutJob: kotlinx.coroutines.Job? = null
     private val localExecutionScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val languageScope = CoroutineScope(Dispatchers.IO + kotlinx.coroutines.SupervisorJob())
+    private val languageSettings = com.example.data.preferences.SettingsManager(context)
     val autonomousCoordinator = com.example.automation.engine.AutonomousTaskCoordinator(localExecutionScope)
+    private var voiceSessionStartTime: Long = 0L
 
     init {
         com.example.automation.engine.TaskCancellationCoordinator.registerCancellationListener(this) {
@@ -55,8 +60,13 @@ class AssistantEngine(private val context: Context) {
                 val sanitized = com.example.utils.InternalReasoningFilter.sanitizeDelta(text)
                 if (sanitized.isNotEmpty()) {
                     val verified = com.example.automation.engine.truth.ExecutionTruthCoordinator.validateOrCorrectAssistantResponse(sanitized)
-                    conversationManager.addMessage("Gemini", verified)
+                    val lastMsg = conversationManager.getHistory().lastOrNull()
+                    if (lastMsg == null || lastMsg.content.trim() != verified.trim()) {
+                        conversationManager.addMessage("Gemini", verified)
+                    }
                     streamingResponseManager.handleIncomingText(verified)
+                    com.example.analytics.MaxActivityTracker.trackAiRequest(context, com.example.analytics.ActivityStatus.SUCCESS)
+                    com.example.analytics.MaxActivityTracker.trackChatRequest(context, com.example.analytics.ActivityStatus.SUCCESS)
                 }
             },
             onAudioReceived = { audioBytes ->
@@ -141,10 +151,36 @@ class AssistantEngine(private val context: Context) {
                     val isAtomicToolCall = functionName in setOf(
                         "open_app", "click_element", "type_text", "press_enter",
                         "press_key", "clear_text", "scroll_screen", "system_action",
-                        "send_whatsapp_message", "open_whatsapp_chat", "navigate_whatsapp"
+                        "send_whatsapp_message", "open_whatsapp_chat", "navigate_whatsapp",
+                        "youtube_search", "flashlight", "set_volume", "set_brightness",
+                        "set_dnd", "set_ringer_mode", "get_battery_status", "get_device_status",
+                        "search_contact", "call_contact", "send_sms", "take_screenshot",
+                        "take_photo", "run_adb_command", "get_bluetooth_status", "set_bluetooth",
+                        "get_notifications", "reply_notification", "set_alarm", "set_timer",
+                        "control_media", "search_files", "toggle_wifi", "open_settings",
+                        "get_app_usage", "get_clipboard", "set_clipboard", "get_location",
+                        "run_routine", "create_routine", "delete_routine", "list_routines",
+                        "log_period_start", "log_period_end", "log_period_note",
+                        "get_period_history", "get_period_prediction", "clear_all_period_data",
+                        "save_memory", "forget_memory", "set_reminder", "unlock_device",
+                        "spotify_smart_search", "instagram_bulk_unlike", "wait",
+                        "inspect_screen", "get_screen_context", "create_contact", "task_completed"
                     ) || normalizedAction in setOf(
                         "OPEN_APP", "CLICK_ELEMENT", "CLICK_TEXT", "TYPE_TEXT",
-                        "PRESS_ENTER", "PRESS_KEY", "CLEAR_TEXT", "SCROLL_SCREEN", "SYSTEM_ACTION"
+                        "PRESS_ENTER", "PRESS_KEY", "CLEAR_TEXT", "SCROLL_SCREEN", "SYSTEM_ACTION",
+                        "YOUTUBE_SEARCH", "FLASHLIGHT_ON", "FLASHLIGHT_OFF", "SET_VOLUME",
+                        "SET_BRIGHTNESS", "SET_DND", "SET_RINGER_MODE", "GET_BATTERY_STATUS",
+                        "GET_DEVICE_STATUS", "CALL_PHONE", "CALL_CONTACT", "SEND_SMS",
+                        "TAKE_SCREENSHOT", "TAKE_PHOTO", "RUN_ADB_COMMAND", "TOGGLE_WIFI",
+                        "OPEN_SETTINGS", "SET_ALARM", "SET_TIMER", "CONTROL_MEDIA",
+                        "SEARCH_FILES", "SAVE_MEMORY", "FORGET_MEMORY", "SET_REMINDER",
+                        "SPOTIFY_SMART_SEARCH", "TASK_COMPLETED", "UNLOCK_DEVICE",
+                        "GET_BLUETOOTH_STATUS", "SET_BLUETOOTH", "GET_NOTIFICATIONS",
+                        "REPLY_NOTIFICATION", "GET_APP_USAGE", "GET_CLIPBOARD", "SET_CLIPBOARD",
+                        "GET_LOCATION", "RUN_ROUTINE", "CREATE_ROUTINE", "DELETE_ROUTINE",
+                        "LIST_ROUTINES", "LOG_PERIOD_START", "LOG_PERIOD_END", "LOG_PERIOD_NOTE",
+                        "GET_PERIOD_HISTORY", "GET_PERIOD_PREDICTION", "CLEAR_ALL_PERIOD_DATA",
+                        "INSPECT_SCREEN", "GET_SCREEN_CONTEXT", "CREATE_CONTACT", "WAIT"
                     )
 
                     val executionResult = if (normalizedAction == "COMPUTER_USE" || functionName == "computer_use" || functionName == "ui_agent") {
@@ -164,12 +200,34 @@ class AssistantEngine(private val context: Context) {
                             normalizedJson.put("target", goalParam)
                         } else if (normalizedAction == "OPEN_APP" && !normalizedJson.has("app") && target.isNotBlank()) {
                             normalizedJson.put("app", target)
+                        } else if (normalizedAction == "YOUTUBE_SEARCH" && !normalizedJson.has("query")) {
+                            val q = target.ifEmpty { goalParam }
+                            if (q.isNotBlank()) normalizedJson.put("query", q)
                         }
 
                         // Authorize and dispatch
-                        val auth = com.example.automation.engine.ActionAuthorizer.authorizeAction(lastUserText.ifEmpty { effectiveGoal }, normalizedAction, target.ifEmpty { goalParam })
+                        val isCallAction = normalizedAction == "CALL_PHONE" || normalizedAction == "CALL_CONTACT"
+                        val callState = com.example.automation.engine.PendingCallManager.state
+                        val isSelectionReply = (callState is com.example.automation.engine.CallState.AwaitingContactSelection) &&
+                            com.example.automation.engine.PendingCallManager.getSelectionCandidates().isNotEmpty() &&
+                            com.example.automation.engine.PendingCallManager.resolveAndSelectCandidate(lastUserText) != null
+
+                        val authIntent = resolveAuthorizationIntent(
+                            action = normalizedAction,
+                            userText = lastUserText,
+                            callState = callState,
+                            originalPendingIntent = com.example.automation.engine.PendingCallManager.getOriginalIntent(),
+                            target = target,
+                            effectiveGoal = effectiveGoal,
+                            isSelectionMatch = isSelectionReply
+                        )
+
+                        val auth = com.example.automation.engine.ActionAuthorizer.authorizeAction(authIntent, normalizedAction, target.ifEmpty { goalParam })
                         if (!auth.authorized) {
                             android.util.Log.w("AssistantEngine", "[VOICE_AUTH] Action '$normalizedAction' BLOCKED: ${auth.reason}")
+                            if (isCallAction && com.example.automation.engine.PendingCallManager.state is com.example.automation.engine.CallState.Confirmed) {
+                                com.example.automation.engine.PendingCallManager.clear()
+                            }
                             org.json.JSONObject().apply {
                                 put("status", "blocked")
                                 put("success", false)
@@ -177,68 +235,77 @@ class AssistantEngine(private val context: Context) {
                                 put("reason", auth.reason)
                             }.toString()
                         } else {
-                            val result = com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, normalizedJson)
-                            if (!autonomousCoordinator.isCompoundGoal(lastUserText.ifEmpty { effectiveGoal })) {
+                            val result = try {
+                                com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, normalizedJson)
+                            } finally {
+                                // Clear PendingCallManager only if the state AFTER dispatch (or in the exception path) is still Confirmed.
+                                // Never clear on NEEDS_INPUT / AwaitingContactSelection / AwaitingConfirmation / Calling results.
+                                if (isCallAction && com.example.automation.engine.PendingCallManager.state is com.example.automation.engine.CallState.Confirmed) {
+                                    com.example.automation.engine.PendingCallManager.clear()
+                                }
+                            }
+                            val resultJson = runCatching { org.json.JSONObject(result) }.getOrNull()
+                            val executionSucceeded = resultJson?.optBoolean("success", false) == true ||
+                                resultJson?.optString("executionState") == "COMPLETED"
+                            if (executionSucceeded && !autonomousCoordinator.isCompoundGoal(lastUserText.ifEmpty { effectiveGoal })) {
                                 autonomousCoordinator.onTaskCompleted("Atomic tool '$normalizedAction' completed.")
                             }
                             result
                         }
-                    } else if ((functionName == "execute_automation" || normalizedAction == "EXECUTE_AUTOMATION") && fastPathPlan != null && fastPathPlan.isNotEmpty()) {
-                        android.util.Log.d("AssistantEngine", "[VOICE_PLAN] Routing voice goal '$effectiveGoal' through fast-path DAG (${fastPathPlan.size} steps, ZERO LLM calls).")
-                        val validationError = com.example.automation.engine.GoalPlanner.validatePlan(fastPathPlan, effectiveGoal)
-                        if (validationError != null) {
-                            android.util.Log.e("AssistantEngine", "[VOICE_PLAN] Fast-path validation failed: $validationError")
+                    } else if (functionName == "execute_automation" || normalizedAction == "EXECUTE_AUTOMATION") {
+                        if (effectiveGoal.isBlank()) {
                             org.json.JSONObject().apply {
-                                put("status", "error")
+                                put("status", "blocked")
                                 put("success", false)
-                                put("executionState", "FAILED")
-                                put("reason", validationError)
+                                put("executionState", "BLOCKED")
+                                put("reason", "The automation goal is missing; clarification is required before execution.")
                             }.toString()
                         } else {
-                            val planResult = com.example.automation.engine.GoalPlanner.planAndExecute(context, effectiveGoal)
-                            android.util.Log.d("AssistantEngine", "[VOICE_RESULT] Finished execution for fast-path goal '$effectiveGoal' (success=${planResult.success})")
-                            org.json.JSONObject().apply {
-                                put("status", if (planResult.success) "success" else "error")
-                                put("success", planResult.success)
-                                put("executionState", if (planResult.success) "COMPLETED" else "FAILED")
-                                put("reason", planResult.errorMessage ?: (if (planResult.success) "Goal completed successfully." else "Goal execution failed."))
-                            }.toString()
+                            // GoalPlanner owns both deterministic fast paths and
+                            // validated LLM planning. Do not require a local
+                            // fast-path match here, or complex user goals are
+                            // incorrectly sent through generic authorization.
+                            val validationError = if (fastPathPlan != null && fastPathPlan.isNotEmpty()) {
+                                android.util.Log.d("AssistantEngine", "[VOICE_PLAN] Routing voice goal '$effectiveGoal' through fast-path DAG (${fastPathPlan.size} steps, ZERO LLM calls).")
+                                com.example.automation.engine.GoalPlanner.validatePlan(fastPathPlan, effectiveGoal)
+                            } else {
+                                android.util.Log.d("AssistantEngine", "[VOICE_PLAN] Routing voice goal '$effectiveGoal' through validated planner fallback.")
+                                null
+                            }
+
+                            if (validationError != null) {
+                                android.util.Log.e("AssistantEngine", "[VOICE_PLAN] Fast-path validation failed: $validationError")
+                                org.json.JSONObject().apply {
+                                    put("status", "error")
+                                    put("success", false)
+                                    put("executionState", "FAILED")
+                                    put("reason", validationError)
+                                }.toString()
+                            } else {
+                                val planResult = com.example.automation.engine.GoalPlanner.planAndExecute(context, effectiveGoal)
+                                android.util.Log.d("AssistantEngine", "[VOICE_RESULT] Finished planned goal '$effectiveGoal' (success=${planResult.success})")
+                                if (planResult.success && !planResult.isWaitingForInput) {
+                                    autonomousCoordinator.onTaskCompleted("Planned goal completed and verified.")
+                                }
+                                org.json.JSONObject().apply {
+                                    put("status", if (planResult.success) "success" else "error")
+                                    put("success", planResult.success)
+                                    put("executionState", if (planResult.success) "COMPLETED" else "FAILED")
+                                    put("reason", planResult.errorMessage ?: (if (planResult.success) "Goal completed successfully." else "Goal execution failed."))
+                                }.toString()
+                            }
                         }
                     } else {
-                        val originalIntent = normalizedJson.optString("original_user_intent")
-                        val isApprovalReply = com.example.automation.approval.ApprovalCoordinator.parseReply(lastUserText) == com.example.automation.approval.ApprovalCoordinator.ReplyIntent.APPROVE
-                        val intentForAuth = if (normalizedAction == "CALL_PHONE" && originalIntent.isNotBlank()) {
-                            originalIntent
-                        } else if (normalizedAction == "CALL_PHONE" && isApprovalReply && com.example.automation.engine.PendingCallManager.state !is com.example.automation.engine.CallState.Idle) {
-                            com.example.automation.engine.PendingCallManager.getOriginalIntent() ?: (if (target.isNotBlank()) "Call $target" else "Call")
-                        } else {
-                            lastUserText.ifEmpty { effectiveGoal }
-                        }
-                        val auth = com.example.automation.engine.ActionAuthorizer.authorizeAction(intentForAuth, normalizedAction, target)
+                        val auth = com.example.automation.engine.ActionAuthorizer.authorizeAction(lastUserText.ifEmpty { effectiveGoal }, normalizedAction, target)
                         if (!auth.authorized) {
                             android.util.Log.w("AssistantEngine", "[VOICE_AUTH] Unsolicited/Rejected action '$normalizedAction' BLOCKED: ${auth.reason}")
                             com.example.automation.activity.AgentActivityTracker.addTrace("ActionAuthorizer", "Action '$normalizedAction' blocked: ${auth.reason}", isSuccess = false)
-                            
-                            // If CALL_PHONE was blocked because user actually wanted WhatsApp messaging, route to TaskPlanner!
-                            val lowerGoal = (lastUserText.ifEmpty { effectiveGoal }).lowercase()
-                            if (normalizedAction == "CALL_PHONE" && (lowerGoal.contains("whatsapp") || lowerGoal.contains("message") || lowerGoal.contains("msg"))) {
-                                android.util.Log.i("AssistantEngine", "[VOICE_AUTOREPAIR] Rerouting rejected CALL_PHONE to WhatsApp DAG for goal: '$effectiveGoal'")
-                                val taskJson = org.json.JSONObject().apply {
-                                    put("action", "TASK_INTENT")
-                                    put("goal", "send_whatsapp_message")
-                                    put("target_entity", "WhatsApp")
-                                    put("required_outcome", "MessageSent")
-                                    put("last_input_transcription", lastUserText.ifEmpty { effectiveGoal })
-                                }
-                                com.example.automation.engine.ActionDispatcher.dispatchWithResult(context, taskJson)
-                            } else {
-                                org.json.JSONObject().apply {
-                                    put("status", "blocked")
-                                    put("success", false)
-                                    put("executionState", "BLOCKED")
-                                    put("reason", auth.reason)
-                                }.toString()
-                            }
+                            org.json.JSONObject().apply {
+                                put("status", "blocked")
+                                put("success", false)
+                                put("executionState", "BLOCKED")
+                                put("reason", auth.reason)
+                            }.toString()
                         } else {
                             // P1.2 — risk-aware approval: decide auto-run vs confirmation vs hard block.
                             val settings = com.example.data.preferences.SettingsManager(context)
@@ -325,8 +392,14 @@ class AssistantEngine(private val context: Context) {
                     // Feed automation execution outcome to Emotion Engine
                     val parsed = runCatching { org.json.JSONObject(enrichedResult) }.getOrNull()
                     if (functionName == "task_completed" || normalizedAction == "TASK_COMPLETED") {
-                        val summaryText = normalizedJson.optString("summary", "Task completed and verified.")
-                        autonomousCoordinator.onTaskCompleted(summaryText)
+                        val completionAccepted = parsed?.optBoolean("completionAccepted", false) == true &&
+                            parsed.optBoolean("success", false)
+                        if (completionAccepted) {
+                            val summaryText = normalizedJson.optString("summary", "Task completed and verified.")
+                            autonomousCoordinator.onTaskCompleted(summaryText)
+                        } else {
+                            android.util.Log.w("AssistantEngine", "[VOICE_COMPLETION] Ignoring unverified task_completed claim.")
+                        }
                     }
                     if (parsed?.optString("status") == "success" || parsed?.optString("executionState") == "COMPLETED") {
                         emotionEngine.processEvent(com.example.emotion.model.EmotionEvent.TaskSuccess(resolvedAction.ifEmpty { functionName }))
@@ -384,6 +457,29 @@ class AssistantEngine(private val context: Context) {
                 stateMachine.transitionTo(newState)
             }
         )
+        var observedLanguage = languageSettings.languagePreference
+        languageScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            languageSettings.languagePreferenceFlow.collect { language ->
+                if (language != languageSettings.languagePreference) return@collect
+                if (language != observedLanguage) {
+                    observedLanguage = language
+                    onLanguagePreferenceChanged(language)
+                }
+            }
+        }
+    }
+
+    private fun onLanguagePreferenceChanged(language: String) {
+        if (connectionManager.updateLanguage(language)) {
+            lastAuthoritativeTranscription = null
+            responseTimeoutJob?.cancel()
+            responseTimeoutJob = null
+            streamingResponseManager.stopAllPlayback()
+            // The old turn's accumulated text belongs to the old language as well.
+            streamingResponseManager = StreamingResponseManager(audioPlayer, toolRegistry,
+                { id, name, result -> connectionManager.sendToolResponse(id, name, result) },
+                { state -> stateMachine.transitionTo(state) })
+        }
     }
 
     var onInterimTranscriptionListener: ((String) -> Unit)? = null
@@ -443,6 +539,48 @@ class AssistantEngine(private val context: Context) {
             }
         }
 
+        val lowerUserText = userText.lowercase()
+        val looksLikeMemorySave = lowerUserText.contains("remember") ||
+            lowerUserText.contains("gurthu") || lowerUserText.contains("gurtu") ||
+            lowerUserText.contains("save memory") || lowerUserText.contains("note down") ||
+            lowerUserText.contains("memory lo") || lowerUserText.contains("yaad rakhna")
+        if (com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(userText) || looksLikeMemorySave) {
+            conversationManager.addMessage("You", userText)
+            AssistantEventBus.emit(AssistantEvent.TextTranscribed("You", userText))
+            localExecutionScope.launch {
+                val saved = com.example.memory.retrieval.MemoryFactResolver.extractAndSaveMemoryFact(context, userText)
+                val factResult = if (saved == null && com.example.memory.retrieval.MemoryFactResolver.isMemoryQuery(userText)) {
+                    com.example.memory.retrieval.MemoryFactResolver.resolve(context, userText)
+                } else null
+                val response = saved ?: factResult?.responseText
+                if (!response.isNullOrBlank()) {
+                    streamingResponseManager.stopAllPlayback()
+                    responseTimeoutJob?.cancel()
+                    responseTimeoutJob = null
+                    conversationManager.addMessage("MAX", response)
+                    AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", response))
+                    val currentPref = com.example.data.preferences.SettingsManager(context).languagePreference
+                    val resolved = com.example.domain.policy.LanguagePolicy.resolveResponseLanguage(userText, currentPref)
+                    val langDirective = when (resolved) {
+                        com.example.domain.policy.AssistantLanguage.TELUGU -> "natural spoken Telugu"
+                        com.example.domain.policy.AssistantLanguage.ENGLISH -> "natural spoken English"
+                        com.example.domain.policy.AssistantLanguage.HINDI -> "natural spoken Hindi"
+                        com.example.domain.policy.AssistantLanguage.TINGLISH -> "natural Tinglish"
+                    }
+                    if (connectionManager.isConnected()) {
+                        connectionManager.sendInterruptionSignal()
+                        connectionManager.sendText("Speak this exact statement to the user in $langDirective: $response")
+                    }
+                } else {
+                    // A phrase containing "remember" is not necessarily a
+                    // memory command. Preserve ordinary conversation instead
+                    // of swallowing an unsupported/ambiguous utterance.
+                    sendTextMessageToModel(userText, userText, recordUserMessage = false)
+                }
+            }
+            return
+        }
+
         conversationManager.addMessage("You", userText)
         AssistantEventBus.emit(AssistantEvent.TextTranscribed("You", userText))
 
@@ -457,7 +595,7 @@ class AssistantEngine(private val context: Context) {
                     is com.example.firebase.manager.GateDecision.BlockDailyLimitReached ->
                         "Daily free limit reached (${quotaDecision.messageCountToday}/${quotaDecision.limit} messages). Upgrade to Premium to continue."
                     is com.example.firebase.manager.GateDecision.BlockTrialExpired ->
-                        "Your 3-day free trial has ended. Activate MAX Premium to continue."
+                        "Your 7-day free trial has ended. Activate MAX Premium to continue."
                     is com.example.firebase.manager.GateDecision.BlockLicenseRevoked ->
                         "Your MAX license has been revoked by the issuer."
                     is com.example.firebase.manager.GateDecision.BlockLicenseInactive ->
@@ -484,6 +622,18 @@ class AssistantEngine(private val context: Context) {
                 responseTimeoutJob = null
                 conversationManager.addMessage("MAX", saveResult)
                 AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", saveResult))
+                if (connectionManager.isConnected()) {
+                    connectionManager.sendInterruptionSignal()
+                    val currentPref = com.example.data.preferences.SettingsManager(context).languagePreference
+                    val resolved = com.example.domain.policy.LanguagePolicy.resolveResponseLanguage(userText, currentPref)
+                    val langDirective = when (resolved) {
+                        com.example.domain.policy.AssistantLanguage.TELUGU -> "natural spoken Telugu"
+                        com.example.domain.policy.AssistantLanguage.ENGLISH -> "natural spoken English"
+                        com.example.domain.policy.AssistantLanguage.HINDI -> "natural spoken Hindi"
+                        com.example.domain.policy.AssistantLanguage.TINGLISH -> "natural Tinglish"
+                    }
+                    // Interrupted Gemini so it does not echo or repeat duplicate response
+                }
                 return@launch
             }
 
@@ -496,6 +646,19 @@ class AssistantEngine(private val context: Context) {
                     responseTimeoutJob = null
                     conversationManager.addMessage("MAX", factResult.responseText)
                     AssistantEventBus.emit(AssistantEvent.TextTranscribed("MAX", factResult.responseText))
+                    if (connectionManager.isConnected()) {
+                        connectionManager.sendInterruptionSignal()
+                        val currentPref = com.example.data.preferences.SettingsManager(context).languagePreference
+                        val resolved = com.example.domain.policy.LanguagePolicy.resolveResponseLanguage(userText, currentPref)
+                        val langDirective = when (resolved) {
+                            com.example.domain.policy.AssistantLanguage.TELUGU -> "natural spoken Telugu"
+                            com.example.domain.policy.AssistantLanguage.ENGLISH -> "natural spoken English"
+                            com.example.domain.policy.AssistantLanguage.HINDI -> "natural spoken Hindi"
+                            com.example.domain.policy.AssistantLanguage.TINGLISH -> "natural Tinglish"
+                        }
+                        // Interrupted Gemini so it does not echo or repeat duplicate response
+                    return@launch
+                    }
                 }
             }
         }
@@ -586,7 +749,7 @@ class AssistantEngine(private val context: Context) {
         connectionManager.sendText(prompt)
         
         // Automatically start listening for user's voice decision (Accept/Reject)
-        CoroutineScope(Dispatchers.Main).launch {
+        localExecutionScope.launch {
             delay(400)
             startListening()
             com.example.automation.IncomingCallManager.onListeningStarted(context, wasConnectedBeforeCall = wasConnected)
@@ -622,7 +785,7 @@ class AssistantEngine(private val context: Context) {
                 is com.example.firebase.manager.GateDecision.BlockDailyLimitReached ->
                     "Daily free limit reached (${voiceDecision.messageCountToday}/${voiceDecision.limit} messages). Upgrade to Premium to continue."
                 is com.example.firebase.manager.GateDecision.BlockTrialExpired ->
-                    "Your 3-day free trial has ended. Activate MAX Premium to continue."
+                    "Your 7-day free trial has ended. Activate MAX Premium to continue."
                 is com.example.firebase.manager.GateDecision.BlockLicenseRevoked ->
                     "Your MAX license has been revoked by the issuer."
                 is com.example.firebase.manager.GateDecision.BlockLicenseInactive ->
@@ -658,6 +821,8 @@ class AssistantEngine(private val context: Context) {
         }
 
         android.util.Log.d("VoiceLatency", "[VoiceLatency] speech_start ts=${System.currentTimeMillis()}")
+        voiceSessionStartTime = System.currentTimeMillis()
+        com.example.analytics.MaxActivityTracker.trackVoiceSessionStart(context)
         stateMachine.transitionTo(SessionState.LISTENING)
         try {
             audioRecorder.startRecording(
@@ -691,6 +856,11 @@ class AssistantEngine(private val context: Context) {
         } catch (e: Exception) {
             android.util.Log.e("AssistantEngine", "Error stopping audio recorder", e)
         } finally {
+            if (voiceSessionStartTime > 0) {
+                val dur = System.currentTimeMillis() - voiceSessionStartTime
+                com.example.analytics.MaxActivityTracker.trackVoiceSessionEnd(context, dur)
+                voiceSessionStartTime = 0L
+            }
             audioProcessor.reset()
             audioStateGuard.markIdle()
             if (stateMachine.getState() == SessionState.LISTENING || stateMachine.getState() == SessionState.STREAMING_AUDIO) {
@@ -746,7 +916,7 @@ class AssistantEngine(private val context: Context) {
                 android.util.Log.d("AssistantEngine", "[EMOTION_EVENT_TEXT] Detected: $detectedEmotionEvent | New state: ${currentEmotion.getDominantTraits()}")
             }
 
-            sendTextMessageToModel(userText, promptText)
+        sendTextMessageToModel(userText, promptText)
         }
     }
 
@@ -779,7 +949,7 @@ class AssistantEngine(private val context: Context) {
         }
     }
 
-    private fun sendTextMessageToModel(userText: String, promptText: String) {
+    private fun sendTextMessageToModel(userText: String, promptText: String, recordUserMessage: Boolean = true) {
         val settings = com.example.data.preferences.SettingsManager(context)
         val keyPresent = settings.hasValidGeminiApiKey()
         android.util.Log.d("GeminiFlow", "[GeminiFlow] key_present=$keyPresent")
@@ -789,12 +959,14 @@ class AssistantEngine(private val context: Context) {
             AssistantEventBus.emit(AssistantEvent.ErrorOccurred(ErrorType.PERMISSION, "Gemini API key required. Please configure in Settings."))
             return
         }
-        conversationManager.addMessage("You", userText)
+        if (recordUserMessage) {
+            conversationManager.addMessage("You", userText)
+        }
         stateMachine.transitionTo(SessionState.WAITING_FOR_MODEL)
         
         // Bounded response timeout (15s) so state is never permanently stuck in THINKING
         responseTimeoutJob?.cancel()
-        responseTimeoutJob = CoroutineScope(Dispatchers.Main).launch {
+        responseTimeoutJob = localExecutionScope.launch {
             delay(15000)
             if (stateMachine.getState() == SessionState.WAITING_FOR_MODEL || stateMachine.getState() == SessionState.TOOL_EXECUTION) {
                 android.util.Log.w("GeminiFlow", "[GeminiFlow] error=response_timeout")
@@ -817,7 +989,7 @@ class AssistantEngine(private val context: Context) {
                         "Daily free limit reached (${decision.messageCountToday}/${decision.limit} messages). Upgrade to Premium to continue."
                     }
                     is com.example.firebase.manager.GateDecision.BlockTrialExpired -> {
-                        "Your 3-day free trial has ended. Activate MAX Premium to continue."
+                        "Your 7-day free trial has ended. Activate MAX Premium to continue."
                     }
                     is com.example.firebase.manager.GateDecision.BlockLicenseRevoked -> {
                         "Your MAX license has been revoked by the issuer."
@@ -874,6 +1046,10 @@ class AssistantEngine(private val context: Context) {
         connectionManager.forceReconnect()
     }
 
+    fun updateLanguage(newLanguage: String) {
+        languageSettings.languagePreference = newLanguage
+    }
+
     fun pause() {
         autonomousCoordinator.cancel("Session paused/stopped")
         responseTimeoutJob?.cancel()
@@ -892,12 +1068,13 @@ class AssistantEngine(private val context: Context) {
     }
 
     fun destroy() {
+        languageScope.coroutineContext.cancelChildren()
         localExecutionScope.coroutineContext.cancelChildren()
         com.example.automation.engine.TaskCancellationCoordinator.unregisterCancellationListener(this)
         responseTimeoutJob?.cancel()
         responseTimeoutJob = null
         stop()
-        connectionManager.disconnect()
+        connectionManager.destroy()
     }
 
     /** Account boundary: do not resume the previous user's Gemini context. */
@@ -906,5 +1083,45 @@ class AssistantEngine(private val context: Context) {
         pause()
         conversationManager.clear()
         connectionManager.resetAccountContext()
+    }
+
+    companion object {
+        /**
+         * Pure function resolving the intent string used for authorization.
+         * For confirmed calls, valid consent replies, or valid candidate selections,
+         * uses the original call intent. Otherwise preserves the raw user utterance.
+         */
+        fun resolveAuthorizationIntent(
+            action: String,
+            userText: String,
+            callState: com.example.automation.engine.CallState,
+            originalPendingIntent: String?,
+            target: String = "",
+            effectiveGoal: String = "",
+            isSelectionMatch: Boolean = false
+        ): String {
+            val isCallAction = action == "CALL_PHONE" || action == "CALL_CONTACT"
+            if (!isCallAction) {
+                return userText.ifEmpty { effectiveGoal }
+            }
+
+            val isConfirmedState = callState is com.example.automation.engine.CallState.Confirmed
+            val pendingTargetName = when (callState) {
+                is com.example.automation.engine.CallState.AwaitingConfirmation -> callState.displayName
+                is com.example.automation.engine.CallState.Confirmed -> callState.displayName
+                else -> null
+            }
+            val hasLivePending = callState is com.example.automation.engine.CallState.AwaitingConfirmation ||
+                    callState is com.example.automation.engine.CallState.Confirmed ||
+                    callState is com.example.automation.engine.CallState.AwaitingContactSelection
+            val isConsentReply = hasLivePending && com.example.automation.approval.ApprovalCoordinator.isConsentUtterance(userText, pendingTargetName)
+            val isSelectionReply = (callState is com.example.automation.engine.CallState.AwaitingContactSelection) && isSelectionMatch
+
+            return if (isConfirmedState || isConsentReply || isSelectionReply) {
+                originalPendingIntent ?: (if (target.isNotBlank()) "Call $target" else "Call")
+            } else {
+                userText.ifEmpty { effectiveGoal }
+            }
+        }
     }
 }

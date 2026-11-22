@@ -23,7 +23,13 @@ object ActionVerifier {
 
         // 1. Evaluate explicit ActionExpectation if attached
         val expectation = action.expectation
-        if (expectation != null) {
+        // A combined TYPE_TEXT + Enter action deliberately ends on the
+        // results screen, where Maps may no longer expose the editable field.
+        // KeyboardController verifies the text before submitting; evaluating
+        // TextPresent against the post-submit tree would reject valid results.
+        val expectationAlreadyVerifiedBeforeSubmit =
+            action is ComputerAction.TypeText && action.pressEnterAfter && expectation is ActionExpectation.TextPresent
+        if (expectation != null && !expectationAlreadyVerifiedBeforeSubmit) {
             val (expVerified, expNote) = evaluateExpectation(expectation, before, after)
             if (!expVerified) {
                 Log.w(TAG, "[VERIFY] FAIL reason='$expNote'")
@@ -52,7 +58,12 @@ object ActionVerifier {
                 val text = action.text.trim()
                 val textPresent = text.isNotEmpty() && after.editableElements.any { it.text?.contains(text) == true }
 
-                if (textPresent) {
+                val submissionVerified = !action.pressEnterAfter || executionResult.submissionVerified
+                if (action.pressEnterAfter && submissionVerified) {
+                    Pair(true, "Text '$text' was verified before typing and the search submission transition was verified")
+                } else if (action.pressEnterAfter) {
+                    Pair(false, "Text '$text' was entered, but the search submission transition was not verified")
+                } else if (textPresent) {
                     Pair(true, "Text '$text' verified entered into field")
                 } else {
                     Pair(false, "Text '$text' not found in target field after typing")
@@ -104,7 +115,8 @@ object ActionVerifier {
 
             is ComputerAction.PressEnter -> {
                 val screenChanged = before.hasScreenChanged(after)
-                Pair(screenChanged || action.expectation != null, "Enter dispatch requires an observed transition or verified expectation (screenChanged=$screenChanged)")
+                val verified = screenChanged && executionResult.submissionVerified
+                Pair(verified, "Enter dispatch requires a verified submission transition (screenChanged=$screenChanged, submissionVerified=${executionResult.submissionVerified})")
             }
 
             is ComputerAction.Scroll -> {

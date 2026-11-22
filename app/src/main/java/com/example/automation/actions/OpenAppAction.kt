@@ -21,6 +21,15 @@ class OpenAppAction : BaseAction<JSONObject>() {
             ?: getHardcodedFallback(appName)
             ?: throw Exception("App '$appName' was not found on this device")
 
+        if (pkg == "com.android.settings") {
+            val settingsIntent = Intent(android.provider.Settings.ACTION_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            context.startActivity(settingsIntent)
+            Log.d(TAG, "Successfully launched system Settings activity")
+            return
+        }
+
         val launchIntent = context.packageManager.getLaunchIntentForPackage(pkg)
             ?: context.packageManager.getLeanbackLaunchIntentForPackage(pkg)
             ?: Intent(Intent.ACTION_MAIN).apply {

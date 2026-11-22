@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.example.network.model.GeminiLiveModels
+import com.google.gson.JsonParser
 
 class GeminiWebSocketClientUnitTest {
 
@@ -26,6 +28,77 @@ class GeminiWebSocketClientUnitTest {
         assertEquals("gemini-3.8-live", GeminiWebSocketClient.sanitizeModelName("gemini-3.8-live"))
         assertEquals("gemini-3.1-flash-live-preview", GeminiWebSocketClient.sanitizeModelName("gemini-3.1-flash-live-preview"))
         assertEquals("custom-experimental-model", GeminiWebSocketClient.sanitizeModelName("custom-experimental-model"))
+    }
+
+    @Test
+    fun testScreenActionsRequireExactGemini38FastLiveModel() {
+        assertTrue(
+            GeminiWebSocketClient.requiresFastLiveModel(
+                GeminiLiveModels.FAST,
+                "click_element"
+            )
+        )
+        assertFalse(
+            GeminiWebSocketClient.requiresFastLiveModel(
+                GeminiLiveModels.DEEP,
+                "click_element"
+            )
+        )
+        assertFalse(
+            GeminiWebSocketClient.requiresFastLiveModel(
+                "models/${GeminiLiveModels.FAST}",
+                "click_element"
+            )
+        )
+        assertFalse(
+            GeminiWebSocketClient.requiresFastLiveModel(
+                GeminiLiveModels.FAST,
+                "task_completed"
+            )
+        )
+    }
+
+    @Test
+    fun testLiveModelRequiredResultIsStructuredAndNamesExactRequiredModel() {
+        val result = JsonParser.parseString(
+            GeminiWebSocketClient.buildLiveModelRequiredResult(
+                functionName = "open_app",
+                activeModelName = GeminiLiveModels.DEEP
+            )
+        ).asJsonObject
+
+        assertEquals(false, result.get("success").asBoolean)
+        assertEquals("LIVE_MODEL_REQUIRED", result.get("status").asString)
+        assertEquals(GeminiLiveModels.FAST, result.get("requiredModel").asString)
+        assertEquals(GeminiLiveModels.DEEP, result.get("activeModel").asString)
+    }
+
+    @Test
+    fun testScreenContinuationPayloadContainsFreshObservationAndNextActionInstruction() {
+        val payload = JsonParser.parseString(
+            GeminiWebSocketClient.buildScreenContinuationPayload(
+                packageName = "com.example.whatsapp",
+                visibleText = "Chats\nYashwanth",
+                clickableElements = listOf("button: 'Yashwanth' (id=7)"),
+                actionName = "click_element"
+            )
+        ).asJsonObject
+        val content = payload.getAsJsonObject("clientContent")
+        val text = content
+            .getAsJsonArray("turns")[0]
+            .asJsonObject
+            .getAsJsonArray("parts")[0]
+            .asJsonObject
+            .get("text")
+            .asString
+
+        assertEquals("user", content.getAsJsonArray("turns")[0].asJsonObject.get("role").asString)
+        assertTrue(content.get("turnComplete").asBoolean)
+        assertTrue(text.contains("com.example.whatsapp"))
+        assertTrue(text.contains("Chats"))
+        assertTrue(text.contains("Yashwanth"))
+        assertTrue(text.contains("Choose the next click, type, scroll"))
+        assertTrue(text.contains("task_completed only after visibly verifying"))
     }
 
     @Test

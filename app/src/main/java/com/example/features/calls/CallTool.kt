@@ -37,15 +37,28 @@ class CallTool(private val callPhoneAction: CallPhoneAction) : Tool, RequestVali
         return try {
             val jsonPayload = JSONObject(request.arguments.toString())
             callPhoneAction.execute(context, jsonPayload)
-            ToolResult(
-                success = true,
-                toolName = name,
-                verificationRequired = true,
-                message = "Call intent requested",
-                metadata = JSONObject().apply {
-                    put("status", "CALL_REQUESTED")
-                }
-            )
+            if (jsonPayload.optBoolean("dialerOpened", false) || jsonPayload.optString("callResult") == "Opened the dialer") {
+                ToolResult(
+                    success = true,
+                    toolName = name,
+                    verificationRequired = false,
+                    message = "Opened the dialer",
+                    metadata = JSONObject().apply {
+                        put("status", "DIALER_OPENED")
+                        put("dialerOpened", true)
+                    }
+                )
+            } else {
+                ToolResult(
+                    success = true,
+                    toolName = name,
+                    verificationRequired = true,
+                    message = "Call intent requested",
+                    metadata = JSONObject().apply {
+                        put("status", "CALL_REQUESTED")
+                    }
+                )
+            }
         } catch (e: CallConfirmationRequiredException) {
             ToolResult.needsInput(
                 toolName = name,

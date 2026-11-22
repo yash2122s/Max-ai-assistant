@@ -36,7 +36,7 @@ class LLMPlanningProviderUnitTest {
     fun test1_GeminiPlanningProvider_DefaultContract() {
         val provider = GeminiPlanningProvider(context)
         assertEquals("gemini", provider.providerId)
-        assertEquals("gemini-2.5-flash", provider.defaultModel)
+        assertEquals("gemini-3.8-flash", provider.defaultModel)
     }
 
     @Test
@@ -229,8 +229,10 @@ class LLMPlanningProviderUnitTest {
             focusMode = "general"
         )
         val prompt = PromptBuilder.buildPlanningPrompt("Find Bhaskar", detailedPayload)
-        assertTrue(prompt.contains("Clickable Elements: [button: 'Bhaskar'"))
-        assertTrue(prompt.contains("Visible Text: \"Chats"))
+        assertTrue(prompt.contains("label=\"screen_clickable\""))
+        assertTrue(prompt.contains("button: 'Bhaskar'"))
+        assertTrue(prompt.contains("label=\"screen_text\""))
+        assertTrue(prompt.contains("Chats"))
     }
 
     @Test
@@ -278,10 +280,11 @@ class LLMPlanningProviderUnitTest {
             focusMode = "general"
         )
         val userContent = PromptBuilder.buildPlanningUserContent("Open WhatsApp, find Bhaskar and send Hello", payload)
-        assertTrue(userContent.contains("<USER_GOAL>"))
+        assertTrue(userContent.contains("label=\"user_goal\""))
         assertTrue(userContent.contains("Open WhatsApp, find Bhaskar and send Hello"))
         assertTrue(userContent.contains("Foreground Package: com.whatsapp"))
-        assertTrue(userContent.contains("Clickable Elements: [Bhaskar]"))
+        assertTrue(userContent.contains("label=\"screen_clickable\""))
+        assertTrue(userContent.contains("Bhaskar"))
         // Confirms system role rules are not duplicated in user content
         assertFalse(userContent.contains("You are MAX's action planner"))
     }

@@ -22,9 +22,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.MaxIOSColors
+import com.example.ui.theme.MaxTheme
 import com.example.voice.assistant.AssistantVoiceController
 import com.example.voice.assistant.SessionState
 
@@ -262,5 +264,15 @@ fun AssistantHud(
                 }
             }
         }
+    }
+}
+
+@Preview(name = "Assistant HUD Preview", showBackground = true, backgroundColor = 0xFF000000)
+@Composable
+private fun AssistantHudPreview() {
+    MaxTheme(darkTheme = true) {
+        AssistantHud(
+            onDismiss = {}
+        )
     }
 }

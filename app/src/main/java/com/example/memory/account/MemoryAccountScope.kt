@@ -24,7 +24,12 @@ object MemoryAccountScope {
     private var observation: Job? = null
 
     fun capture(): MemorySession = state.value
-    fun isCurrent(session: MemorySession): Boolean = session.ownerKey != UNAVAILABLE && state.value == session && auth?.let { it.isCurrentSession(it.sessionState.value) } != false
+    fun isCurrent(session: MemorySession): Boolean {
+        val manager = auth ?: return false
+        val active = manager.sessionState.value
+        val owner = active.uid?.let { "uid:$it" } ?: GUEST
+        return session == state.value && session.ownerKey == owner && manager.isCurrentSession(active)
+    }
     fun requireCurrent(session: MemorySession) { if (!isCurrent(session)) throw CancellationException("Memory account session is unavailable or stale") }
     fun directoryName(session: MemorySession): String = sha256(session.ownerKey).take(32)
     fun bind(authManager: FirebaseAuthManager) {
@@ -37,7 +42,7 @@ object MemoryAccountScope {
         // callers can capture UNAVAILABLE despite an authenticated Firebase session.
         publishFromAuth(authManager)
         observation = CoroutineScope(Dispatchers.Main.immediate).launch {
-            authManager.userState.collect { publishFromAuth(authManager) }
+            authManager.sessionState.collect { publishFromAuth(authManager) }
         }
     }
     fun unbind() { observation?.cancel(); observation = null; auth?.removeSessionInvalidationListener(this); auth = null; transitionUnavailable() }
@@ -45,8 +50,9 @@ object MemoryAccountScope {
     private fun publishFromAuth(a: FirebaseAuthManager) {
         if (auth !== a || !a.isCurrentSession(a.sessionState.value)) return
         val key = a.currentUid?.let { "uid:$it" } ?: GUEST
-        if (state.value.ownerKey != key) transitionUnavailable()
-        state.value = MemorySession(key, state.value.generation + 1)
+        if (state.value.ownerKey != key) {
+            state.value = MemorySession(key, state.value.generation + 1)
+        }
     }
     private fun sha256(value: String): String = MessageDigest.getInstance("SHA-256").digest(value.toByteArray()).joinToString("") { "%02x".format(it) }
 }

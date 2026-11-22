@@ -9,6 +9,9 @@ import android.os.Build
 import android.util.Log
 import com.example.automation.ShizukuManager
 import com.example.automation.ShizukuShellPlugin
+import com.example.automation.engine.GenericAction
+import com.example.automation.engine.GenericActionExecutor
+import com.example.automation.keyboard.KeyboardController
 import com.example.core.registry.ServiceRegistry
 import com.example.core.registry.ServiceType
 import com.example.service.JarvisAccessibilityService
@@ -17,6 +20,8 @@ import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlin.coroutines.resume
 
 /**
@@ -34,7 +39,7 @@ object UiActionExecutor {
             return@withContext false
         }
 
-        Log.d(TAG, "Executing UI action: ${action.type} (reason: ${action.reason})")
+        Log.d(TAG, "Executing UI action: ${action.type}")
 
         return@withContext when (action.type) {
             UiAction.Type.TAP -> executeTap(requireNotNull(action.x), requireNotNull(action.y))
@@ -47,31 +52,17 @@ object UiActionExecutor {
                 action.durationMs
             )
             UiAction.Type.SCROLL -> executeScroll(context, action.direction ?: "DOWN")
-            UiAction.Type.TYPE -> executeType(action.text ?: "")
-            UiAction.Type.KEY_ENTER -> executeEnter()
+            UiAction.Type.TYPE -> GenericActionExecutor.execute(GenericAction.TypeText(action.text ?: "")).success
+            UiAction.Type.KEY_ENTER -> {
+                val result = KeyboardController.pressEnter(context)
+                result.success && result.metadata.optBoolean("submissionVerified", false)
+            }
             UiAction.Type.KEY_BACK -> executeBack()
             UiAction.Type.KEY_HOME -> executeHome(context)
             UiAction.Type.LAUNCH_APP -> executeLaunchApp(context, action.packageName ?: "")
             UiAction.Type.SCREENSHOT -> true
             UiAction.Type.FINISH -> true
         }
-    }
-
-    private fun executeEnter(): Boolean {
-        val service = JarvisAccessibilityService.instance
-            ?: ServiceRegistry.get<JarvisAccessibilityService>(ServiceType.ACCESSIBILITY)
-
-        if (service != null) {
-            val success = service.pressImeAction()
-            if (success) return true
-        }
-
-        if (ShizukuManager.isShizukuAvailable() && ShizukuManager.isPermissionGranted()) {
-            val res = ShizukuShellPlugin.runCommand("input keyevent 66")
-            return !res.startsWith("Error") && !res.startsWith("Failed") && !res.startsWith("Remote error")
-        }
-
-        return false
     }
 
     private suspend fun executeTap(x: Int, y: Int): Boolean {
@@ -85,7 +76,7 @@ object UiActionExecutor {
                 .addStroke(GestureDescription.StrokeDescription(path, 0, 50))
                 .build()
 
-            val success = awaitGesture(service, gesture)
+            val success = awaitGesture(service, gesture) ?: return false
             if (success) {
                 Log.d(TAG, "Tap at ($x, $y) succeeded via AccessibilityService")
                 return true
@@ -113,7 +104,7 @@ object UiActionExecutor {
                 .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(500, 2000)))
                 .build()
 
-            val success = awaitGesture(service, gesture)
+            val success = awaitGesture(service, gesture) ?: return false
             if (success) return true
         }
 
@@ -139,7 +130,7 @@ object UiActionExecutor {
                 .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(100, 1000)))
                 .build()
 
-            val success = awaitGesture(service, gesture)
+            val success = awaitGesture(service, gesture) ?: return false
             if (success) return true
         }
 
@@ -155,29 +146,35 @@ object UiActionExecutor {
     private suspend fun awaitGesture(
         service: JarvisAccessibilityService,
         gesture: GestureDescription
-    ): Boolean {
+    ): Boolean? = awaitGestureCompletion { callback -> service.dispatchGesture(gesture, callback, null) }
+
+    /** null means an accepted gesture has an uncertain outcome: never repeat it via shell. */
+    internal suspend fun awaitGestureCompletion(
+        timeoutMs: Long = GESTURE_TIMEOUT_MS,
+        dispatch: (AccessibilityService.GestureResultCallback) -> Boolean
+    ): Boolean? {
         return try {
-            withTimeout(GESTURE_TIMEOUT_MS) {
-                suspendCancellableCoroutine { continuation ->
-                    val accepted = service.dispatchGesture(
-                        gesture,
+            withTimeout(timeoutMs) {
+                suspendCancellableCoroutine<Boolean?> { continuation ->
+                    val accepted = dispatch(
                         object : AccessibilityService.GestureResultCallback() {
                             override fun onCompleted(gestureDescription: GestureDescription?) {
                                 if (continuation.isActive) continuation.resume(true)
                             }
 
                             override fun onCancelled(gestureDescription: GestureDescription?) {
-                                if (continuation.isActive) continuation.resume(false)
+                                if (continuation.isActive) continuation.resume(null)
                             }
-                        },
-                        null
+                        }
                     )
                     if (!accepted && continuation.isActive) continuation.resume(false)
                 }
             }
         } catch (_: TimeoutCancellationException) {
-            Log.w(TAG, "Accessibility gesture timed out")
-            false
+            // Do not swallow an outer task timeout/cancellation and then dispatch a fallback.
+            currentCoroutineContext().ensureActive()
+            Log.w(TAG, "Accessibility gesture outcome uncertain; fallback suppressed")
+            null
         }
     }
 
@@ -201,51 +198,6 @@ object UiActionExecutor {
             "RIGHT" -> executeSwipe(x(centerX - horizontalDelta), y(centerY), x(centerX + horizontalDelta), y(centerY), 300)
             else -> executeSwipe(x(centerX), y(centerY + verticalDelta), x(centerX), y(centerY - verticalDelta), 300)
         }
-    }
-
-    private fun executeType(text: String): Boolean {
-        // 1. Tier 1: Accessibility set text on focused node (preferred, safe)
-        val service = JarvisAccessibilityService.instance
-            ?: ServiceRegistry.get<JarvisAccessibilityService>(ServiceType.ACCESSIBILITY)
-
-        val root = service?.rootInActiveWindow
-        val focused = root?.findFocus(android.view.accessibility.AccessibilityNodeInfo.FOCUS_INPUT)
-        if (focused != null) {
-            val args = android.os.Bundle().apply {
-                putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text)
-            }
-            try {
-                if (focused.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
-                    Log.d(TAG, "Typed text via Accessibility ACTION_SET_TEXT")
-                    return true
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Accessibility ACTION_SET_TEXT failed", e)
-            }
-        }
-
-        // 2. Tier 2: Shell input with strict character validation
-        // Reject any text with shell metacharacters: ;, &, |, `, $, \, ", ', <, >, newlines
-        val hasShellMetachars = text.any { it in ";|`$\\<>\n\r\"'" }
-        if (hasShellMetachars) {
-            Log.w(TAG, "[SECURITY_REJECT] Text contains prohibited shell metacharacters; rejected for shell input")
-            return false
-        }
-
-        val safeText = text.replace(" ", "%s")
-        val cmd = "input text $safeText"
-        if (com.example.automation.computeruse.ShellCommandPolicy.isCommandAllowed(cmd)) {
-            if (ShizukuManager.isShizukuAvailable() && ShizukuManager.isPermissionGranted()) {
-                val res = ShizukuShellPlugin.runCommand(cmd)
-                val ok = !res.startsWith("Error") && !res.startsWith("Failed") && !res.startsWith("Remote error")
-                Log.d(TAG, "Typed text via Shizuku shell (cmd='$cmd', ok=$ok, res='$res')")
-                return ok
-            }
-        } else {
-            Log.w(TAG, "[SECURITY_REJECT] Shell input command rejected by ShellCommandPolicy: '$cmd'")
-        }
-
-        return false
     }
 
     private fun executeBack(): Boolean {

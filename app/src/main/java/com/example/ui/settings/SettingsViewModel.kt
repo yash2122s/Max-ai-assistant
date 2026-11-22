@@ -23,6 +23,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val events: Flow<SettingsUiEvent> = _events.receiveAsFlow()
 
     init {
+        viewModelScope.launch {
+            settingsManager.languagePreferenceFlow.collect { language ->
+                if (language == settingsManager.languagePreference) {
+                    _uiState.update { it.copy(languagePreference = language) }
+                }
+            }
+        }
         if (!settingsManager.modelRoutingMode.equals("AUTO", ignoreCase = true)) {
             settingsManager.modelRoutingMode = "AUTO"
         }
@@ -70,7 +77,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             ragEmbeddingProvider = settingsManager.ragEmbeddingProvider,
             isAutoIndexMemoriesEnabled = settingsManager.isAutoIndexMemoriesEnabled,
             isDefaultAssistant = com.example.voice.assistant.SystemAssistantManager.isDefaultAssistant(getApplication()),
-            wakeWordStatus = com.example.voice.assistant.SystemAssistantManager.getWakeWordStatusDescription()
+            wakeWordStatus = com.example.voice.assistant.SystemAssistantManager.getWakeWordStatusDescription(),
+            isOverlayEnabled = settingsManager.isOverlayEnabled,
+            overlayOnlyInVoiceMode = settingsManager.overlayOnlyInVoiceMode,
+            webDashboardUrl = settingsManager.webDashboardUrl,
+            isSecondBrainEnabled = settingsManager.isSecondBrainEnabled,
+            secondBrainUrl = settingsManager.secondBrainUrl
         )
     }
 
@@ -157,8 +169,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun updateLanguagePreference(language: String) {
-        _uiState.update { it.copy(languagePreference = language) }
         settingsManager.languagePreference = language
+        _uiState.update { it.copy(languagePreference = settingsManager.languagePreference) }
     }
 
     fun updateTelegramBotEnabled(enabled: Boolean) {
@@ -219,6 +231,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         settingsManager.isAutoIndexMemoriesEnabled = enabled
     }
 
+    fun updateIsOverlayEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(isOverlayEnabled = enabled) }
+        settingsManager.isOverlayEnabled = enabled
+    }
+
+    fun updateOverlayOnlyInVoiceMode(enabled: Boolean) {
+        _uiState.update { it.copy(overlayOnlyInVoiceMode = enabled) }
+        settingsManager.overlayOnlyInVoiceMode = enabled
+    }
+
     fun rebuildRagIndex() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -239,6 +261,42 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             } catch (e: Exception) {
                 _events.send(SettingsUiEvent.ShowToast("Clear failed: ${e.message}"))
             }
+        }
+    }
+
+    fun updateWebDashboardUrl(url: String) {
+        _uiState.update { it.copy(webDashboardUrl = url) }
+        settingsManager.webDashboardUrl = url
+    }
+
+    fun updateIsSecondBrainEnabled(enabled: Boolean) {
+        _uiState.update { it.copy(isSecondBrainEnabled = enabled) }
+        settingsManager.isSecondBrainEnabled = enabled
+    }
+
+    fun updateSecondBrainUrl(url: String) {
+        _uiState.update { it.copy(secondBrainUrl = url) }
+        settingsManager.secondBrainUrl = url
+    }
+
+    fun testSecondBrainConnection() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(secondBrainStatus = "Testing connection...") }
+            val (success, message) = com.example.memory.secondbrain.SecondBrainBridge.testConnection(
+                getApplication(),
+                _uiState.value.secondBrainUrl
+            )
+            _uiState.update { it.copy(secondBrainStatus = message) }
+            _events.send(SettingsUiEvent.ShowToast(message))
+        }
+    }
+
+    fun syncAllToSecondBrain() {
+        viewModelScope.launch(Dispatchers.IO) {
+            _uiState.update { it.copy(secondBrainStatus = "Syncing memories...") }
+            val (count, message) = com.example.memory.secondbrain.SecondBrainBridge.syncAllLocalMemories(getApplication())
+            _uiState.update { it.copy(secondBrainStatus = message) }
+            _events.send(SettingsUiEvent.ShowToast(message))
         }
     }
 

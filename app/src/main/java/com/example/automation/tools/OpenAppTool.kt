@@ -30,10 +30,14 @@ class OpenAppTool(private val openAppAction: OpenAppAction) : Tool {
             val jsonPayload = JSONObject(request.arguments.toString())
             openAppAction.execute(context, jsonPayload)
             
+            val appName = jsonPayload.optString("app_name")
+                .ifEmpty { jsonPayload.optString("app") }
+                .ifEmpty { "the requested app" }
             ToolResult(
                 success = true,
                 toolName = name,
-                verificationRequired = true
+                verificationRequired = true,
+                message = "Opened $appName successfully."
             )
         } catch (e: Exception) {
             ToolResult(

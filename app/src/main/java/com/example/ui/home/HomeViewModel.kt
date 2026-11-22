@@ -34,7 +34,7 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     private val memoryRepository = MemoryRepository.getInstance(application)
     private val settingsManager = com.example.data.preferences.SettingsManager(application)
 
-    private val _uiState = MutableStateFlow(HomeUiState())
+    private val _uiState = MutableStateFlow(HomeUiState(selectedLanguage = settingsManager.languagePreference))
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     private val _audioRms = MutableStateFlow(0f)
@@ -174,6 +174,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
+        viewModelScope.launch {
+            settingsManager.languagePreferenceFlow.collect { language ->
+                if (language == settingsManager.languagePreference) applyReplyLanguage(language)
+            }
+        }
         (application as com.example.MyApplication).maxLicenseManager.authManager
             .addSessionInvalidationListener(this) {
                 resetAccount(MemoryAccountScope.capture())
@@ -788,6 +793,25 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun selectLanguage(language: String) {
+        val canonical = com.example.domain.policy.LanguagePolicy.canonicalPreference(language)
+        if (settingsManager.languagePreference == canonical) return
+        applyReplyLanguage(canonical)
+        assistantUseCase.updateLanguage(language)
+        _uiEvents.tryEmit(HomeUiEvent.ShowSnackbar("Language set to $canonical"))
+    }
+
+    private fun applyReplyLanguage(language: String) {
+        if (_uiState.value.selectedLanguage == language) return
+        turnGeneration++
+        suppressResponseUntilNextTurn = true
+        captionClearJob?.cancel()
+        discardStreaming()
+        _liveAiCaption.value = ""
+        _uiState.update { it.copy(selectedLanguage = language, liveAiCaption = "", isAiSpeaking = false) }
+        refreshPresentation()
+    }
+
     fun clearChatHistory() {
         val session = MemoryAccountScope.capture()
         MemoryAccountScope.requireCurrent(session)
@@ -869,7 +893,11 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             streamingResponseBuilder.setLength(0)
             visibleResponse(res)
         }
-        if (textToPersist.isNotBlank() && textToPersist != lastFinalText) {
+        val isRecentDuplicate = persistedChatItems.any {
+            !it.isUser && it.text.trim().equals(textToPersist.trim(), ignoreCase = true) &&
+            Math.abs(System.currentTimeMillis() - it.timestamp) < 4000L
+        }
+        if (textToPersist.isNotBlank() && textToPersist != lastFinalText && !isRecentDuplicate) {
             lastFinalText = textToPersist
             activeStreamingMessage = ChatMessageItem(
                 id = -1, sender = "jarvis", text = textToPersist,
@@ -887,14 +915,20 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun updateMergedMessages() {
         var currentActive = activeStreamingMessage
-        if (currentActive != null && !currentActive.isPending && persistedChatItems.any {
-                !it.isUser && it.text == currentActive.text && it.timestamp >= currentActive.timestamp
-            }) {
-            activeStreamingMessage = null
-            currentActive = null
+        if (currentActive != null && !currentActive.isPending) {
+            val alreadyPersisted = persistedChatItems.any {
+                !it.isUser && it.text.trim().equals(currentActive.text.trim(), ignoreCase = true)
+            }
+            if (alreadyPersisted) {
+                activeStreamingMessage = null
+                currentActive = null
+            }
         }
         val merged = if (currentActive != null && currentActive.text.isNotBlank()) {
-            persistedChatItems + listOf(currentActive)
+            val existsInPersisted = persistedChatItems.any {
+                !it.isUser && it.text.trim().equals(currentActive.text.trim(), ignoreCase = true)
+            }
+            if (existsInPersisted) persistedChatItems else persistedChatItems + listOf(currentActive)
         } else {
             persistedChatItems
         }
@@ -994,6 +1028,10 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
             reason = "Task stopped by user from Home UI"
         )
         if (!wasActive) finish(AssistantPhase.CANCELLED, "Voice interaction stopped")
+    }
+
+    fun navigateTo(route: String) {
+        _uiEvents.tryEmit(HomeUiEvent.NavigateTo(route))
     }
 
     override fun onCleared() {

@@ -5,9 +5,15 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
+import androidx.test.core.app.ApplicationProvider
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [36])
 class RemoteCommandExecutionTest {
 
     private lateinit var cache: CommandIdempotencyCache
@@ -227,5 +233,29 @@ class RemoteCommandExecutionTest {
         }
         jobs.joinAll()
         assertEquals(50, threadCache.size())
+    }
+
+    @Test
+    fun test09_protocolTimeoutReturnsUnverifiedFailure() = runTest {
+        val client = WindowsAgentClient(ApplicationProvider.getApplicationContext())
+        val payload = WindowsAgentClient.CommandRequestPayload(
+            commandId = "cmd_timeout",
+            tool = "test",
+            action = "TEST",
+            timeoutMs = 20
+        )
+
+        val result = client.executeWithProtocolTimeout(payload) {
+            delay(200)
+            WindowsAgentClient.CommandResultPayload(
+                commandId = payload.commandId,
+                status = "success",
+                action = payload.action
+            )
+        }
+
+        assertEquals("failed", result.status)
+        assertEquals("EXECUTION_TIMEOUT", result.error?.code)
+        assertTrue(result.error?.message?.contains("outcome may be unknown") == true)
     }
 }

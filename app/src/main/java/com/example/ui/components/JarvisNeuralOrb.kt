@@ -21,6 +21,8 @@ import com.example.ui.theme.*
 import kotlin.math.*
 
 import androidx.compose.animation.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -155,35 +157,35 @@ fun JarvisNeuralOrb(
     val activeColor = if (isDark) {
         when {
             !isActive -> MaxTextMuted
-            isRecording -> AetherNeonCyan
-            isAiSpeaking -> AetherNeonPurple
-            isThinking -> AetherNeonCyanDim
-            else -> AetherNeonCyan
+            isRecording -> MaxAccentCyan
+            isAiSpeaking -> Color(0xFF8B5CF6)
+            isThinking -> MaxAccentCyan
+            else -> MaxAccentCyan
         }
     } else {
         when {
             !isActive -> MaxTextMuted
-            isRecording -> NeonPink
-            isAiSpeaking -> MagentaRose
-            isThinking -> MaxSemanticColors.accentPink
-            else -> NeonPink
+            isRecording -> MaxAccentCyan
+            isAiSpeaking -> Color(0xFF8B5CF6)
+            isThinking -> MaxAccentCyan
+            else -> MaxAccentCyan
         }
     }
     val secondaryColor = if (isDark) {
         when {
             !isActive -> BorderDark
-            isRecording -> AetherNeonPurple
+            isRecording -> Color(0xFF8B5CF6)
             isAiSpeaking -> MaxPrimaryRoyal
-            isThinking -> AetherNeonCyan
-            else -> AetherNeonPurple
+            isThinking -> MaxAccentCyan
+            else -> Color(0xFF8B5CF6)
         }
     } else {
         when {
-            !isActive -> SoftRoseBorder
-            isRecording -> MagentaRose
-            isAiSpeaking -> MaxSemanticColors.accentPink
-            isThinking -> NeonPink
-            else -> MagentaRose
+            !isActive -> MaxBorderHairline
+            isRecording -> MaxPrimaryRoyal
+            isAiSpeaking -> Color(0xFF8B5CF6)
+            isThinking -> MaxAccentCyan
+            else -> MaxPrimaryRoyal
         }
     }
 
@@ -436,18 +438,20 @@ fun RotatingSuggestions(
         val text = suggestions[i]
         Box(
             Modifier
-                .heightIn(min = 48.dp)
+                .heightIn(min = 40.dp)
                 .clip(MaxShapes.pill)
+                .background(MaxSemanticColors.surfaceElevated.copy(alpha = 0.65f))
+                .border(MaxDimensions.borderHairline, MaxSemanticColors.borderHairline, MaxShapes.pill)
                 .clickable(role = Role.Button, onClickLabel = "Use this suggestion") {
                     onSuggestionClick(text)
                 }
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp, vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 "Try: “$text”",
-                style = MaxType.Caption,
-                color = MaxSemanticColors.textSecondary
+                style = MaxType.CaptionMedium,
+                color = MaxSemanticColors.accentCyan
             )
         }
     }

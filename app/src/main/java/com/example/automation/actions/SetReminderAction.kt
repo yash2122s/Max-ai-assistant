@@ -2,8 +2,7 @@ package com.example.automation.actions
 
 import android.content.Context
 import org.json.JSONObject
-import com.example.data.local.AppDatabase
-import com.example.data.local.Reminder
+import com.example.data.repository.JarvisRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -18,23 +17,10 @@ class SetReminderAction : BaseAction<JSONObject>() {
             return
         }
 
-        log("Setting reminder: '$message' at $triggerAtMillis")
-        
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val db = AppDatabase.getDatabase(context)
-                val reminder = Reminder(
-                    message = message,
-                    triggerAt = triggerAtMillis,
-                    status = "pending"
-                )
-                val insertedId = db.reminderDao().insertReminder(reminder).toInt()
-                
-                // Schedule the alarm
-                val repo = com.example.data.repository.JarvisRepository(context)
-                repo.scheduleSystemAlarm(insertedId, message, triggerAtMillis)
-                
-                log("Reminder saved (id=$insertedId) and alarm scheduled successfully")
+                JarvisRepository(context.applicationContext).saveReminder(null, message, triggerAtMillis)
+                log("Reminder scheduled")
             } catch (e: Exception) {
                 logError("Failed to set reminder", e)
             }

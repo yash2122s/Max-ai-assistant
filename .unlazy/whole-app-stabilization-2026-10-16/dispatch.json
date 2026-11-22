@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "waves": {
+    "ready-1": {
+      "leaves": [
+        "leaf-1.1.1",
+        "leaf-1.2.1"
+      ],
+      "state": "complete",
+      "openedAt": "2026-10-16T08:52:56.479Z",
+      "started": {
+        "leaf-1.1.1": {
+          "handle": "ses_ebc156279ffeKFD2A2DJhx5m5B",
+          "at": "2026-10-16T09:43:24.573Z"
+        },
+        "leaf-1.2.1": {
+          "handle": "ses_ebc15626fffeN0s7BBqWR5uQvZ",
+          "at": "2026-10-16T09:43:24.656Z"
+        }
+      },
+      "returned": {
+        "leaf-1.1.1": {
+          "at": "2026-10-16T09:43:54.338Z"
+        },
+        "leaf-1.2.1": {
+          "at": "2026-10-16T09:43:54.430Z"
+        }
+      },
+      "sealedAt": "2026-10-16T09:43:24.743Z",
+      "completedAt": "2026-10-16T09:43:54.430Z"
+    }
+  }
+}
