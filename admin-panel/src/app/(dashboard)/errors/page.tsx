@@ -35,6 +35,7 @@ export default function ErrorsAndPerformancePage() {
       const res = await getErrorsAndPerformance();
       setData(res);
     } catch (err) {
+      setData(null);
       console.error("Failed to load errors and latency", err);
     } finally {
       setLoading(false);
@@ -57,19 +58,16 @@ export default function ErrorsAndPerformancePage() {
     );
   }
 
-  const latencyChartData = data?.latencyBuckets
-    ? Object.entries(data.latencyBuckets).map(([bucket, count]) => ({
-        bucket,
-        count
-      }))
-    : [
-        { bucket: "<200ms", count: 18 },
-        { bucket: "200ms-500ms", count: 42 },
-        { bucket: "500ms-1s", count: 25 },
-        { bucket: "1s-3s", count: 9 },
-        { bucket: ">3s", count: 2 }
-      ];
+  if (!data) {
+    return (
+      <>
+        <Header title="Errors & Performance" onRefresh={() => { setRefreshing(true); loadData(); }} isRefreshing={refreshing} />
+        <p role="alert" className="p-8 text-sm text-slate-300">Telemetry could not be loaded. Use Refresh Data to retry.</p>
+      </>
+    );
+  }
 
+  const latencyChartData = Object.entries(data.latencyBuckets).map(([bucket, count]) => ({ bucket, count }));
   const recentErrors = data?.recentErrors || [];
 
   return (
@@ -102,7 +100,7 @@ export default function ErrorsAndPerformancePage() {
                 <Clock className="w-4 h-4 text-cyan-400" />
                 Response & Execution Latency Distribution
               </h2>
-              <p className="text-[11px] font-mono text-slate-400">Duration breakdown across sampled AI requests and tool dispatches</p>
+              <p className="text-[11px] font-mono text-slate-400">Completed AI and tool operations with a duration in the latest 100 activity events</p>
             </div>
           </div>
 
@@ -144,7 +142,7 @@ export default function ErrorsAndPerformancePage() {
 
           {recentErrors.length === 0 ? (
             <div className="p-8 text-center text-slate-500 font-mono text-xs">
-              Zero failure events recorded. All operations executing within nominal parameters.
+              No recorded failures in this result.
             </div>
           ) : (
             <div className="overflow-x-auto">

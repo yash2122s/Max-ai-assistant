@@ -2,14 +2,9 @@
 
 import React, { useEffect, useState } from "react";
 import {
-  Layers,
   MessageSquare,
   Mic,
   Wrench,
-  CalendarCheck,
-  Brain,
-  CheckCircle2,
-  XCircle,
   BarChart2
 } from "lucide-react";
 import {
@@ -27,15 +22,6 @@ import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { getOverview, OverviewMetrics } from "@/lib/api";
 import { formatNumber } from "@/lib/utils";
 
-const FEATURE_COLORS: Record<string, string> = {
-  "Chat / Gemini": "#00f0ff",
-  "Voice Assistant": "#3b82f6",
-  "Tool Execution": "#a855f7",
-  "Task Manager": "#10b981",
-  "Memory Subsystem": "#f59e0b",
-  "System / Device": "#f43f5e",
-};
-
 export default function FeatureAnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<OverviewMetrics | null>(null);
@@ -46,6 +32,7 @@ export default function FeatureAnalyticsPage() {
       const res = await getOverview();
       setData(res);
     } catch (err) {
+      setData(null);
       console.error("Failed to load feature analytics", err);
     } finally {
       setLoading(false);
@@ -68,6 +55,15 @@ export default function FeatureAnalyticsPage() {
     );
   }
 
+  if (!data) {
+    return (
+      <>
+        <Header title="Feature Analytics" onRefresh={() => { setRefreshing(true); loadData(); }} isRefreshing={refreshing} />
+        <p role="alert" className="p-8 text-sm text-slate-300">Telemetry could not be loaded. Use Refresh Data to retry.</p>
+      </>
+    );
+  }
+
   const featureBreakdown = [
     {
       name: "Chat / Gemini",
@@ -83,8 +79,8 @@ export default function FeatureAnalyticsPage() {
       category: "Voice",
       icon: Mic,
       total: data?.totalVoiceSessions || 0,
-      success: data?.totalVoiceSessions || 0,
-      failed: 0,
+      success: null,
+      failed: null,
       color: "#3b82f6"
     },
     {
@@ -96,24 +92,6 @@ export default function FeatureAnalyticsPage() {
       failed: data?.failedToolExecutions || 0,
       color: "#a855f7"
     },
-    {
-      name: "Task Manager",
-      category: "Tasks",
-      icon: CalendarCheck,
-      total: Math.round((data?.totalToolExecutions || 0) * 0.25),
-      success: Math.round((data?.totalToolExecutions || 0) * 0.25),
-      failed: 0,
-      color: "#10b981"
-    },
-    {
-      name: "Memory Subsystem",
-      category: "RAG & Memory",
-      icon: Brain,
-      total: Math.round((data?.totalAiRequests || 0) * 0.4),
-      success: Math.round((data?.totalAiRequests || 0) * 0.4),
-      failed: 0,
-      color: "#f59e0b"
-    }
   ];
 
   return (
@@ -133,7 +111,7 @@ export default function FeatureAnalyticsPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {featureBreakdown.map((f) => {
             const Icon = f.icon;
-            const rate = f.total > 0 ? (((f.total - f.failed) / f.total) * 100).toFixed(1) : "100";
+            const rate = f.total > 0 && f.success !== null ? (f.success * 100 / f.total).toFixed(1) : null;
             return (
               <div key={f.name} className="glass-panel p-6 rounded-2xl border border-jarvis-border space-y-4">
                 <div className="flex items-center justify-between">
@@ -149,7 +127,7 @@ export default function FeatureAnalyticsPage() {
                       <span className="text-[10px] font-mono text-slate-400 uppercase">{f.category}</span>
                     </div>
                   </div>
-                  <span className="text-xs font-mono font-bold text-emerald-400">{rate}% OK</span>
+                  <span className="text-xs font-mono font-bold text-emerald-400">{rate === null ? "—" : `${rate}% OK`}</span>
                 </div>
 
                 <div className="space-y-2 pt-2 border-t border-jarvis-border">
@@ -159,11 +137,11 @@ export default function FeatureAnalyticsPage() {
                   </div>
                   <div className="flex justify-between text-xs font-mono">
                     <span className="text-slate-400">Successful:</span>
-                    <span className="text-emerald-400 font-medium">{formatNumber(f.success)}</span>
+                    <span className="text-emerald-400 font-medium">{f.success === null ? "—" : formatNumber(f.success)}</span>
                   </div>
                   <div className="flex justify-between text-xs font-mono">
                     <span className="text-slate-400">Failures:</span>
-                    <span className="text-rose-400 font-medium">{formatNumber(f.failed)}</span>
+                    <span className="text-rose-400 font-medium">{f.failed === null ? "—" : formatNumber(f.failed)}</span>
                   </div>
                 </div>
               </div>

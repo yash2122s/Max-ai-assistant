@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:reporting": "tsc --module commonjs --target es2021 --moduleResolution node --esModuleInterop --skipLibCheck --outDir .test-build src/lib/api.ts && node --test test/reporting-fallback.cjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",

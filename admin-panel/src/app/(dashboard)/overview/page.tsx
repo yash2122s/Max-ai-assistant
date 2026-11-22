@@ -39,6 +39,7 @@ export default function OverviewPage() {
       const res = await getOverview();
       setData(res);
     } catch (err) {
+      setData(null);
       console.error("Failed to load overview data", err);
     } finally {
       setLoading(false);
@@ -66,13 +67,22 @@ export default function OverviewPage() {
     );
   }
 
+  if (!data) {
+    return (
+      <>
+        <Header title="Overview & Telemetry" onRefresh={handleRefresh} isRefreshing={refreshing} />
+        <p role="alert" className="p-8 text-sm text-slate-300">Telemetry could not be loaded. Use Refresh Data to retry.</p>
+      </>
+    );
+  }
+
   const aiTotal = data?.totalAiRequests || 0;
   const aiSuccess = data?.successfulAiRequests || 0;
-  const aiSuccessRate = aiTotal > 0 ? ((aiSuccess / aiTotal) * 100).toFixed(1) : "100";
+  const aiSuccessRate = aiTotal > 0 ? ((aiSuccess / aiTotal) * 100).toFixed(1) : null;
 
   const toolTotal = data?.totalToolExecutions || 0;
   const toolFailed = data?.failedToolExecutions || 0;
-  const toolSuccessRate = toolTotal > 0 ? (((toolTotal - toolFailed) / toolTotal) * 100).toFixed(1) : "100";
+  const toolSuccessRate = toolTotal > 0 ? (((toolTotal - toolFailed) / toolTotal) * 100).toFixed(1) : null;
 
   return (
     <>
@@ -95,7 +105,7 @@ export default function OverviewPage() {
             badge="LIVE"
           />
           <KpiCard
-            title="Total Users"
+            title="Tracked Users"
             value={formatNumber(data?.totalUsers)}
             subtext={`DAU: ${data?.activeUsers.dau} | WAU: ${data?.activeUsers.wau}`}
             icon={Users}
@@ -104,14 +114,14 @@ export default function OverviewPage() {
           <KpiCard
             title="AI Requests"
             value={formatNumber(data?.totalAiRequests)}
-            subtext={`${aiSuccessRate}% success rate`}
+            subtext={aiSuccessRate === null ? "No completed operations" : `${aiSuccessRate}% success rate`}
             icon={Zap}
             variant="emerald"
           />
           <KpiCard
             title="Tool Executions"
             value={formatNumber(data?.totalToolExecutions)}
-            subtext={`${toolSuccessRate}% success rate`}
+            subtext={toolSuccessRate === null ? "No completed operations" : `${toolSuccessRate}% success rate`}
             icon={Wrench}
             variant="purple"
           />
@@ -121,8 +131,8 @@ export default function OverviewPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <KpiCard
             title="Average Latency"
-            value={formatDuration(data?.avgLatencyMs || 0)}
-            subtext="AI pipeline & tool execution"
+            value={formatDuration(data.avgLatencyMs)}
+            subtext="AI and tool completions in the latest 100 events"
             icon={Clock}
             variant="amber"
           />
@@ -152,7 +162,7 @@ export default function OverviewPage() {
                   <TrendingUp className="w-4 h-4 text-cyan-400" />
                   Activity & Request Volume
                 </h2>
-                <p className="text-[11px] font-mono text-slate-400">Daily event volume trends over the past 14 days</p>
+                <p className="text-[11px] font-mono text-slate-400">Latest 30 recorded UTC days</p>
               </div>
               <span className="text-[10px] font-mono px-2 py-1 rounded bg-slate-900 border border-slate-800 text-slate-400">
                 UTC Days
@@ -227,12 +237,12 @@ export default function OverviewPage() {
               <div>
                 <div className="flex justify-between text-xs font-mono mb-1.5">
                   <span className="text-slate-300">AI Request Success</span>
-                  <span className="text-emerald-400 font-bold">{aiSuccessRate}%</span>
+                  <span className="text-emerald-400 font-bold">{aiSuccessRate === null ? "—" : `${aiSuccessRate}%`}</span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-emerald-500 to-cyan-400 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(parseFloat(aiSuccessRate), 100)}%` }}
+                    style={{ width: `${Math.min(Number(aiSuccessRate), 100)}%` }}
                   />
                 </div>
               </div>
@@ -240,12 +250,12 @@ export default function OverviewPage() {
               <div>
                 <div className="flex justify-between text-xs font-mono mb-1.5">
                   <span className="text-slate-300">Tool Execution Success</span>
-                  <span className="text-cyan-400 font-bold">{toolSuccessRate}%</span>
+                  <span className="text-cyan-400 font-bold">{toolSuccessRate === null ? "—" : `${toolSuccessRate}%`}</span>
                 </div>
                 <div className="h-2 w-full rounded-full bg-slate-900 border border-slate-800 overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 rounded-full transition-all duration-500"
-                    style={{ width: `${Math.min(parseFloat(toolSuccessRate), 100)}%` }}
+                    style={{ width: `${Math.min(Number(toolSuccessRate), 100)}%` }}
                   />
                 </div>
               </div>

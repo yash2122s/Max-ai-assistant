@@ -26,4 +26,20 @@ class PremiumMessageTextTest {
         val text = "# Heading\n\n- first\n- second with `code`"
         assertEquals(listOf(MessageBlock(text)), messageBlocks(text))
     }
+
+    @Test fun longerFencePreservesShorterFencesInsideExample() {
+        val blocks = messageBlocks("````markdown\n```kt\nval x = 1\n```\n````\nDone")
+        assertEquals(listOf(MessageBlock("```kt\nval x = 1\n```", "markdown", true), MessageBlock("Done")), blocks)
+    }
+
+    @Test fun fencedCodeClosesOnlyOnAnEligibleDelimiterLine() {
+        val code = "``` still code\n    ```\n~~~"
+        val blocks = messageBlocks("```kt\n$code\n  ````  \nహలో")
+        assertEquals(listOf(MessageBlock(code, "kt", true), MessageBlock("హలో")), blocks)
+    }
+
+    @Test fun tildeFenceDoesNotCloseOnBackticksDuringStreaming() {
+        val blocks = messageBlocks("~~~text\n```\nవివరణ")
+        assertEquals(listOf(MessageBlock("```\nవివరణ", "text", true)), blocks)
+    }
 }

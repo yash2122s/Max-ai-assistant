@@ -1,12 +1,15 @@
+import { csvCell, recentEventLimit, summarizeLatency } from "../../../functions/src/reporting";
 import { httpsCallable } from "firebase/functions";
 import {
   collection,
   doc,
   getDoc,
   getDocs,
+  getCountFromServer,
   query,
   where,
   orderBy,
+  startAfter,
   limit as fsLimit
 } from "firebase/firestore";
 import { functions, firestore } from "./firebase";
@@ -25,7 +28,7 @@ export interface OverviewMetrics {
   totalToolExecutions: number;
   failedToolExecutions: number;
   totalVoiceSessions: number;
-  avgLatencyMs: number;
+  avgLatencyMs: number | null;
   dailyTrends: Array<{
     date: string;
     totalEvents?: number;
@@ -66,6 +69,12 @@ export interface ActivityEventItem {
   metadata: Record<string, unknown>;
 }
 
+async function readRecentLatency() {
+  const events = await getDocs(query(collection(firestore, "activityEvents"),
+    orderBy("serverTimestamp", "desc"), fsLimit(recentEventLimit)));
+  return summarizeLatency(events.docs.map(doc => doc.data()));
+}
+
 export async function getOverview(): Promise<OverviewMetrics> {
   try {
     const fn = httpsCallable<void, OverviewMetrics>(functions, "getAdminOverview");
@@ -73,41 +82,36 @@ export async function getOverview(): Promise<OverviewMetrics> {
     return res.data;
   } catch {
     // Fallback direct Firestore reads if callable function is unavailable
-    const overviewDoc = await getDoc(doc(firestore, "adminAggregates", "overview"));
-    const data = overviewDoc.exists() ? overviewDoc.data() : {};
-
-    const fiveMinsAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const activeSessionsSnap = await getDocs(
-      query(
-        collection(firestore, "userSessions"),
-        where("isActive", "==", true),
-        where("lastHeartbeatAt", ">=", fiveMinsAgo),
-        fsLimit(200)
-      )
-    );
-
-    const usersSnap = await getDocs(collection(firestore, "userAnalytics"));
-    const dailySnap = await getDocs(
-      query(collection(firestore, "dailyAnalytics"), orderBy("date", "desc"), fsLimit(14))
-    );
-
+    const now = Date.now();
+    const users = collection(firestore, "userAnalytics");
+    const activeCount = (days: number) => getCountFromServer(query(users,
+      where("lastActiveAt", ">=", new Date(now - days * 86400000))));
+    const [overviewDoc, sessions, allUsers, dau, wau, mau, dailySnap, latency] = await Promise.all([
+      getDoc(doc(firestore, "adminAggregates", "overview")),
+      getCountFromServer(query(collection(firestore, "userSessions"), where("isActive", "==", true),
+        where("lastHeartbeatAt", ">=", new Date(now - 300000)))),
+      getCountFromServer(users), activeCount(1), activeCount(7), activeCount(30),
+      getDocs(query(collection(firestore, "dailyAnalytics"), orderBy("date", "desc"), fsLimit(30))),
+      readRecentLatency()
+    ]);
+    const data = overviewDoc.data() || {};
     const dailyTrends = dailySnap.docs.map(d => d.data() as OverviewMetrics["dailyTrends"][0]).reverse();
 
     return {
-      totalUsers: usersSnap.size,
+      totalUsers: allUsers.data().count,
       activeUsers: {
-        dau: usersSnap.size,
-        wau: usersSnap.size,
-        mau: usersSnap.size,
+        dau: dau.data().count,
+        wau: wau.data().count,
+        mau: mau.data().count,
       },
-      activeSessionsCount: activeSessionsSnap.size,
+      activeSessionsCount: sessions.data().count,
       totalAiRequests: data.totalAiRequests || 0,
       successfulAiRequests: data.successfulAiRequests || 0,
       failedAiRequests: data.failedAiRequests || 0,
       totalToolExecutions: data.totalToolExecutions || 0,
       failedToolExecutions: data.failedToolExecutions || 0,
       totalVoiceSessions: data.totalVoiceSessions || 0,
-      avgLatencyMs: 420,
+      avgLatencyMs: latency.avgLatencyMs,
       dailyTrends,
       heartbeatWindowMinutes: 5,
       timestamp: Date.now()
@@ -117,21 +121,25 @@ export async function getOverview(): Promise<OverviewMetrics> {
 
 export async function getUsers(options?: {
   limit?: number;
+  startAfter?: string;
   searchQuery?: string;
   filterPlan?: string;
-}): Promise<{ users: UserItem[]; hasMore: boolean }> {
+}): Promise<{ users: UserItem[]; hasMore: boolean; nextCursor: string | null }> {
   try {
-    const fn = httpsCallable<typeof options, { users: UserItem[]; hasMore: boolean }>(functions, "getAdminUsers");
+    const fn = httpsCallable<typeof options, { users: UserItem[]; hasMore: boolean; nextCursor: string | null }>(functions, "getAdminUsers");
     const res = await fn(options);
     return res.data;
   } catch {
-    const q = query(
-      collection(firestore, "userAnalytics"),
-      orderBy("lastActiveAt", "desc"),
-      fsLimit(options?.limit || 25)
-    );
-    const snap = await getDocs(q);
-    const users: UserItem[] = snap.docs.map(d => {
+    if (options?.filterPlan && options.filterPlan !== "ALL") throw new Error("License filtering requires the admin service.");
+    const collectionRef = collection(firestore, "userAnalytics");
+    const pageSize = Math.min(options?.limit || 20, 100);
+    const cursor = options?.startAfter ? await getDoc(doc(collectionRef, options.startAfter)) : null;
+    if (cursor && !cursor.exists()) throw new Error("User list changed. Refresh to restart pagination.");
+    const snap = await getDocs(query(collectionRef, orderBy("lastActiveAt", "desc"),
+      ...(cursor ? [startAfter(cursor)] : []), fsLimit(pageSize + 1)));
+    const page = snap.docs.slice(0, pageSize);
+    const hasMore = snap.size > pageSize;
+    const users: UserItem[] = page.map(d => {
       const data = d.data();
       return {
         uid: d.id,
@@ -141,11 +149,13 @@ export async function getUsers(options?: {
         totalToolExecutions: data.totalToolExecutions || 0,
         totalVoiceSessions: data.totalVoiceSessions || 0,
         lastActiveAt: data.lastActiveAt?.toMillis ? data.lastActiveAt.toMillis() : null,
-        licensePlan: "STANDARD",
-        licenseStatus: "ACTIVE"
+        licensePlan: "UNKNOWN",
+        licenseStatus: "UNKNOWN"
       };
     });
-    return { users, hasMore: false };
+    const search = options?.searchQuery?.toLowerCase() || "";
+    return { users: users.filter(user => user.uid.toLowerCase().includes(search)),
+      hasMore, nextCursor: hasMore ? page[page.length - 1].id : null };
   }
 }
 
@@ -170,7 +180,7 @@ export async function getUserDetail(targetUid: string) {
     const sessions = sessionsSnap.docs.map(d => ({
       sessionId: d.id,
       startedAt: d.data().startedAt?.toMillis ? d.data().startedAt.toMillis() : null,
-      durationMs: d.data().durationMs || null,
+      durationMs: d.data().durationMs ?? null,
       isActive: !!d.data().isActive,
       appVersion: d.data().appVersion || "Unknown"
     }));
@@ -183,7 +193,7 @@ export async function getUserDetail(targetUid: string) {
       eventType: d.data().eventType,
       feature: d.data().feature,
       status: d.data().status,
-      durationMs: d.data().durationMs || null,
+      durationMs: d.data().durationMs ?? null,
       serverTimestamp: d.data().serverTimestamp?.toMillis ? d.data().serverTimestamp.toMillis() : null
     }));
 
@@ -220,7 +230,7 @@ export async function getLiveActivity(limitCount = 50): Promise<ActivityEventIte
         eventType: data.eventType || "UNKNOWN",
         feature: data.feature || "System",
         status: data.status || "SUCCESS",
-        durationMs: data.durationMs || null,
+        durationMs: data.durationMs ?? null,
         errorCategory: data.errorCategory || null,
         appVersion: data.appVersion || "1.0.0",
         platform: data.platform || "Android",
@@ -245,36 +255,21 @@ export async function getErrorsAndPerformance() {
       userId: d.data().userId,
       feature: d.data().feature,
       eventType: d.data().eventType,
-      errorCategory: d.data().errorCategory || "OPERATION_FAILED",
-      durationMs: d.data().durationMs || null,
+      errorCategory: d.data().errorCategory || "UNKNOWN_ERROR",
+      durationMs: d.data().durationMs ?? null,
       serverTimestamp: d.data().serverTimestamp?.toMillis ? d.data().serverTimestamp.toMillis() : Date.now(),
       metadata: d.data().metadata || {}
     }));
 
-    const latencySnap = await getDocs(
-      query(collection(firestore, "activityEvents"), where("durationMs", ">", 0), orderBy("durationMs", "desc"), fsLimit(100))
-    );
-    const latencyBuckets = {
-      "<200ms": 0,
-      "200ms-500ms": 0,
-      "500ms-1s": 0,
-      "1s-3s": 0,
-      ">3s": 0
-    };
-    latencySnap.forEach(d => {
-      const dur = d.data().durationMs;
-      if (typeof dur === "number") {
-        if (dur < 200) latencyBuckets["<200ms"]++;
-        else if (dur < 500) latencyBuckets["200ms-500ms"]++;
-        else if (dur < 1000) latencyBuckets["500ms-1s"]++;
-        else if (dur < 3000) latencyBuckets["1s-3s"]++;
-        else latencyBuckets[">3s"]++;
-      }
-    });
+    const { latencyBuckets } = await readRecentLatency();
+    const errorCategories: Record<string, number> = Object.create(null);
+    for (const { errorCategory } of recentErrors) {
+      errorCategories[errorCategory] = (errorCategories[errorCategory] || 0) + 1;
+    }
 
     return {
       recentErrors,
-      errorCategories: {},
+      errorCategories,
       latencyBuckets,
       totalErrorSamples: recentErrors.length,
       timestamp: Date.now()
@@ -289,21 +284,23 @@ export async function exportReport(type: "users" | "activity") {
     return res.data;
   } catch {
     if (type === "users") {
-      const snap = await getDocs(query(collection(firestore, "userAnalytics"), fsLimit(200)));
-      const headers = ["UID", "AppVersion", "LastFeature", "TotalAIRequests", "TotalTools", "LastActive"];
+      const snap = await getDocs(query(collection(firestore, "userAnalytics"), orderBy("lastActiveAt", "desc"), fsLimit(500)));
+      const headers = ["UID", "AppVersion", "LastFeature", "TotalAIRequests", "TotalToolExecutions", "LastActive"];
       const rows = [headers.join(",")];
       snap.forEach(d => {
         const u = d.data();
-        rows.push([`"${d.id}"`, `"${u.appVersion || ""}"`, `"${u.lastFeatureUsed || ""}"`, u.totalAiRequests || 0, u.totalToolExecutions || 0, `"${u.lastActiveAt?.toDate ? u.lastActiveAt.toDate().toISOString() : ""}"`].join(","));
+        rows.push([d.id, u.appVersion, u.lastFeatureUsed, u.totalAiRequests || 0,
+          u.totalToolExecutions || 0, u.lastActiveAt?.toDate?.().toISOString()].map(csvCell).join(","));
       });
       return { csv: rows.join("\n"), filename: `max-users-report-${Date.now()}.csv` };
     } else {
-      const snap = await getDocs(query(collection(firestore, "activityEvents"), orderBy("serverTimestamp", "desc"), fsLimit(500)));
+      const snap = await getDocs(query(collection(firestore, "activityEvents"), orderBy("serverTimestamp", "desc"), fsLimit(1000)));
       const headers = ["EventID", "UserID", "EventType", "Feature", "Status", "DurationMs", "ErrorCategory", "Timestamp"];
       const rows = [headers.join(",")];
       snap.forEach(d => {
         const ev = d.data();
-        rows.push([`"${d.id}"`, `"${ev.userId}"`, `"${ev.eventType}"`, `"${ev.feature}"`, `"${ev.status}"`, ev.durationMs || 0, `"${ev.errorCategory || ""}"`, `"${ev.serverTimestamp?.toDate ? ev.serverTimestamp.toDate().toISOString() : ""}"`].join(","));
+        rows.push([d.id, ev.userId, ev.eventType, ev.feature, ev.status, ev.durationMs || 0,
+          ev.errorCategory, ev.serverTimestamp?.toDate?.().toISOString()].map(csvCell).join(","));
       });
       return { csv: rows.join("\n"), filename: `max-activity-report-${Date.now()}.csv` };
     }

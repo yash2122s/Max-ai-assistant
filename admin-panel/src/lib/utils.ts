@@ -11,7 +11,7 @@ export function formatNumber(num: number | undefined | null): string {
 }
 
 export function formatDuration(ms: number | undefined | null): string {
-  if (ms === undefined || ms === null) return "0ms";
+  if (ms === undefined || ms === null) return "—";
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
   const minutes = Math.floor(ms / 60000);

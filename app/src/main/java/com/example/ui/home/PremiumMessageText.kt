@@ -18,29 +18,6 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.example.ui.theme.*
 
-internal data class MessageBlock(val text: String, val language: String? = null, val code: Boolean = false)
-
-/** Keeps incomplete streaming fences visible and preserves code indentation. */
-internal fun messageBlocks(text: String): List<MessageBlock> {
-    val blocks = mutableListOf<MessageBlock>()
-    val lines = mutableListOf<String>()
-    var code = false
-    var language: String? = null
-    fun flush() {
-        if (lines.isNotEmpty()) blocks += MessageBlock(lines.joinToString("\n"), language, code)
-        lines.clear()
-    }
-    text.lines().forEach { line ->
-        if (line.trimStart().startsWith("```")) {
-            flush()
-            code = !code
-            language = if (code) line.trim().removePrefix("```").trim().ifBlank { null } else null
-        } else lines += line
-    }
-    flush()
-    return blocks
-}
-
 private val inlinePattern = Regex("\\*\\*(.+?)\\*\\*|`([^`]+)`")
 
 @Composable

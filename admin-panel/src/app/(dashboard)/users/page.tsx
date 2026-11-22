@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   Users as UsersIcon,
   Search,
@@ -8,7 +8,6 @@ import {
   ExternalLink,
   Copy,
   Check,
-  ChevronLeft,
   ChevronRight
 } from "lucide-react";
 import { Header } from "@/components/Header";
@@ -20,36 +19,54 @@ import { formatNumber, formatTimestamp, truncateUid } from "@/lib/utils";
 
 export default function UsersPage() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const [users, setUsers] = useState<UserItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
+  const [submittedSearch, setSubmittedSearch] = useState("");
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const latest = useRef(0);
   const [filterPlan, setFilterPlan] = useState("ALL");
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [copiedUid, setCopiedUid] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const loadUsers = async () => {
+  const loadUsers = async (cursor?: string) => {
+    const request = ++latest.current;
+    setRefreshing(true);
+    setError(false);
+    if (!cursor) {
+      setNextCursor(null);
+      setLoading(true);
+    }
     try {
-      const res = await getUsers({
-        searchQuery: searchQuery || undefined,
-        filterPlan: filterPlan !== "ALL" ? filterPlan : undefined,
+      const res = await getUsers({ searchQuery: submittedSearch, filterPlan, startAfter: cursor });
+      if (request !== latest.current) return;
+      setUsers(previous => {
+        if (!cursor) return res.users;
+        const seen = new Set(previous.map(user => user.uid));
+        return [...previous, ...res.users.filter(user => !seen.has(user.uid))];
       });
-      setUsers(res.users);
+      setNextCursor(res.nextCursor);
     } catch (err) {
+      if (request === latest.current) setError(true);
       console.error("Failed to load users", err);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (request === latest.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   };
 
   useEffect(() => {
     loadUsers();
-  }, [filterPlan]);
+    return () => { latest.current++; };
+  }, [filterPlan, submittedSearch]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    loadUsers();
+    if (searchQuery === submittedSearch) loadUsers();
+    else setSubmittedSearch(searchQuery);
   };
 
   const handleCopy = (uid: string) => {
@@ -106,9 +123,11 @@ export default function UsersPage() {
         <div className="glass-panel rounded-2xl border border-jarvis-border overflow-hidden">
           {loading ? (
             <LoadingSpinner label="Fetching user records..." />
+          ) : error ? (
+            <p role="alert" className="p-8 text-center">User records could not be loaded. Refresh to retry.</p>
           ) : users.length === 0 ? (
             <div className="p-12 text-center text-slate-500 font-mono text-xs">
-              No registered user records match the given criteria.
+              {nextCursor ? "No matches in the records checked so far." : "No matching user records."}
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -146,8 +165,8 @@ export default function UsersPage() {
                       </td>
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1.5">
-                          <StatusBadge status={u.licensePlan || "STANDARD"} type="plan" />
-                          <StatusBadge status={u.licenseStatus || "ACTIVE"} type="status" />
+                          <StatusBadge status={u.licensePlan || "UNKNOWN"} type="plan" />
+                          <StatusBadge status={u.licenseStatus || "UNKNOWN"} type="status" />
                         </div>
                       </td>
                       <td className="py-3 px-4 text-slate-400">{u.appVersion}</td>
@@ -171,6 +190,13 @@ export default function UsersPage() {
             </div>
           )}
         </div>
+
+        {nextCursor && !error && (
+          <button className="inline-flex items-center gap-2 text-sm text-cyan-400" disabled={refreshing}
+            onClick={() => loadUsers(nextCursor)}>
+            {refreshing ? "Loading…" : "Load more records"} <ChevronRight className="w-4 h-4" />
+          </button>
+        )}
 
         {/* Modal */}
         <UserDetailModal

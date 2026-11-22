@@ -89,8 +89,8 @@ export function UserDetailModal({ userId, onClose }: UserDetailModalProps) {
                 <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
                   <span className="text-[10px] font-mono text-slate-400 uppercase">License Plan</span>
                   <div className="mt-1 flex items-center gap-2">
-                    <StatusBadge status={data?.license?.plan || "STANDARD"} type="plan" />
-                    <StatusBadge status={data?.license?.status || "ACTIVE"} type="status" />
+                    <StatusBadge status={data?.license?.plan || "UNKNOWN"} type="plan" />
+                    <StatusBadge status={data?.license?.status || "UNKNOWN"} type="status" />
                   </div>
                 </div>
                 <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800">
