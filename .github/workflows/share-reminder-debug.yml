@@ -26,9 +26,10 @@ jobs:
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
           "$signer" verify app/build/outputs/apk/debug/app-debug.apk
           cp app/build/outputs/apk/debug/app-debug.apk MAX-share-reminder-debug.apk
-      - uses: actions/upload-artifact@v4
+          sha256sum MAX-share-reminder-debug.apk >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
         with:
-          name: MAX-share-reminder-debug
+          archive: false
           path: MAX-share-reminder-debug.apk
       - name: Run share reminder tests
         run: bash gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:testDebugUnitTest --tests 'com.example.share.*' --console=plain

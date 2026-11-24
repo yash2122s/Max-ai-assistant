@@ -12,13 +12,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.ViewModel
@@ -152,8 +150,8 @@ class ShareReminderActivity : ComponentActivity() {
                 OutlinedTextField(title, { title = it.take(160) }, label = { Text("Reminder title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 OutlinedTextField(date, { date = it }, label = { Text("Event date (YYYY-MM-DD)") }, singleLine = true)
                 OutlinedTextField(time, { time = it }, label = { Text("Event time (HH:mm, 24-hour)") }, singleLine = true)
-                OutlinedTextField(before, { before = it }, label = { Text("Remind me this many minutes before") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                OutlinedTextField(before, { before = it }, label = { Text("How early?") },
+                    supportingText = { Text("Minutes, or “30 minutes mundu remind chey”") }, singleLine = true)
                 val formatted = trigger?.let { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).apply { timeZone = zone }.format(Date(it)) }
                 Text(if (formatted != null) "Reminder: $formatted (${zone.id})" else "Enter a valid date, time and lead time (0–10080 minutes). Times use ${zone.id}.")
                 if (trigger != null && trigger <= System.currentTimeMillis()) Text("Choose a future reminder time.")

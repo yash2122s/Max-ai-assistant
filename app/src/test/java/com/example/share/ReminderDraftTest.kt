@@ -20,6 +20,13 @@ class ReminderDraftTest {
         assertEquals("", draft.time)
     }
 
+    @Test fun plainLanguageLeadTimeMatchesNumericMinutes() {
+        fun alert(lead: String) = ReminderDraftParser.trigger("2026-11-27", "15:00", lead, zone)
+        assertEquals(alert("30"), alert("30 minutes mundu remind chey"))
+        assertEquals(alert("60"), alert("remind me 1 hour before"))
+        assertNull(alert("30 minutes after"))
+    }
+
     @Test fun invalidInputsCannotSchedule() {
         for (date in listOf("2026-02-31", "2026-2-01", "")) assertNull(ReminderDraftParser.trigger(date, "15:00", "0", zone))
         for (minutes in listOf("-1", "10081", "x", "")) assertNull(ReminderDraftParser.trigger("2026-11-27", "15:00", minutes, zone))

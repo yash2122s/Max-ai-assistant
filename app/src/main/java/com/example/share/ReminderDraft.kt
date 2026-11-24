@@ -49,9 +49,24 @@ internal object ReminderDraftParser {
         return ReminderDraft(title.take(160), foundDates.singleOrNull().orEmpty(), foundTimes.singleOrNull().orEmpty())
     }
 
+    private val leadInstruction = Regex(
+        """(?:remind me\s+)?(\d{1,5})\s*(min(?:ute)?s?|h(?:ou)?rs?|hours?)\s+(?:before(?:hand)?|early|mundu|mundhu)(?:\s+remind\s+(?:chey|cheyyi))?[.!]?""",
+        RegexOption.IGNORE_CASE
+    )
+
+    private fun leadMinutes(input: String): Int? {
+        val value = input.trim()
+        val minutes = value.toIntOrNull() ?: run {
+            val match = leadInstruction.matchEntire(value) ?: return null
+            val amount = match.groupValues[1].toInt()
+            if (match.groupValues[2].startsWith("h", ignoreCase = true)) amount * 60 else amount
+        }
+        return minutes.takeIf { it in 0..10080 }
+    }
+
     fun trigger(date: String, time: String, minutes: String, zone: TimeZone): Long? {
         if (!Regex("""\d{4}-\d{2}-\d{2}""").matches(date) || !Regex("""\d{2}:\d{2}""").matches(time)) return null
-        val offset = minutes.toIntOrNull()?.takeIf { it in 0..10080 } ?: return null
+        val offset = leadMinutes(minutes) ?: return null
         return parse("$date $time", "yyyy-MM-dd HH:mm", zone)?.time?.minus(offset * 60_000L)
     }
 }
