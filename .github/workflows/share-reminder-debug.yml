@@ -32,3 +32,12 @@ jobs:
           path: MAX-share-reminder-debug.apk
       - name: Run share reminder tests
         run: bash gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:testDebugUnitTest --tests 'com.example.share.*' --console=plain
+      - name: Enable emulator acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - name: Test image sharing, offline OCR and reminder persistence on Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          script: bash gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.share.SharedScreenshotTest --console=plain
