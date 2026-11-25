@@ -11,7 +11,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
@@ -106,6 +108,7 @@ internal class TvSession(
     val host: String,
     private val factory: WebSocket.Factory? = null,
     private val onMacDetected: ((String) -> Unit)? = null,
+    private val onVolumeSync: ((Int, Boolean) -> Unit)? = null,
     val status: (String, Boolean) -> Unit
 ) : WebSocketListener() {
     private val profiles=context.getSharedPreferences("tv_devices",Context.MODE_PRIVATE)
@@ -124,15 +127,16 @@ internal class TvSession(
     private val seq = AtomicInteger()
     fun connect() { require(lanHost(host)); val endpoint=if(secure) "wss://"+host+":3001" else "ws://"+host+":3000"; socket = transport.newWebSocket(Request.Builder().url(endpoint).build(), this) }
     fun close() { socket?.cancel() }
-    override fun onOpen(ws: WebSocket, response: Response) {
+    override fun onOpen(webSocket: WebSocket, response: Response) {
         val permissions = org.json.JSONArray(listOf("CONTROL_AUDIO","CONTROL_POWER","CONTROL_INPUT_MEDIA_PLAYBACK","CONTROL_INPUT_TV","LAUNCH","WRITE_NOTIFICATION_TOAST","READ_CURRENT_CHANNEL","READ_RUNNING_APPS","CONTROL_MOUSE_AND_KEYBOARD"))
         val payload = JSONObject().put("pairingType","PROMPT").put("manifest",JSONObject().put("manifestVersion",1).put("appVersion","1.0").put("permissions",permissions))
         prefs.getString(host,null)?.let { payload.put("client-key",it) }
-        ws.send(JSONObject().put("type","register").put("id","pair").put("payload",payload).toString())
+        webSocket.send(JSONObject().put("type","register").put("id","pair").put("payload",payload).toString())
     }
     @Volatile private var ready = false
     private val macRequests = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-    override fun onMessage(ws: WebSocket, text: String) {
+    private val volumeSyncRequests = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    override fun onMessage(webSocket: WebSocket, text: String) {
         val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
         val data = msg.optJSONObject("payload")
         val msgId = msg.optString("id")
@@ -144,9 +148,12 @@ internal class TvSession(
                 status("Connected",true)
                 val macId = seq.incrementAndGet().toString()
                 macRequests.add(macId)
-                ws.send(JSONObject().put("type","request").put("id",macId).put("uri","ssap://com.webos.service.connectionmanager/getStatus").toString())
+                webSocket.send(JSONObject().put("type","request").put("id",macId).put("uri","ssap://com.webos.service.connectionmanager/getStatus").toString())
+                val volId = seq.incrementAndGet().toString()
+                volumeSyncRequests.add(volId)
+                webSocket.send(JSONObject().put("type","request").put("id",volId).put("uri","ssap://audio/getVolume").toString())
             }
-            "error" -> if (!macRequests.remove(msgId)) status(msg.optString("error","TV rejected command"),ready)
+            "error" -> if (!macRequests.remove(msgId) && !volumeSyncRequests.remove(msgId)) status(msg.optString("error","TV rejected command"),ready)
             "response" -> if (macRequests.remove(msgId)) {
                 val wifi = data?.optJSONObject("wifiInfo")
                 val wired = data?.optJSONObject("wiredInfo")
@@ -160,28 +167,34 @@ internal class TvSession(
                     profiles.edit().putString("mac_" + host, candidate).apply()
                     onMacDetected?.invoke(candidate)
                 }
+            } else if (volumeSyncRequests.remove(msgId)) {
+                val volObj = data?.optJSONObject("volumeStatus") ?: data
+                val vol = volObj?.optInt("volume", -1) ?: -1
+                val muted = volObj?.optBoolean("muteStatus", false) ?: volObj?.optBoolean("muted", false) ?: false
+                if (vol in 0..100) onVolumeSync?.invoke(vol, muted)
             } else if (checks.containsKey(msgId)) {
                 val expected=checks.remove(msg.optString("id"))
                 if(expected!=null && data?.optBoolean("returnValue")==true) {
                     val id=seq.incrementAndGet().toString()
                     readings[id]=expected
-                    ws.send(JSONObject().put("type","request").put("id",id).put("uri","ssap://audio/getVolume").toString())
+                    webSocket.send(JSONObject().put("type","request").put("id",id).put("uri","ssap://audio/getVolume").toString())
                 } else status("TV rejected volume change",ready)
             } else if(readings.containsKey(msg.optString("id"))) {
                 val expected=readings.remove(msg.optString("id"))
                 val actual=(data?.optJSONObject("volumeStatus") ?: data)?.optInt("volume",-1)
+                if (actual in 0..100) onVolumeSync?.invoke(actual!!, false)
                 status(if(actual==expected) "Volume verified" else "Volume could not be verified",ready)
             } else if (data?.has("socketPath")==true) { val path=data.optString("socketPath")
                 val url=runCatching { java.net.URI(path) }.getOrNull()
                 val key=keys.remove(msg.optString("id"))
                 if(key!=null && url?.host==host && url.scheme==(if(secure) "wss" else "ws") && url.port==(if(secure) 3001 else 3000)) transport.newWebSocket(Request.Builder().url(path).build(),object:WebSocketListener(){
-                    override fun onOpen(remote:WebSocket,response:Response){remote.send("type:button\nname:"+key+"\n\n"); remote.close(1000,"Done"); status("Navigation sent",true)}
+                    override fun onOpen(webSocket:WebSocket,response:Response){webSocket.send("type:button\nname:"+key+"\n\n"); webSocket.close(1000,"Done"); status("Navigation sent",true)}
                 }) else status("Unsupported navigation endpoint",ready)
             } else if (msg.optString("id") != "pair") status(if (data?.optBoolean("returnValue")==true) "TV acknowledged command" else "TV did not confirm command",ready)
         }
     }
-    override fun onFailure(ws: WebSocket,t: Throwable,response: Response?) { ready=false; val seen=tls.observed; val saved=prefs.getString("cert_"+host,null); status(when { secure && seen!=null && saved==null -> "Confirm TV certificate SHA-256: "+seen; secure && seen!=null && seen!=saved -> "TV certificate changed. Connection blocked."; else -> "Disconnected: "+(t.message ?: t.javaClass.simpleName) },false) }
-    override fun onClosed(ws: WebSocket,code: Int,reason: String) { ready=false; status("Disconnected",false) }
+    override fun onFailure(webSocket: WebSocket,t: Throwable,response: Response?) { ready=false; val seen=tls.observed; val saved=prefs.getString("cert_"+host,null); status(when { secure && seen!=null && saved==null -> "Confirm TV certificate SHA-256: "+seen; secure && seen!=null && seen!=saved -> "TV certificate changed. Connection blocked."; else -> "Disconnected: "+(t.message ?: t.javaClass.simpleName) },false) }
+    override fun onClosed(webSocket: WebSocket,code: Int,reason: String) { ready=false; status("Disconnected",false) }
     private val checks = java.util.concurrent.ConcurrentHashMap<String,Int>()
     private val readings = java.util.concurrent.ConcurrentHashMap<String,Int>()
     private val keys = java.util.concurrent.ConcurrentHashMap<String,String>()
@@ -202,6 +215,7 @@ internal class TvSession(
 fun TvRemote() {
     val activity = LocalContext.current
     val ctx = activity.applicationContext
+    val haptic = LocalHapticFeedback.current
     val scope = rememberCoroutineScope()
     val profiles = remember { ctx.getSharedPreferences("tv_devices", Context.MODE_PRIVATE) }
     var host by remember { mutableStateOf(profiles.getString("last", "").orEmpty()) }
@@ -212,6 +226,7 @@ fun TvRemote() {
     var ready by remember { mutableStateOf(false) }
     var session by remember { mutableStateOf<TvSession?>(null) }
     var volume by remember { mutableFloatStateOf(20f) }
+    var muted by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
     var attempt by remember { mutableIntStateOf(0) }
     var showSettings by remember { mutableStateOf(false) }
@@ -224,7 +239,15 @@ fun TvRemote() {
         val connection = if (lanHost(selected)) TvSession(
             ctx,
             selected,
-            onMacDetected = { detected -> scope.launch { if (active) mac = detected } }
+            onMacDetected = { detected -> scope.launch { if (active) mac = detected } },
+            onVolumeSync = { syncedVol, isMuted ->
+                scope.launch {
+                    if (active) {
+                        volume = syncedVol.toFloat()
+                        muted = isMuted
+                    }
+                }
+            }
         ) { status, connected ->
             scope.launch {
                 if (active) {
@@ -327,15 +350,30 @@ fun TvRemote() {
                         TextButton(onClick = { session?.send("system/turnOff") }) { Text("Power off") }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                        RemoteKey("▲", Modifier.width(68.dp)) { session?.key("UP") }
+                        RemoteKey("▲", Modifier.width(68.dp)) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            session?.key("UP")
+                        }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                        RemoteKey("◀", Modifier.width(68.dp)) { session?.key("LEFT") }
-                        RemoteKey("OK", Modifier.width(68.dp)) { session?.key("ENTER") }
-                        RemoteKey("▶", Modifier.width(68.dp)) { session?.key("RIGHT") }
+                        RemoteKey("◀", Modifier.width(68.dp)) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            session?.key("LEFT")
+                        }
+                        RemoteKey("OK", Modifier.width(68.dp)) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            session?.key("ENTER")
+                        }
+                        RemoteKey("▶", Modifier.width(68.dp)) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            session?.key("RIGHT")
+                        }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                        RemoteKey("▼", Modifier.width(68.dp)) { session?.key("DOWN") }
+                        RemoteKey("▼", Modifier.width(68.dp)) {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            session?.key("DOWN")
+                        }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                         TextButton(onClick = { session?.key("BACK") }) { Text("Back") }
@@ -343,18 +381,33 @@ fun TvRemote() {
                         TextButton(onClick = { session?.send("media.controls/play") }) { Text("Play") }
                         TextButton(onClick = { session?.send("media.controls/pause") }) { Text("Pause") }
                     }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        OutlinedButton(onClick = { session?.send("tv/channelDown") }) { Text("CH −") }
+                        OutlinedButton(onClick = { session?.send("tv/channelUp") }) { Text("CH +") }
+                    }
                 }
             }
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Volume  ${volume.toInt()}", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        if (muted) "Volume  ${volume.toInt()} (Muted)" else "Volume  ${volume.toInt()}",
+                        style = MaterialTheme.typography.titleMedium
+                    )
                     Slider(value = volume, onValueChange = { volume = it }, valueRange = 0f..100f,
                         onValueChangeFinished = { session?.send("audio/setVolume", JSONObject().put("volume", volume.toInt())) })
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        OutlinedButton(onClick = { session?.send("audio/volumeDown") }) { Text("−") }
-                        OutlinedButton(onClick = { session?.send("audio/setMute", JSONObject().put("mute", true)) }) { Text("Mute") }
-                        OutlinedButton(onClick = { session?.send("audio/setMute", JSONObject().put("mute", false)) }) { Text("Unmute") }
-                        OutlinedButton(onClick = { session?.send("audio/volumeUp") }) { Text("+") }
+                        OutlinedButton(onClick = {
+                            volume = (volume - 2f).coerceAtLeast(0f)
+                            session?.send("audio/volumeDown")
+                        }) { Text("−") }
+                        OutlinedButton(onClick = {
+                            muted = !muted
+                            session?.send("audio/setMute", JSONObject().put("mute", muted))
+                        }) { Text(if (muted) "Unmute" else "Mute") }
+                        OutlinedButton(onClick = {
+                            volume = (volume + 2f).coerceAtMost(100f)
+                            session?.send("audio/volumeUp")
+                        }) { Text("+") }
                     }
                 }
             }

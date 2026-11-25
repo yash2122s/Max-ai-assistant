@@ -104,6 +104,26 @@ object OfflineCommandEngine {
         val isTvTarget = Regex("""\b(tv|television|smart\s+tv|lg\s+tv)\b""", RegexOption.IGNORE_CASE).containsMatchIn(cleanedText) ||
             cleanedText.contains("టీవీ")
 
+        if (isTvTarget) {
+            val tvAction = when {
+                Regex("""\b(unmute)\b""").containsMatchIn(cleanedText) -> "unmute"
+                Regex("""\b(mute)\b""").containsMatchIn(cleanedText) -> "mute"
+                Regex("""\b(off|bandh|band|turn\s+off|power\s+off)\b""").containsMatchIn(cleanedText) -> "off"
+                Regex("""\b(on|turn\s+on|power\s+on|start|wake)\b""").containsMatchIn(cleanedText) -> "on"
+                Regex("""\b(penchu|pencu|penchandi|increase|raise|up)\b|పెంచు""").containsMatchIn(cleanedText) &&
+                    Regex("""\b(volume|sound|audio)\b|వాల్యూమ్""").containsMatchIn(cleanedText) -> "volume_up"
+                Regex("""\b(thagginchu|thaggincu|tagginchu|taggincu|decrease|lower|down|reduce)\b|తగ్గించు""").containsMatchIn(cleanedText) &&
+                    Regex("""\b(volume|sound|audio)\b|వాల్యూమ్""").containsMatchIn(cleanedText) -> "volume_down"
+                else -> null
+            }
+            if (tvAction != null) {
+                val args = JsonObject().apply { addProperty("tv_action", tvAction) }
+                Log.d(TAG, "Matched Offline TV Action: LG_TV ($tvAction)")
+                val res = ExecutionEngine.execute(context, ExecutionRequest(action = "LG_TV", arguments = args))
+                return if (res.message.isNullOrEmpty()) res.copy(message = "TV command '$tvAction' sent.") else res
+            }
+        }
+
         // 5. Volume Controls (Percent & Direction in English, Telugu, Tenglish)
         val volumePatternPercent = Regex(
             """(?:set\s+)?(?:volume|sound|audio|వాల్యూమ్|సౌండ్)\s*(?:ni|nu|ki|to|lo)?\s*(?:adjust\s+chey\s*)?(\d{1,3})\s*(?:%|percent|shatham|శాతం)?(?:\s*(?:pe\s*to|pettu|petu|lo\s*pettu|ki\s*pettu|lo\s*unsu|ki\s*set\s*chey|set\s*chey|chey|ki|lo|to))?""",

@@ -57,6 +57,8 @@ private suspend fun runTv(ctx:Context,host:String,action:String,value:String):St
             }
         }
         "play","pause" -> "media.controls/"+action
+        "channel_up" -> "tv/channelUp"
+        "channel_down" -> "tv/channelDown"
         "youtube","netflix","prime" -> { data.put("id",mapOf("youtube" to "youtube.leanback.v4","netflix" to "netflix","prime" to "amazon")[action]);"system.launcher/launch" }
         "hdmi" -> {require(value in listOf("1","2","3","4"));data.put("inputId","HDMI_"+value);"tv/switchInput"}
         "reminder" -> {require(value.isNotBlank());data.put("message",value);"system.notifications/createToast"}

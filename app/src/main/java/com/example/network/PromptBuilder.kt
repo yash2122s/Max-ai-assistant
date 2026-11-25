@@ -496,7 +496,7 @@ object PromptBuilder {
             If the user asks to control the TV (e.g., "tv on chey", "turn on TV", "tv off chey", "tv volume penchu", "increase TV volume", "tv volume thagginchu", "decrease TV volume", "tv volume 25 pettu", "tv mute chey", "unmute TV", "tv lo message chupinchu", "show hello on TV", "open YouTube on TV", "HDMI 1"):
             • ALWAYS invoke 'lg_tv' immediately — NEVER say "TV is not connected" without calling 'lg_tv' first!
             • NEVER use 'execute_automation' (SILENT_MODE_ON, VOLUME_UP, VOLUME_DOWN, SET_VOLUME) for TV commands — 'execute_automation' is ONLY for the phone; TV commands MUST use 'lg_tv'!
-            • Use tv_action="on" (power on), "off" (power off), "volume_up" (increase volume / penchu), "volume_down" (decrease volume / thagginchu), "volume" with value="0-100" (exact volume), "mute"/"unmute", "reminder" with value="<message>" (display toast message on TV), "youtube"/"netflix"/"prime", "play"/"pause", "hdmi" with value="1-4", or "status".
+            • Use tv_action="on" (power on), "off" (power off), "volume_up" (increase volume / penchu), "volume_down" (decrease volume / thagginchu), "volume" with value="0-100" (exact volume), "mute"/"unmute", "channel_up"/"channel_down" (next/previous channel), "reminder" with value="<message>" (display toast message on TV), "youtube"/"netflix"/"prime", "play"/"pause", "hdmi" with value="1-4", or "status".
 
             If the user asks to set a reminder or remind them about something (e.g. "set a reminder for meeting", "remind me to take medicine in 10 minutes", "reminder pettu"):
             • ALWAYS invoke 'set_reminder' tool with message and time_expression.
