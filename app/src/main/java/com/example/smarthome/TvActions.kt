@@ -13,11 +13,7 @@ import java.net.*
 import java.util.Calendar
 
 internal fun validMac(s:String)=Regex("(?i)([0-9a-f]{2}:){5}[0-9a-f]{2}").matches(s)
-internal fun magicPacket(s:String):ByteArray {
-    require(validMac(s))
-    val mac=s.split(":").map { it.toInt(16).toByte() }
-    return ByteArray(102){ if(it<6) 0xff.toByte() else mac[(it-6)%6] }
-}
+internal fun magicPacket(s:String)=WakeOnLanManager.magicPacket(s)
 internal suspend fun wakeTv(mac:String,address:InetAddress=InetAddress.getByName("255.255.255.255"),port:Int=9)=withContext(Dispatchers.IO){
     val bytes=magicPacket(mac)
     DatagramSocket().use { socket -> socket.broadcast=true;socket.send(DatagramPacket(bytes,bytes.size,address,port)) }
@@ -25,7 +21,12 @@ internal suspend fun wakeTv(mac:String,address:InetAddress=InetAddress.getByName
 private suspend fun runTv(ctx:Context,host:String,action:String,value:String):String {
     require(lanHost(host)){"Pair a TV in Smart Home first"}
     val profiles=ctx.getSharedPreferences("tv_devices",Context.MODE_PRIVATE)
-    if(action=="on"){ wakeTv(profiles.getString("mac_"+host,"").orEmpty()); return "Wake packet sent" }
+    if(action=="on") {
+        val mac=profiles.getString("mac_"+host,"").orEmpty()
+        WakeOnLanManager.wake(ctx,mac)
+        return awaitTvConnection(ctx,host)
+    }
+    if(action=="status" || action=="reconnect") return awaitTvConnection(ctx,host, if(action=="status") 5000 else 60000)
     val data=JSONObject()
     val uri=when(action){
         "off" -> "system/turnOff"
@@ -37,6 +38,12 @@ private suspend fun runTv(ctx:Context,host:String,action:String,value:String):St
         "reminder" -> {require(value.isNotBlank());data.put("message",value);"system.notifications/createToast"}
         else -> error("Unsupported TV command")
     }
+    if(action!="off") runCatching { awaitTvConnection(ctx,host,5000) }.getOrElse {
+        val mac=profiles.getString("mac_"+host,"").orEmpty()
+        if(!validMac(mac)) throw it
+        WakeOnLanManager.wake(ctx,mac)
+        awaitTvConnection(ctx,host)
+    }
     val answer=CompletableDeferred<String>()
     lateinit var session:TvSession
     session=TvSession(ctx,host){ msg,ready ->
@@ -46,7 +53,31 @@ private suspend fun runTv(ctx:Context,host:String,action:String,value:String):St
             else -> answer.completeExceptionally(IllegalStateException(msg))
         }
     }
-    return try { session.connect();withTimeout(6500){answer.await()} } finally {session.close()}
+    return try { session.connect();withTimeout(10000){answer.await()} } finally {session.close()}
+}
+
+private suspend fun awaitTvConnection(ctx:Context,host:String,timeoutMs:Long=60000):String {
+    val start=android.os.SystemClock.elapsedRealtime()
+    var backoff=700L
+    var lastError="TV unreachable"
+    while(android.os.SystemClock.elapsedRealtime()-start<timeoutMs) {
+        val connected=CompletableDeferred<Boolean>()
+        val session=TvSession(ctx,host){ message,ready ->
+            if(ready) connected.complete(true)
+            else if(message.startsWith("Confirm TV certificate") || message.contains("certificate changed")) {
+                lastError=message
+                connected.complete(false)
+            } else if(message.startsWith("Disconnected")) connected.complete(false)
+        }
+        try {
+            session.connect()
+            if(withTimeoutOrNull(4500){connected.await()}==true) return "TV connected"
+        } finally {session.close()}
+        if(lastError.contains("certificate")) break
+        delay(backoff)
+        backoff=(backoff*2).coerceAtMost(5000)
+    }
+    error(lastError)
 }
 class LgTvTool: Tool {
     override val name="lg_tv"
@@ -70,11 +101,25 @@ internal fun scheduleTv(ctx:Context,host:String,action:String,h:Int,m:Int,messag
     val alarms=ctx.getSystemService(AlarmManager::class.java)
     require(Build.VERSION.SDK_INT<31 || alarms.canScheduleExactAlarms()){"Allow exact alarms in Settings"}
     alarms.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP,time.timeInMillis,pi)
+    ctx.getSharedPreferences("tv_schedules",Context.MODE_PRIVATE).edit()
+        .putString(host+"/"+action,JSONObject().put("host",host).put("action",action)
+            .put("hour",h).put("minute",m).put("message",message).toString()).apply()
+}
+internal fun restoreTvSchedules(ctx:Context){
+    ctx.getSharedPreferences("tv_schedules",Context.MODE_PRIVATE).all.values.forEach { raw ->
+        runCatching { JSONObject(raw as String) }.getOrNull()?.let { item ->
+            runCatching { scheduleTv(ctx,item.getString("host"),item.getString("action"),
+                item.getInt("hour"),item.getInt("minute"),item.optString("message")) }
+        }
+    }
 }
 class TvAlarm:BroadcastReceiver(){
     override fun onReceive(ctx:Context,intent:Intent){
         val result=goAsync()
-        CoroutineScope(Dispatchers.IO).launch { try {runTv(ctx,intent.getStringExtra("host").orEmpty(),intent.getStringExtra("action").orEmpty(),intent.getStringExtra("message").orEmpty())}
+        val host=intent.getStringExtra("host").orEmpty()
+        val action=intent.getStringExtra("action").orEmpty()
+        ctx.getSharedPreferences("tv_schedules",Context.MODE_PRIVATE).edit().remove(host+"/"+action).apply()
+        CoroutineScope(Dispatchers.IO).launch { try {runTv(ctx,host,action,intent.getStringExtra("message").orEmpty())}
             catch(e:Exception){android.util.Log.w("LgTv","Scheduled TV command failed",e)} finally {result.finish()} }
     }
 }
