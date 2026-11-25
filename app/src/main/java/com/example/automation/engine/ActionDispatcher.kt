@@ -273,6 +273,41 @@ object ActionDispatcher {
             }
         }
 
+        val spokenText = json.optString("last_input_transcription", "")
+        val isTvIntent = (Regex("""\b(tv|television|smart\s+tv|lg\s+tv)\b""", RegexOption.IGNORE_CASE).containsMatchIn(spokenText) ||
+            spokenText.contains("టీవీ")) &&
+            !Regex("""\b(phone|mobile)\b""", RegexOption.IGNORE_CASE).containsMatchIn(spokenText)
+        if (isTvIntent) {
+            when (actionName) {
+                "VOLUME_UP" -> { json.put("action", "LG_TV"); json.put("tv_action", "volume_up"); return json }
+                "VOLUME_DOWN" -> { json.put("action", "LG_TV"); json.put("tv_action", "volume_down"); return json }
+                "SET_VOLUME" -> {
+                    json.put("action", "LG_TV")
+                    val dir = json.optString("direction", "").lowercase()
+                    when {
+                        dir == "up" -> json.put("tv_action", "volume_up")
+                        dir == "down" -> json.put("tv_action", "volume_down")
+                        json.has("percent") -> {
+                            json.put("tv_action", "volume")
+                            json.put("value", json.optInt("percent").toString())
+                        }
+                        else -> json.put("tv_action", "volume_up")
+                    }
+                    return json
+                }
+                "SILENT_MODE_ON" -> { json.put("action", "LG_TV"); json.put("tv_action", "mute"); return json }
+                "SILENT_MODE_OFF" -> { json.put("action", "LG_TV"); json.put("tv_action", "unmute"); return json }
+                "SET_RINGER_MODE" -> {
+                    val mode = json.optString("mode", "").lowercase()
+                    if (mode == "silent") {
+                        json.put("action", "LG_TV"); json.put("tv_action", "mute"); return json
+                    } else if (mode == "normal") {
+                        json.put("action", "LG_TV"); json.put("tv_action", "unmute"); return json
+                    }
+                }
+            }
+        }
+
         when (actionName) {
             "PERFORM_BACK" -> { json.put("action", "SYSTEM_ACTION"); json.put("system_action_str", "back") }
             "PERFORM_HOME" -> { json.put("action", "SYSTEM_ACTION"); json.put("system_action_str", "home") }

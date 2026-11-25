@@ -101,6 +101,9 @@ object OfflineCommandEngine {
             return if (res.message.isNullOrEmpty()) res.copy(message = "Flashlight turned off.") else res
         }
 
+        val isTvTarget = Regex("""\b(tv|television|smart\s+tv|lg\s+tv)\b""", RegexOption.IGNORE_CASE).containsMatchIn(cleanedText) ||
+            cleanedText.contains("టీవీ")
+
         // 5. Volume Controls (Percent & Direction in English, Telugu, Tenglish)
         val volumePatternPercent = Regex(
             """(?:set\s+)?(?:volume|sound|audio|వాల్యూమ్|సౌండ్)\s*(?:ni|nu|ki|to|lo)?\s*(?:adjust\s+chey\s*)?(\d{1,3})\s*(?:%|percent|shatham|శాతం)?(?:\s*(?:pe\s*to|pettu|petu|lo\s*pettu|ki\s*pettu|lo\s*unsu|ki\s*set\s*chey|set\s*chey|chey|ki|lo|to))?""",
@@ -123,29 +126,31 @@ object OfflineCommandEngine {
             RegexOption.IGNORE_CASE
         )
 
-        val volMatchPercent = volumePatternPercent.find(cleanedText)
-            ?: volumePatternPercentLeading.find(cleanedText)
-        if (volMatchPercent != null && volMatchPercent.groupValues[1].isNotEmpty()) {
-            val percentVal = (volMatchPercent.groupValues[1].toIntOrNull() ?: 50).coerceIn(0, 100)
-            val args = JsonObject().apply { addProperty("percent", percentVal) }
-            Log.d(TAG, "Matched Offline Action: SET_VOLUME ($percentVal%)")
-            val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
-            return if (res.message.isNullOrEmpty()) res.copy(message = "Volume set to $percentVal%.") else res
-        } else if (volumePatternUp.containsMatchIn(cleanedText)) {
-            val args = JsonObject().apply { addProperty("direction", "up") }
-            Log.d(TAG, "Matched Offline Action: SET_VOLUME (up)")
-            val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
-            return if (res.message.isNullOrEmpty()) res.copy(message = "Volume increased.") else res
-        } else if (volumePatternDown.containsMatchIn(cleanedText)) {
-            val args = JsonObject().apply { addProperty("direction", "down") }
-            Log.d(TAG, "Matched Offline Action: SET_VOLUME (down)")
-            val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
-            return if (res.message.isNullOrEmpty()) res.copy(message = "Volume decreased.") else res
-        } else if (volumePatternAdjust.containsMatchIn(cleanedText)) {
-            val args = JsonObject().apply { addProperty("direction", "show") }
-            Log.d(TAG, "Matched Offline Action: SET_VOLUME (show slider)")
-            val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
-            return if (res.message.isNullOrEmpty()) res.copy(message = "Volume slider opened.") else res
+        if (!isTvTarget) {
+            val volMatchPercent = volumePatternPercent.find(cleanedText)
+                ?: volumePatternPercentLeading.find(cleanedText)
+            if (volMatchPercent != null && volMatchPercent.groupValues[1].isNotEmpty()) {
+                val percentVal = (volMatchPercent.groupValues[1].toIntOrNull() ?: 50).coerceIn(0, 100)
+                val args = JsonObject().apply { addProperty("percent", percentVal) }
+                Log.d(TAG, "Matched Offline Action: SET_VOLUME ($percentVal%)")
+                val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
+                return if (res.message.isNullOrEmpty()) res.copy(message = "Volume set to $percentVal%.") else res
+            } else if (volumePatternUp.containsMatchIn(cleanedText)) {
+                val args = JsonObject().apply { addProperty("direction", "up") }
+                Log.d(TAG, "Matched Offline Action: SET_VOLUME (up)")
+                val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
+                return if (res.message.isNullOrEmpty()) res.copy(message = "Volume increased.") else res
+            } else if (volumePatternDown.containsMatchIn(cleanedText)) {
+                val args = JsonObject().apply { addProperty("direction", "down") }
+                Log.d(TAG, "Matched Offline Action: SET_VOLUME (down)")
+                val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
+                return if (res.message.isNullOrEmpty()) res.copy(message = "Volume decreased.") else res
+            } else if (volumePatternAdjust.containsMatchIn(cleanedText)) {
+                val args = JsonObject().apply { addProperty("direction", "show") }
+                Log.d(TAG, "Matched Offline Action: SET_VOLUME (show slider)")
+                val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_VOLUME", arguments = args))
+                return if (res.message.isNullOrEmpty()) res.copy(message = "Volume slider opened.") else res
+            }
         }
 
         // 6. Brightness Controls (Percent & Direction in English, Telugu, Tenglish)
@@ -180,12 +185,12 @@ object OfflineCommandEngine {
         val ringerPatternDndOn = Regex("(?:dnd|do not disturb|disturb cheyoddu)\\s+(?:mode\\s+)?(?:on|chey|active|cheyyi)")
         val ringerPatternDndOff = Regex("(?:dnd|do not disturb|disturb cheyoddu)\\s+(?:mode\\s+)?(?:off|deactivate|teesey|teeseyyi)")
 
-        if (ringerPatternSilentOn.containsMatchIn(cleanedText)) {
+        if (!isTvTarget && ringerPatternSilentOn.containsMatchIn(cleanedText)) {
             val args = JsonObject().apply { addProperty("mode", "silent") }
             Log.d(TAG, "Matched Offline Action: SET_RINGER_MODE (silent)")
             val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_RINGER_MODE", arguments = args))
             return if (res.message.isNullOrEmpty()) res.copy(message = "Silent mode enabled.") else res
-        } else if (ringerPatternSilentOff.containsMatchIn(cleanedText) || ringerPatternNormalOn.containsMatchIn(cleanedText)) {
+        } else if (!isTvTarget && (ringerPatternSilentOff.containsMatchIn(cleanedText) || ringerPatternNormalOn.containsMatchIn(cleanedText))) {
             val args = JsonObject().apply { addProperty("mode", "normal") }
             Log.d(TAG, "Matched Offline Action: SET_RINGER_MODE (normal)")
             val res = ExecutionEngine.execute(context, ExecutionRequest(action = "SET_RINGER_MODE", arguments = args))
