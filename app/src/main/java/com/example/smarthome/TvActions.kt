@@ -18,6 +18,20 @@ internal suspend fun wakeTv(mac:String,address:InetAddress=InetAddress.getByName
     val bytes=magicPacket(mac)
     DatagramSocket().use { socket -> socket.broadcast=true;socket.send(DatagramPacket(bytes,bytes.size,address,port)) }
 }
+private fun resolveTvHost(ctx: Context): String {
+    val profiles = ctx.getSharedPreferences("tv_devices", Context.MODE_PRIVATE)
+    val last = profiles.getString("last", "").orEmpty()
+    if (lanHost(last)) return last
+    val fallback = profiles.all.keys.firstOrNull { it.startsWith("paired_") }?.removePrefix("paired_")
+        ?: profiles.all.keys.firstOrNull { it.startsWith("mac_") }?.removePrefix("mac_")
+        ?: ""
+    if (lanHost(fallback)) {
+        profiles.edit().putString("last", fallback).apply()
+        return fallback
+    }
+    return ""
+}
+
 private suspend fun runTv(ctx:Context,host:String,action:String,value:String):String {
     require(lanHost(host)){"Pair a TV in Smart Home first"}
     val profiles=ctx.getSharedPreferences("tv_devices",Context.MODE_PRIVATE)
@@ -32,29 +46,46 @@ private suspend fun runTv(ctx:Context,host:String,action:String,value:String):St
     val uri=when(action){
         "off" -> "system/turnOff"
         "mute","unmute" -> {data.put("mute",action=="mute");"audio/setMute"}
-        "volume" -> {data.put("volume",requireNotNull(value.toIntOrNull()?.takeIf { it in 0..100 }));"audio/setVolume"}
+        "volume_up" -> "audio/volumeUp"
+        "volume_down" -> "audio/volumeDown"
+        "volume" -> when {
+            value.equals("up", true) || value.equals("increase", true) || value == "+" -> "audio/volumeUp"
+            value.equals("down", true) || value.equals("decrease", true) || value == "-" -> "audio/volumeDown"
+            else -> {
+                data.put("volume",requireNotNull(value.toIntOrNull()?.takeIf { it in 0..100 }) { "Provide a TV volume between 0 and 100" })
+                "audio/setVolume"
+            }
+        }
         "play","pause" -> "media.controls/"+action
         "youtube","netflix","prime" -> { data.put("id",mapOf("youtube" to "youtube.leanback.v4","netflix" to "netflix","prime" to "amazon")[action]);"system.launcher/launch" }
         "hdmi" -> {require(value in listOf("1","2","3","4"));data.put("inputId","HDMI_"+value);"tv/switchInput"}
         "reminder" -> {require(value.isNotBlank());data.put("message",value);"system.notifications/createToast"}
-        else -> error("Unsupported TV command")
+        else -> error("Unsupported TV command: $action")
     }
-    if(action!="off") runCatching { awaitTvConnection(ctx,host,5000) }.getOrElse {
-        val mac=profiles.getString("mac_"+host,"").orEmpty()
-        if(!validMac(mac)) throw it
-        WakeOnLanManager.wake(ctx,mac)
-        awaitTvConnection(ctx,host)
-    }
-    val answer=CompletableDeferred<String>()
-    lateinit var session:TvSession
-    session=TvSession(ctx,host){ msg,ready ->
-        when {
-            msg=="Connected" -> session.send(uri,data)
-            msg=="TV acknowledged command" || msg=="Volume verified" -> answer.complete(msg)
-            else -> answer.completeExceptionally(IllegalStateException(msg))
+    suspend fun sendOnce(): String {
+        val answer=CompletableDeferred<String>()
+        var sent=false
+        lateinit var session:TvSession
+        session=TvSession(ctx,host){ msg,_ ->
+            when {
+                msg=="Connected" -> {
+                    sent=true
+                    session.send(uri,data)
+                }
+                msg=="TV acknowledged command" || msg=="Volume verified" || msg=="Volume could not be verified" -> answer.complete(msg)
+                sent && action=="off" && msg.startsWith("Disconnected") -> answer.complete("TV powered off")
+                else -> answer.completeExceptionally(IllegalStateException(msg))
+            }
         }
+        return try { session.connect(); withTimeout(10000){answer.await()} } finally { session.close() }
     }
-    return try { session.connect();withTimeout(10000){answer.await()} } finally {session.close()}
+    return runCatching { sendOnce() }.getOrElse { firstErr ->
+        val mac=profiles.getString("mac_"+host,"").orEmpty()
+        if(action=="off" || !validMac(mac)) throw firstErr
+        WakeOnLanManager.wake(ctx,mac)
+        awaitTvConnection(ctx,host,45000)
+        sendOnce()
+    }
 }
 
 private suspend fun awaitTvConnection(ctx:Context,host:String,timeoutMs:Long=60000):String {
@@ -88,8 +119,10 @@ class LgTvTool: Tool {
     override fun validate(request:ExecutionRequest)=true
     override suspend fun execute(context:Context,request:ExecutionRequest):ToolResult {
         val args=JSONObject(request.arguments.toString())
-        val host=context.getSharedPreferences("tv_devices",Context.MODE_PRIVATE).getString("last","").orEmpty()
-        return try {ToolResult(success=true,toolName=name,message=runTv(context,host,args.optString("tv_action"),args.optString("value")))}
+        val host=resolveTvHost(context)
+        val tvAction=args.optString("tv_action").ifBlank { args.optString("command") }
+        val value=args.optString("value").ifBlank { args.optString("message").ifBlank { args.optString("text") } }
+        return try {ToolResult(success=true,toolName=name,message=runTv(context,host,tvAction,value))}
         catch(e:Exception){ToolResult(success=false,toolName=name,message=e.message ?: "TV command failed")}
     }
 }

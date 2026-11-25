@@ -147,6 +147,7 @@ object ExecutionEngine {
     }
 
     private fun executionBudgetMs(request: ExecutionRequest): Long {
+        if (request.action.equals("LG_TV", ignoreCase = true)) return 65_000L
         if (request.action.uppercase() !in setOf("WAIT", "WAIT_FOR_TIME", "DELAY", "SLEEP")) return 25_000L
         return com.example.automation.tools.WaitTool.durationMs(request).coerceIn(0L, 3_600_000L) + 5000L
     }
