@@ -40,13 +40,19 @@ private suspend fun discover() = withContext(Dispatchers.IO) {
     }
 }
 
-internal class TvSession(context: Context, val host: String, private val factory: WebSocket.Factory = client, val status: (String, Boolean) -> Unit) : WebSocketListener() {
+internal class TvSession(context: Context, val host: String, private val factory: WebSocket.Factory? = null, val status: (String, Boolean) -> Unit) : WebSocketListener() {
     private val profiles=context.getSharedPreferences("tv_devices",Context.MODE_PRIVATE)
     private val prefs = EncryptedSharedPreferences.create(context, "lg_tv_keys", MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(), EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
-    companion object { private val client = OkHttpClient() }
+    private val secure = !profiles.getBoolean("legacy_"+host,false)
+    private val tls = TvTls(host) { prefs.getString("cert_"+host,null) }
+    private val transport: WebSocket.Factory by lazy { factory ?: if(secure) tls.client() else OkHttpClient.Builder().followRedirects(false).build() }
+    fun trustCertificate() {
+        val observed = tls.observed ?: return
+        if(prefs.getString("cert_"+host,null)==null) prefs.edit().putString("cert_"+host,observed).apply()
+    }
     private var socket: WebSocket? = null
     private val seq = AtomicInteger()
-    fun connect() { require(lanHost(host)); socket = factory.newWebSocket(Request.Builder().url("ws://"+host+":3000").build(), this) }
+    fun connect() { require(lanHost(host)); val endpoint=if(secure) "wss://"+host+":3001" else "ws://"+host+":3000"; socket = transport.newWebSocket(Request.Builder().url(endpoint).build(), this) }
     fun close() { socket?.cancel() }
     override fun onOpen(ws: WebSocket, response: Response) {
         val permissions = org.json.JSONArray(listOf("CONTROL_AUDIO","CONTROL_POWER","CONTROL_INPUT_MEDIA_PLAYBACK","CONTROL_INPUT_TV","LAUNCH","WRITE_NOTIFICATION_TOAST","READ_CURRENT_CHANNEL","READ_RUNNING_APPS","CONTROL_MOUSE_AND_KEYBOARD"))
@@ -75,13 +81,13 @@ internal class TvSession(context: Context, val host: String, private val factory
             } else if (data?.has("socketPath")==true) { val path=data.optString("socketPath")
                 val url=runCatching { java.net.URI(path) }.getOrNull()
                 val key=keys.remove(msg.optString("id"))
-                if(key!=null && url?.host==host && url.scheme=="ws" && url.port==3000) client.newWebSocket(Request.Builder().url(path).build(),object:WebSocketListener(){
+                if(key!=null && url?.host==host && url.scheme==(if(secure) "wss" else "ws") && url.port==(if(secure) 3001 else 3000)) transport.newWebSocket(Request.Builder().url(path).build(),object:WebSocketListener(){
                     override fun onOpen(remote:WebSocket,response:Response){remote.send("type:button\nname:"+key+"\n\n"); remote.close(1000,"Done"); status("Navigation sent",true)}
                 }) else status("Unsupported navigation endpoint",ready)
             } else if (msg.optString("id") != "pair") status(if (data?.optBoolean("returnValue")==true) "TV acknowledged command" else "TV did not confirm command",ready)
         }
     }
-    override fun onFailure(ws: WebSocket,t: Throwable,response: Response?) { ready=false; status("Disconnected",false) }
+    override fun onFailure(ws: WebSocket,t: Throwable,response: Response?) { ready=false; val seen=tls.observed; val saved=prefs.getString("cert_"+host,null); status(when { secure && seen!=null && saved==null -> "Confirm TV certificate SHA-256: "+seen; secure && seen!=null && seen!=saved -> "TV certificate changed. Connection blocked."; else -> "Disconnected: "+(t.message ?: t.javaClass.simpleName) },false) }
     override fun onClosed(ws: WebSocket,code: Int,reason: String) { ready=false; status("Disconnected",false) }
     private val checks = java.util.concurrent.ConcurrentHashMap<String,Int>()
     private val readings = java.util.concurrent.ConcurrentHashMap<String,Int>()
@@ -122,13 +128,16 @@ fun TvRemote() {
         if(s!=null){ info="Approve pairing on your TV"; s.connect() }
         onDispose { active=false; s?.close() }
     }
-    LaunchedEffect(info,selected) { if(info=="Disconnected" && lanHost(selected)) { delay(8000); attempt++ } }
+    LaunchedEffect(info,selected) { if(info.startsWith("Disconnected") && lanHost(selected)) { delay(8000); attempt++ } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text("LG Smart TV",style=MaterialTheme.typography.headlineMedium)
         Text(info)
+        if(info.startsWith("Confirm TV certificate")) Button(onClick={session?.trustCertificate();attempt++}) { Text("Trust this TV and pair") }
         Button(onClick={scope.launch { info="Searching Wi-Fi…"; devices=runCatching { discover() }.getOrDefault(emptyList()); info=if(devices.isEmpty()) "No TVs found. Enter the TV address." else "Choose a TV" }}){Text("Discover TVs")}
         (devices + profiles.all.keys.filter { it.startsWith("paired_") }.map { it.removePrefix("paired_") }).distinct().forEach { TextButton(onClick={host=it; selected=it; attempt++}){Text(it)} }
         OutlinedTextField(host,{host=it.trim()},label={Text("TV IP address")},singleLine=true)
+        var legacy by remember(host) { mutableStateOf(profiles.getBoolean("legacy_"+host,false)) }
+        Row { Checkbox(checked=legacy,onCheckedChange={legacy=it;profiles.edit().putBoolean("legacy_"+host,it).apply()}); Text("Use unencrypted port 3000 for older TVs") }
         Button(enabled=lanHost(host),onClick={selected=host; attempt++}){Text("Connect")}
         OutlinedTextField(mac,{mac=it},label={Text("TV MAC address for wake-up")},singleLine=true)
         if(lanHost(host) && validMac(mac)) Button(onClick={

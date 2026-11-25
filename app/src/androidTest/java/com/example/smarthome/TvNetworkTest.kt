@@ -39,6 +39,24 @@ class TvNetworkTest {
             assertEquals(listOf("register","ssap://audio/setVolume","ssap://audio/getVolume"),frames.toList())
         } finally { tv.close();server.shutdown();client.dispatcher.executorService.shutdown() }
     }
+    @Test fun secureHandshakeRequiresApprovalAndRejectsChangedPin() {
+        val cert=okhttp3.tls.HeldCertificate.Builder().commonName("TV").build()
+        val credentials=okhttp3.tls.HandshakeCertificates.Builder().heldCertificate(cert).build()
+        val server=okhttp3.mockwebserver.MockWebServer()
+        server.useHttps(credentials.sslSocketFactory(),false)
+        server.enqueue(okhttp3.mockwebserver.MockResponse().setBody("paired"))
+        server.start()
+        var pin:String?=null
+        val tls=TvTls(server.hostName){pin}
+        val request=okhttp3.Request.Builder().url(server.url("/")).build()
+        try {
+            assertTrue(runCatching { tls.client().newCall(request).execute().close() }.isFailure)
+            pin=requireNotNull(tls.observed)
+            tls.client().newCall(request).execute().use { assertEquals("paired",it.body?.string()) }
+            pin="different"
+            assertTrue(runCatching { tls.client().newCall(request).execute().close() }.isFailure)
+        } finally {server.shutdown()}
+    }
     @Test fun wakePacketArrivesAtUdpReceiver() = runBlocking {
         val loop=InetAddress.getLoopbackAddress()
         DatagramSocket(0,loop).use { s ->
