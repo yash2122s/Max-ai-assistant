@@ -42,7 +42,7 @@ private suspend fun runTv(ctx:Context,host:String,action:String,value:String):St
     session=TvSession(ctx,host){ msg,ready ->
         when {
             msg=="Connected" -> session.send(uri,data)
-            msg=="TV acknowledged command" -> answer.complete(msg)
+            msg=="TV acknowledged command" || msg=="Volume verified" -> answer.complete(msg)
             else -> answer.completeExceptionally(IllegalStateException(msg))
         }
     }
