@@ -3,6 +3,7 @@ package com.example.smarthome
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.LinkAddress
+import android.net.NetworkCapabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -40,6 +41,9 @@ internal object WakeOnLanManager {
             withContext(Dispatchers.IO) {
                 val manager = context.getSystemService(ConnectivityManager::class.java)
                 val network = manager.activeNetwork ?: error("Wi-Fi is unavailable")
+                require(manager.getNetworkCapabilities(network)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
+                    "Connect the phone to the TV's Wi-Fi network"
+                }
                 val properties = manager.getLinkProperties(network) ?: error("Local network unavailable")
                 val link: LinkAddress = properties.linkAddresses.firstOrNull {
                     it.address is Inet4Address && it.prefixLength in 1..32 &&
@@ -48,6 +52,7 @@ internal object WakeOnLanManager {
                 val destination = broadcast(link.address as Inet4Address, link.prefixLength)
                 val packet = magicPacket(mac)
                 DatagramSocket().use { socket ->
+                    network.bindSocket(socket)
                     socket.broadcast = true
                     for (attempt in 0 until packets) {
                         socket.send(DatagramPacket(packet, packet.size, destination, port))
