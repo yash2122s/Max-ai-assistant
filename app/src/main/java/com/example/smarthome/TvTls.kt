@@ -19,9 +19,10 @@ internal class TvTls(private val host:String, private val expected:()->String?):
     }
     override fun checkClientTrusted(chain:Array<out X509Certificate>,authType:String){throw CertificateException("Client certificate unsupported")}
     override fun getAcceptedIssuers():Array<X509Certificate> = emptyArray()
-    fun client():OkHttpClient {
+    fun client(socketFactory: javax.net.SocketFactory? = null):OkHttpClient {
         val ssl=SSLContext.getInstance("TLS").apply { init(null,arrayOf(this@TvTls),null) }
         return OkHttpClient.Builder().sslSocketFactory(ssl.socketFactory,this)
+            .apply { if (socketFactory != null) socketFactory(socketFactory) }
             .hostnameVerifier { name,_ -> name==host && observed!=null && observed==expected() }
             .followRedirects(false).followSslRedirects(false).build()
     }

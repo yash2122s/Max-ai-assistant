@@ -1,6 +1,10 @@
 package com.example.smarthome
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -23,29 +27,95 @@ internal fun lanHost(host: String): Boolean {
     return parts[0] == 10 || parts[0] == 192 && parts[1] == 168 || parts[0] == 172 && parts[1] in 16..31
 }
 
-private suspend fun discover() = withContext(Dispatchers.IO) {
-    DatagramSocket().use { socket ->
-        val probe = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:lge-com:service:webos-second-screen:1\r\n\r\n".toByteArray()
-        socket.send(DatagramPacket(probe, probe.size, InetAddress.getByName("239.255.255.250"), 1900))
-        val hosts = mutableSetOf<String>()
-        val end = android.os.SystemClock.elapsedRealtime() + 3500
-        socket.soTimeout = 350
-        while (android.os.SystemClock.elapsedRealtime() < end) {
-            val p = DatagramPacket(ByteArray(4096), 4096)
-            try { socket.receive(p) } catch (_: SocketTimeoutException) { continue }
-            val host = p.address.hostAddress ?: continue
-            if (lanHost(host) && String(p.data, 0, p.length).contains("webos-second-screen", true)) hosts.add(host)
-        }
-        hosts.toList()
+private fun findWifiNetwork(context: Context): Network? {
+    val cm = context.getSystemService(ConnectivityManager::class.java) ?: return null
+    val active = cm.activeNetwork
+    if (active != null && cm.getNetworkCapabilities(active)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true) {
+        return active
+    }
+    @Suppress("DEPRECATION")
+    return cm.allNetworks.firstOrNull {
+        cm.getNetworkCapabilities(it)?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
     }
 }
 
-internal class TvSession(context: Context, val host: String, private val factory: WebSocket.Factory? = null, val status: (String, Boolean) -> Unit) : WebSocketListener() {
+private suspend fun discover(context: Context): List<String> = withContext(Dispatchers.IO) {
+    val wifiNetwork = findWifiNetwork(context)
+    val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
+    val lock = wifi?.createMulticastLock("max_lg_tv_ssdp")?.apply { setReferenceCounted(false) }
+    val hosts = java.util.Collections.synchronizedSet(linkedSetOf<String>())
+    try {
+        runCatching { lock?.acquire() }
+        DatagramSocket().use { socket ->
+            runCatching { wifiNetwork?.bindSocket(socket) }
+            socket.broadcast = true
+            val group = InetAddress.getByName("239.255.255.250")
+            for (st in listOf("urn:lge-com:service:webos-second-screen:1", "ssdp:all")) {
+                val probe = "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: $st\r\n\r\n".toByteArray()
+                runCatching { socket.send(DatagramPacket(probe, probe.size, group, 1900)) }
+            }
+            val end = android.os.SystemClock.elapsedRealtime() + 3500
+            socket.soTimeout = 350
+            while (android.os.SystemClock.elapsedRealtime() < end) {
+                val p = DatagramPacket(ByteArray(4096), 4096)
+                try { socket.receive(p) } catch (_: SocketTimeoutException) { continue }
+                val host = p.address.hostAddress ?: continue
+                val body = String(p.data, 0, p.length)
+                if (lanHost(host) && (body.contains("webos-second-screen", true) || body.contains("lge-com", true) || body.contains("webOS", true))) {
+                    hosts.add(host)
+                }
+            }
+        }
+        if (hosts.isEmpty() && wifiNetwork != null) {
+            val cm = context.getSystemService(ConnectivityManager::class.java)
+            val localIp = cm?.getLinkProperties(wifiNetwork)?.linkAddresses
+                ?.firstOrNull { it.address is Inet4Address && !it.address.isLoopbackAddress && !it.address.isLinkLocalAddress }
+                ?.address?.hostAddress
+            val prefix = localIp?.substringBeforeLast('.')
+            if (prefix != null) {
+                coroutineScope {
+                    (1..254).map { octet ->
+                        async(Dispatchers.IO) {
+                            val candidate = "$prefix.$octet"
+                            if (candidate == localIp) return@async
+                            for (port in intArrayOf(3001, 3000)) {
+                                val reachable = runCatching {
+                                    wifiNetwork.socketFactory.createSocket().use { s ->
+                                        s.connect(InetSocketAddress(candidate, port), 220)
+                                        true
+                                    }
+                                }.getOrDefault(false)
+                                if (reachable) {
+                                    hosts.add(candidate)
+                                    break
+                                }
+                            }
+                        }
+                    }.awaitAll()
+                }
+            }
+        }
+    } finally {
+        if (lock?.isHeld == true) runCatching { lock.release() }
+    }
+    hosts.toList()
+}
+
+internal class TvSession(
+    private val context: Context,
+    val host: String,
+    private val factory: WebSocket.Factory? = null,
+    private val onMacDetected: ((String) -> Unit)? = null,
+    val status: (String, Boolean) -> Unit
+) : WebSocketListener() {
     private val profiles=context.getSharedPreferences("tv_devices",Context.MODE_PRIVATE)
     private val prefs = EncryptedSharedPreferences.create(context, "lg_tv_keys", MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(), EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
     private val secure = !profiles.getBoolean("legacy_"+host,false)
     private val tls = TvTls(host) { prefs.getString("cert_"+host,null) }
-    private val transport: WebSocket.Factory by lazy { factory ?: if(secure) tls.client() else OkHttpClient.Builder().followRedirects(false).build() }
+    private val transport: WebSocket.Factory by lazy {
+        val wifiSocketFactory = findWifiNetwork(context)?.socketFactory
+        factory ?: if(secure) tls.client(wifiSocketFactory) else OkHttpClient.Builder().apply { if (wifiSocketFactory != null) socketFactory(wifiSocketFactory) }.followRedirects(false).build()
+    }
     fun trustCertificate() {
         val observed = tls.observed ?: return
         if(prefs.getString("cert_"+host,null)==null) prefs.edit().putString("cert_"+host,observed).apply()
@@ -61,13 +131,36 @@ internal class TvSession(context: Context, val host: String, private val factory
         ws.send(JSONObject().put("type","register").put("id","pair").put("payload",payload).toString())
     }
     @Volatile private var ready = false
+    private val macRequests = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     override fun onMessage(ws: WebSocket, text: String) {
         val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
         val data = msg.optJSONObject("payload")
+        val msgId = msg.optString("id")
         when (msg.optString("type")) {
-            "registered" -> { data?.optString("client-key")?.takeIf { it.isNotBlank() }?.let { prefs.edit().putString(host,it).apply() }; profiles.edit().putBoolean("paired_"+host,true).apply(); ready=true; status("Connected",true) }
-            "error" -> status(msg.optString("error","TV rejected command"),ready)
-            "response" -> if (checks.containsKey(msg.optString("id"))) {
+            "registered" -> {
+                data?.optString("client-key")?.takeIf { it.isNotBlank() }?.let { prefs.edit().putString(host,it).apply() }
+                profiles.edit().putBoolean("paired_"+host,true).apply()
+                ready=true
+                status("Connected",true)
+                val macId = seq.incrementAndGet().toString()
+                macRequests.add(macId)
+                ws.send(JSONObject().put("type","request").put("id",macId).put("uri","ssap://com.webos.service.connectionmanager/getStatus").toString())
+            }
+            "error" -> if (!macRequests.remove(msgId)) status(msg.optString("error","TV rejected command"),ready)
+            "response" -> if (macRequests.remove(msgId)) {
+                val wifi = data?.optJSONObject("wifiInfo")
+                val wired = data?.optJSONObject("wiredInfo")
+                val candidate = listOfNotNull(
+                    wifi?.takeIf { it.optString("state") == "connected" }?.optString("macAddress"),
+                    wired?.takeIf { it.optString("state") == "connected" }?.optString("macAddress"),
+                    wifi?.optString("macAddress"),
+                    wired?.optString("macAddress")
+                ).firstOrNull { validMac(it) }
+                if (candidate != null) {
+                    profiles.edit().putString("mac_" + host, candidate).apply()
+                    onMacDetected?.invoke(candidate)
+                }
+            } else if (checks.containsKey(msgId)) {
                 val expected=checks.remove(msg.optString("id"))
                 if(expected!=null && data?.optBoolean("returnValue")==true) {
                     val id=seq.incrementAndGet().toString()
@@ -128,7 +221,11 @@ fun TvRemote() {
 
     DisposableEffect(selected, attempt) {
         var active = true
-        val connection = if (lanHost(selected)) TvSession(ctx, selected) { status, connected ->
+        val connection = if (lanHost(selected)) TvSession(
+            ctx,
+            selected,
+            onMacDetected = { detected -> scope.launch { if (active) mac = detected } }
+        ) { status, connected ->
             scope.launch {
                 if (active) {
                     info = status
@@ -171,7 +268,7 @@ fun TvRemote() {
                     Button(onClick = {
                         scope.launch {
                             info = "Searching Wi-Fi…"
-                            devices = runCatching { discover() }.getOrDefault(emptyList())
+                            devices = runCatching { discover(ctx) }.getOrDefault(emptyList())
                             info = if (devices.isEmpty()) "No TVs found. Enter the TV address." else "Choose a TV"
                         }
                     }) { Text("Discover TVs") }
@@ -180,7 +277,35 @@ fun TvRemote() {
                         TextButton(onClick = { host = address; selected = address; attempt++ }) { Text(address) }
                     }
                     OutlinedTextField(host, { host = it.trim() }, label = { Text("TV IP address") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
-                    Button(enabled = lanHost(host), onClick = { selected = host; attempt++ }) { Text("Connect") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(enabled = lanHost(host), onClick = { selected = host; attempt++ }) { Text("Connect") }
+                        if (lanHost(host) && !ready) {
+                            Button(enabled = validMac(mac) && !waking, onClick = {
+                                profiles.edit().putString("mac_" + host, mac).apply()
+                                scope.launch {
+                                    if (ready) { info = "Connected"; return@launch }
+                                    waking = true
+                                    info = "Waking Up"
+                                    try {
+                                        WakeOnLanManager.wake(ctx, mac)
+                                        info = "Connecting"
+                                        selected = host
+                                        attempt = 0
+                                        attempt++
+                                        withTimeout(60000) {
+                                            while (!ready) delay(500)
+                                        }
+                                        info = "Connected"
+                                    } catch (e: Exception) {
+                                        info = "TV unreachable. Check Wi-Fi and retry."
+                                    } finally { waking = false }
+                                }
+                            }) { Text(if (waking) "Waking Up…" else "Power on TV") }
+                        }
+                    }
+                    if (lanHost(host) && !ready && !validMac(mac)) {
+                        Text("Connect once while TV is on to auto-detect MAC, or enter MAC below to enable Power on", style = MaterialTheme.typography.bodySmall)
+                    }
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Checkbox(checked = legacy, onCheckedChange = {
                             legacy = it
@@ -188,7 +313,7 @@ fun TvRemote() {
                         })
                         Text("Older TV connection (port 3000)")
                     }
-                    OutlinedTextField(mac, { mac = it }, label = { Text("TV MAC address for wake-up") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    OutlinedTextField(mac, { mac = it.trim() }, label = { Text("TV MAC address for wake-up") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
                 }
             }
         }
