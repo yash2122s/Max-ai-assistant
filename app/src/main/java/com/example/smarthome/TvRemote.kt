@@ -263,6 +263,7 @@ fun TvRemote() {
             Button(enabled = validMac(mac) && !waking, onClick = {
                 profiles.edit().putString("mac_" + host, mac).apply()
                 scope.launch {
+                    if (ready) { info = "Connected"; return@launch }
                     waking = true
                     info = "Waking Up"
                     try {
