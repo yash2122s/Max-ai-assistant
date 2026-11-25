@@ -249,3 +249,5 @@ MAX
 | Auto-reply | `features/whatsapp/AutoReplyController.kt` |
 | Theme colors | `ui/theme/Color.kt` & `ui/theme/Theme.kt` |
 | Security/Unlock | `security/MaxLockAutomationEngine.kt` |
+
+LG TV local control: `smarthome/TvActions.kt` registers the `lg_tv` Gemini Live tool through MyApplication.

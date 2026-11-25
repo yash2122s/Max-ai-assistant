@@ -134,7 +134,9 @@ class ConnectionManager(
 
     @Synchronized
     fun connect() {
-        if (!isExplicitlyDisconnected && (connectionState == ConnectionState.CONNECTING || webSocketClient != null)) return
+        if (!isExplicitlyDisconnected && (connectionState == ConnectionState.CONNECTING || connectionState == ConnectionState.CONNECTED)) return
+        cancelReconnectJob()
+        reconnectInProgress = false
         liveSessionState.reset()
         ServiceRegistry.register(ServiceType.VOICE, this)
         isExplicitlyDisconnected = false
@@ -178,7 +180,7 @@ class ConnectionManager(
 
         if (!keyPresent) {
             Log.w("ConnectionManager", "[SECURITY_GATE] Gemini API Key is missing. Connection blocked. User must configure key in Settings or Onboarding.")
-            Log.w("GeminiFlow", "[GeminiFlow] error=API key is missing")
+            onMessageReceived("Gemini Live needs your Gemini API key. Open MAX Settings, save the key, then reconnect.")
             handleConnectionStateChange(ConnectionState.DISCONNECTED)
             return
         }

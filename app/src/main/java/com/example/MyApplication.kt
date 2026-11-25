@@ -182,6 +182,7 @@ class MyApplication : Application() {
         ToolRegistry.register(smsTool)
         ToolRegistry.register(com.example.automation.tools.SaveMemoryTool())
         ToolRegistry.register(com.example.automation.tools.ForgetMemoryTool())
+        ToolRegistry.register(com.example.smarthome.LgTvTool())
         ToolRegistry.register(com.example.automation.tools.ReminderTool())
         ToolRegistry.register(com.example.automation.tools.UnlockTool())
         ToolRegistry.register(com.example.automation.tools.ClickUiTool())

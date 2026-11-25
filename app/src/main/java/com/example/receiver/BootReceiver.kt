@@ -49,6 +49,7 @@ class BootReceiver : BroadcastReceiver() {
                     } catch (e: Exception) {
                         Log.e("BootReceiver", "Error restoring scheduled tasks", e)
                     }
+                    com.example.smarthome.restoreTvSchedules(context)
                 } catch (e: Exception) {
                     Log.e("BootReceiver", "Error restoring alarms", e)
                 } finally {

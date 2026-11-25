@@ -20,7 +20,7 @@ android {
     applicationId = "com.maxaiagent.yash"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
+    versionCode = 2
     versionName = "1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -174,6 +174,8 @@ dependencies {
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.runner)
+  androidTestImplementation("com.squareup.okhttp3:okhttp-tls:4.10.0")
+  androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.10.0")
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   debugImplementation(libs.leakcanary)
