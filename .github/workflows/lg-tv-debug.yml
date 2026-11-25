@@ -41,8 +41,7 @@ jobs:
           "$signer" verify --print-certs app/build/outputs/apk/debug/app-debug.apk
           cp app/build/outputs/apk/debug/app-debug.apk MAX-lg-tv-debug.apk
           sha256sum MAX-lg-tv-debug.apk >> "$GITHUB_STEP_SUMMARY"
-      - if: steps.signing.outputs.ready == 'true'
-        uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v7
         with:
           archive: false
           path: MAX-lg-tv-debug.apk
