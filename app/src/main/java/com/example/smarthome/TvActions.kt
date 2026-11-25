@@ -22,6 +22,7 @@ private suspend fun runTv(ctx:Context,host:String,action:String,value:String):St
     require(lanHost(host)){"Pair a TV in Smart Home first"}
     val profiles=ctx.getSharedPreferences("tv_devices",Context.MODE_PRIVATE)
     if(action=="on") {
+        if(runCatching { awaitTvConnection(ctx,host,5000) }.isSuccess) return "TV already connected"
         val mac=profiles.getString("mac_"+host,"").orEmpty()
         WakeOnLanManager.wake(ctx,mac)
         return awaitTvConnection(ctx,host)
