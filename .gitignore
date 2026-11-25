@@ -109,5 +109,8 @@ tools/security-tests/*-debug.log
 max-ai-agent-website/
 max-ai-public-website/
 
+# Ignore all Markdown files
+*.md
+
 
 
