@@ -72,6 +72,7 @@ val MainDrawerItems = listOf(
     NavigationDrawerItem(MaxDestinations.MEMORY, "Memory Wallet", Icons.Rounded.FolderShared),
     NavigationDrawerItem(MaxDestinations.PERIOD, "Period Tracker", Icons.Rounded.Favorite),
     NavigationDrawerItem(MaxDestinations.REMINDERS, "Reminders", Icons.Rounded.Alarm, DrawerIconGroup.ALERT),
+    NavigationDrawerItem("smart_home", "Smart Home", Icons.Rounded.Home),
     NavigationDrawerItem(MaxDestinations.SKILLS, "Automation Skills", Icons.Rounded.Extension),
     NavigationDrawerItem(MaxDestinations.ROUTINES, "Routines & Automation", Icons.Rounded.AutoAwesome),
     NavigationDrawerItem(MaxDestinations.NOTIFICATIONS, "Notifications & Auto-Reply", Icons.Rounded.Notifications, DrawerIconGroup.ALERT),
@@ -244,6 +245,7 @@ fun MaxNavGraph(
             )
         }
 
+        composable("smart_home") { com.example.smarthome.TvRemote() }
         composable(MaxDestinations.CAPABILITIES) {
             com.example.ui.capabilities.CapabilitiesScreen(
                 onNavigateBack = navigateBackToPreviousOrDrawer
