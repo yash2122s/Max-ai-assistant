@@ -1,4 +1,4 @@
-name: Share reminder debug APK
+name: LG TV debug APK
 on:
   push:
     branches: [feature/lg-tv-remote]
@@ -33,3 +33,12 @@ jobs:
           path: MAX-lg-tv-debug.apk
       - name: Run share reminder tests
         run: bash gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:testDebugUnitTest --tests 'com.example.smarthome.*' --console=plain
+      - name: Enable emulator acceleration
+        run: sudo chmod a+rw /dev/kvm
+      - name: Test local UDP wake packet delivery on Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          script: bash gradlew -Dorg.gradle.java.home="$JAVA_HOME" :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.example.smarthome.TvNetworkTest --console=plain

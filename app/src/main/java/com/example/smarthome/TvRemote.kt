@@ -40,7 +40,8 @@ private suspend fun discover() = withContext(Dispatchers.IO) {
     }
 }
 
-private class TvSession(context: Context, val host: String, val status: (String, Boolean) -> Unit) : WebSocketListener() {
+internal class TvSession(context: Context, val host: String, val status: (String, Boolean) -> Unit) : WebSocketListener() {
+    private val profiles=context.getSharedPreferences("tv_devices",Context.MODE_PRIVATE)
     private val prefs = EncryptedSharedPreferences.create(context, "lg_tv_keys", MasterKey.Builder(context).setKeyScheme(MasterKey.KeyScheme.AES256_GCM).build(), EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV, EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM)
     companion object { private val client = OkHttpClient() }
     private var socket: WebSocket? = null
@@ -48,7 +49,7 @@ private class TvSession(context: Context, val host: String, val status: (String,
     fun connect() { require(lanHost(host)); socket = client.newWebSocket(Request.Builder().url("ws://"+host+":3000").build(), this) }
     fun close() { socket?.cancel() }
     override fun onOpen(ws: WebSocket, response: Response) {
-        val permissions = org.json.JSONArray(listOf("CONTROL_AUDIO","CONTROL_POWER","CONTROL_INPUT_MEDIA_PLAYBACK","CONTROL_INPUT_TV","LAUNCH","WRITE_NOTIFICATION_TOAST","READ_CURRENT_CHANNEL","READ_RUNNING_APPS"))
+        val permissions = org.json.JSONArray(listOf("CONTROL_AUDIO","CONTROL_POWER","CONTROL_INPUT_MEDIA_PLAYBACK","CONTROL_INPUT_TV","LAUNCH","WRITE_NOTIFICATION_TOAST","READ_CURRENT_CHANNEL","READ_RUNNING_APPS","CONTROL_MOUSE_AND_KEYBOARD"))
         val payload = JSONObject().put("pairingType","PROMPT").put("manifest",JSONObject().put("manifestVersion",1).put("appVersion","1.0").put("permissions",permissions))
         prefs.getString(host,null)?.let { payload.put("client-key",it) }
         ws.send(JSONObject().put("type","register").put("id","pair").put("payload",payload).toString())
@@ -58,13 +59,26 @@ private class TvSession(context: Context, val host: String, val status: (String,
         val msg = runCatching { JSONObject(text) }.getOrNull() ?: return
         val data = msg.optJSONObject("payload")
         when (msg.optString("type")) {
-            "registered" -> { data?.optString("client-key")?.takeIf { it.isNotBlank() }?.let { prefs.edit().putString(host,it).apply() }; ready=true; status("Connected",true) }
+            "registered" -> { data?.optString("client-key")?.takeIf { it.isNotBlank() }?.let { prefs.edit().putString(host,it).apply() }; profiles.edit().putString("last",host).apply(); ready=true; status("Connected",true) }
             "error" -> status(msg.optString("error","TV rejected command"),ready)
-            "response" -> if (msg.optString("id") != "pair") status(if (data?.optBoolean("returnValue")==true) "TV acknowledged command" else "TV did not confirm command",ready)
+            "response" -> if (data?.has("socketPath")==true) { val path=data.optString("socketPath")
+                val url=runCatching { java.net.URI(path) }.getOrNull()
+                val key=keys.remove(msg.optString("id"))
+                if(key!=null && url?.host==host && url.scheme=="ws" && url.port==3000) client.newWebSocket(Request.Builder().url(path).build(),object:WebSocketListener(){
+                    override fun onOpen(remote:WebSocket,response:Response){remote.send("type:button\nname:"+key+"\n\n"); remote.close(1000,"Done"); status("Navigation sent",true)}
+                }) else status("Unsupported navigation endpoint",ready)
+            } else if (msg.optString("id") != "pair") status(if (data?.optBoolean("returnValue")==true) "TV acknowledged command" else "TV did not confirm command",ready)
         }
     }
     override fun onFailure(ws: WebSocket,t: Throwable,response: Response?) { ready=false; status("Disconnected",false) }
     override fun onClosed(ws: WebSocket,code: Int,reason: String) { ready=false; status("Disconnected",false) }
+    private val keys = java.util.concurrent.ConcurrentHashMap<String,String>()
+    fun key(key: String) {
+        require(key in listOf("UP","DOWN","LEFT","RIGHT","ENTER","BACK","HOME"))
+        val id = seq.incrementAndGet().toString()
+        keys[id]=key
+        socket?.send(JSONObject().put("type","request").put("id",id).put("uri","ssap://com.webos.service.networkinput/getPointerInputSocket").toString())
+    }
     fun send(uri: String, data: JSONObject = JSONObject()) {
         if (!ready || socket?.send(JSONObject().put("type","request").put("id",seq.incrementAndGet().toString()).put("uri","ssap://"+uri).put("payload",data).toString()) != true) status("Disconnected",false)
     }
@@ -72,10 +86,13 @@ private class TvSession(context: Context, val host: String, val status: (String,
 
 @Composable
 fun TvRemote() {
+    val activity = LocalContext.current
     val ctx = LocalContext.current.applicationContext
     val scope = rememberCoroutineScope()
-    var host by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf("") }
+    val profiles=remember { ctx.getSharedPreferences("tv_devices",Context.MODE_PRIVATE) }
+    var host by remember { mutableStateOf(profiles.getString("last","").orEmpty()) }
+    var mac by remember(host) { mutableStateOf(profiles.getString("mac_"+host,"").orEmpty()) }
+    var selected by remember { mutableStateOf(host) }
     var devices by remember { mutableStateOf(emptyList<String>()) }
     var info by remember { mutableStateOf("Choose a TV on your Wi-Fi") }
     var ready by remember { mutableStateOf(false) }
@@ -90,6 +107,7 @@ fun TvRemote() {
         if(s!=null){ info="Approve pairing on your TV"; s.connect() }
         onDispose { active=false; s?.close() }
     }
+    LaunchedEffect(info,selected) { if(info=="Disconnected" && lanHost(selected)) { delay(8000); attempt++ } }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
         Text("LG Smart TV",style=MaterialTheme.typography.headlineMedium)
         Text(info)
@@ -97,7 +115,19 @@ fun TvRemote() {
         devices.forEach { TextButton(onClick={host=it; selected=it; attempt++}){Text(it)} }
         OutlinedTextField(host,{host=it.trim()},label={Text("TV IP address")},singleLine=true)
         Button(enabled=lanHost(host),onClick={selected=host; attempt++}){Text("Connect")}
+        OutlinedTextField(mac,{mac=it},label={Text("TV MAC address for wake-up")},singleLine=true)
+        if(lanHost(host) && validMac(mac)) Button(onClick={
+            profiles.edit().putString("mac_"+host,mac).apply()
+            scope.launch { info=runCatching { wakeTv(mac); "Wake packet sent" }.getOrElse { "Wake failed" } }
+        }) { Text("Power on") }
+        if(lanHost(selected)) for(action in listOf("on","off","reminder")) {
+            TextButton(onClick={android.app.TimePickerDialog(activity,{ _,h,m ->
+                if(action=="on" && host==selected && validMac(mac)) profiles.edit().putString("mac_"+selected,mac).apply()
+                info=runCatching { scheduleTv(ctx,selected,action,h,m,message); "Scheduled" }.getOrElse { it.message ?: "Could not schedule" }
+            },20,0,true).show()}) { Text("Schedule "+action) }
+        }
         if(ready) {
+            for(keys in listOf(listOf("UP","DOWN","LEFT","RIGHT"),listOf("ENTER","BACK","HOME"))) Row { keys.forEach { key -> TextButton(onClick={session?.key(key)}) { Text(key) } } }
             Text("Set volume: "+volume.toInt())
             Slider(value=volume,onValueChange={volume=it},valueRange=0f..100f,onValueChangeFinished={session?.send("audio/setVolume",JSONObject().put("volume",volume.toInt()))})
             for ((label,uri) in listOf("Volume up" to "audio/volumeUp","Volume down" to "audio/volumeDown","Play" to "media.controls/play","Pause" to "media.controls/pause","Power off" to "system/turnOff")) {
