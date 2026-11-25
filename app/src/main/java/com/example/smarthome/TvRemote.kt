@@ -124,6 +124,7 @@ fun TvRemote() {
     var showSettings by remember { mutableStateOf(false) }
     var showSchedule by remember { mutableStateOf(false) }
     var legacy by remember(host) { mutableStateOf(profiles.getBoolean("legacy_" + host, false)) }
+    var waking by remember { mutableStateOf(false) }
 
     DisposableEffect(selected, attempt) {
         var active = true
@@ -145,8 +146,8 @@ fun TvRemote() {
         onDispose { active = false; connection?.close() }
     }
     LaunchedEffect(info, selected) {
-        if (info.startsWith("Disconnected") && lanHost(selected)) {
-            delay(8000)
+        if (info.startsWith("Disconnected") && lanHost(selected) && attempt < 5 && !waking) {
+            delay((2000L shl attempt).coerceAtMost(30000L))
             attempt++
         }
     }
@@ -258,11 +259,29 @@ fun TvRemote() {
                 }
             }
         }
-        if (lanHost(host) && validMac(mac)) {
-            OutlinedButton(onClick = {
+        if (lanHost(host)) {
+            Button(enabled = validMac(mac) && !waking, onClick = {
                 profiles.edit().putString("mac_" + host, mac).apply()
-                scope.launch { info = runCatching { wakeTv(mac); "Wake packet sent" }.getOrElse { "Wake failed" } }
-            }) { Text("Power on TV") }
+                scope.launch {
+                    waking = true
+                    info = "Waking Up"
+                    try {
+                        WakeOnLanManager.wake(ctx, mac)
+                        info = "Connecting"
+                        selected = host
+                        attempt = 0
+                        attempt++
+                        withTimeout(60000) {
+                            while (!ready) delay(500)
+                        }
+                        info = "Connected"
+                    } catch (e: Exception) {
+                        info = "TV unreachable. Check Wi-Fi and retry."
+                    } finally { waking = false }
+                }
+            }) { Text(if (waking) "Waking Up…" else "Power on TV") }
+            if (!validMac(mac)) Text("Enter the TV MAC address to enable Power on", style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = { attempt = 0; attempt++ }) { Text("Reconnect") }
         }
         if (lanHost(selected)) {
             TextButton(onClick = { showSchedule = !showSchedule }) { Text(if (showSchedule) "Hide schedules" else "Schedules") }
