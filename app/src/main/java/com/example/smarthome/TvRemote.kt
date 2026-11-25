@@ -108,11 +108,11 @@ internal class TvSession(context: Context, val host: String, private val factory
 @Composable
 fun TvRemote() {
     val activity = LocalContext.current
-    val ctx = LocalContext.current.applicationContext
+    val ctx = activity.applicationContext
     val scope = rememberCoroutineScope()
-    val profiles=remember { ctx.getSharedPreferences("tv_devices",Context.MODE_PRIVATE) }
-    var host by remember { mutableStateOf(profiles.getString("last","").orEmpty()) }
-    var mac by remember(host) { mutableStateOf(profiles.getString("mac_"+host,"").orEmpty()) }
+    val profiles = remember { ctx.getSharedPreferences("tv_devices", Context.MODE_PRIVATE) }
+    var host by remember { mutableStateOf(profiles.getString("last", "").orEmpty()) }
+    var mac by remember(host) { mutableStateOf(profiles.getString("mac_" + host, "").orEmpty()) }
     var selected by remember { mutableStateOf(host) }
     var devices by remember { mutableStateOf(emptyList<String>()) }
     var info by remember { mutableStateOf("Choose a TV on your Wi-Fi") }
@@ -121,47 +121,169 @@ fun TvRemote() {
     var volume by remember { mutableFloatStateOf(20f) }
     var message by remember { mutableStateOf("") }
     var attempt by remember { mutableIntStateOf(0) }
-    DisposableEffect(selected,attempt) {
+    var showSettings by remember { mutableStateOf(false) }
+    var showSchedule by remember { mutableStateOf(false) }
+    var legacy by remember(host) { mutableStateOf(profiles.getBoolean("legacy_" + host, false)) }
+
+    DisposableEffect(selected, attempt) {
         var active = true
-        val s = if (lanHost(selected)) TvSession(ctx,selected) { msg, ok -> scope.launch { if (active) { info=msg; ready=ok; if(msg=="Connected") profiles.edit().putString("last",selected).apply() } } } else null
-        session=s; ready=false
-        if(s!=null){ info="Approve pairing on your TV"; s.connect() }
-        onDispose { active=false; s?.close() }
-    }
-    LaunchedEffect(info,selected) { if(info.startsWith("Disconnected") && lanHost(selected)) { delay(8000); attempt++ } }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement=Arrangement.spacedBy(8.dp)) {
-        Text("LG Smart TV",style=MaterialTheme.typography.headlineMedium)
-        Text(info)
-        if(info.startsWith("Confirm TV certificate")) Button(onClick={session?.trustCertificate();attempt++}) { Text("Trust this TV and pair") }
-        Button(onClick={scope.launch { info="Searching Wi-Fi…"; devices=runCatching { discover() }.getOrDefault(emptyList()); info=if(devices.isEmpty()) "No TVs found. Enter the TV address." else "Choose a TV" }}){Text("Discover TVs")}
-        (devices + profiles.all.keys.filter { it.startsWith("paired_") }.map { it.removePrefix("paired_") }).distinct().forEach { TextButton(onClick={host=it; selected=it; attempt++}){Text(it)} }
-        OutlinedTextField(host,{host=it.trim()},label={Text("TV IP address")},singleLine=true)
-        var legacy by remember(host) { mutableStateOf(profiles.getBoolean("legacy_"+host,false)) }
-        Row { Checkbox(checked=legacy,onCheckedChange={legacy=it;profiles.edit().putBoolean("legacy_"+host,it).apply()}); Text("Use unencrypted port 3000 for older TVs") }
-        Button(enabled=lanHost(host),onClick={selected=host; attempt++}){Text("Connect")}
-        OutlinedTextField(mac,{mac=it},label={Text("TV MAC address for wake-up")},singleLine=true)
-        if(lanHost(host) && validMac(mac)) Button(onClick={
-            profiles.edit().putString("mac_"+host,mac).apply()
-            scope.launch { info=runCatching { wakeTv(mac); "Wake packet sent" }.getOrElse { "Wake failed" } }
-        }) { Text("Power on") }
-        if(lanHost(selected)) for(action in listOf("on","off","reminder")) {
-            TextButton(onClick={android.app.TimePickerDialog(activity,{ _,h,m ->
-                if(action=="on" && host==selected && validMac(mac)) profiles.edit().putString("mac_"+selected,mac).apply()
-                info=runCatching { scheduleTv(ctx,selected,action,h,m,message); "Scheduled" }.getOrElse { it.message ?: "Could not schedule" }
-            },20,0,true).show()}) { Text("Schedule "+action) }
-        }
-        if(ready) {
-            for(keys in listOf(listOf("UP","DOWN","LEFT","RIGHT"),listOf("ENTER","BACK","HOME"))) Row { keys.forEach { key -> TextButton(onClick={session?.key(key)}) { Text(key) } } }
-            Text("Set volume: "+volume.toInt())
-            Slider(value=volume,onValueChange={volume=it},valueRange=0f..100f,onValueChangeFinished={session?.send("audio/setVolume",JSONObject().put("volume",volume.toInt()))})
-            for ((label,uri) in listOf("Volume up" to "audio/volumeUp","Volume down" to "audio/volumeDown","Play" to "media.controls/play","Pause" to "media.controls/pause","Power off" to "system/turnOff")) {
-                OutlinedButton(onClick={session?.send(uri)}){Text(label)}
+        val connection = if (lanHost(selected)) TvSession(ctx, selected) { status, connected ->
+            scope.launch {
+                if (active) {
+                    info = status
+                    ready = connected
+                    if (status == "Connected") profiles.edit().putString("last", selected).apply()
+                }
             }
-            Row { for ((label,on) in listOf("Mute" to true,"Unmute" to false)) TextButton(onClick={session?.send("audio/setMute",JSONObject().put("mute",on))}){Text(label)} }
-            for ((label,id) in listOf("YouTube" to "youtube.leanback.v4","Netflix" to "netflix","Prime Video" to "amazon")) TextButton(onClick={session?.send("system.launcher/launch",JSONObject().put("id",id))}){Text(label)}
-            Row { (1..4).forEach { n -> TextButton(onClick={session?.send("tv/switchInput",JSONObject().put("inputId","HDMI_"+n))}){Text("HDMI "+n)} } }
-            OutlinedTextField(message,{message=it},label={Text("TV notification")})
-            Button(enabled=message.isNotBlank(),onClick={session?.send("system.notifications/createToast",JSONObject().put("message",message))}){Text("Show on TV")}
+        } else null
+        session = connection
+        ready = false
+        if (connection != null) {
+            info = "Approve pairing on your TV"
+            connection.connect()
+        }
+        onDispose { active = false; connection?.close() }
+    }
+    LaunchedEffect(info, selected) {
+        if (info.startsWith("Disconnected") && lanHost(selected)) {
+            delay(8000)
+            attempt++
         }
     }
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 18.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("LG Smart TV", style = MaterialTheme.typography.headlineMedium)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(if (ready) "Connected" else "TV connection", style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = { showSettings = !showSettings }) { Text(if (showSettings) "Hide setup" else "Setup") }
+                }
+                Text(if (ready) selected else info, style = MaterialTheme.typography.bodyMedium)
+                if (info.startsWith("Confirm TV certificate")) {
+                    Button(onClick = { session?.trustCertificate(); attempt++ }) { Text("Trust this TV and pair") }
+                }
+                if (showSettings || !ready) {
+                    Button(onClick = {
+                        scope.launch {
+                            info = "Searching Wi-Fi…"
+                            devices = runCatching { discover() }.getOrDefault(emptyList())
+                            info = if (devices.isEmpty()) "No TVs found. Enter the TV address." else "Choose a TV"
+                        }
+                    }) { Text("Discover TVs") }
+                    (devices + profiles.all.keys.filter { it.startsWith("paired_") }
+                        .map { it.removePrefix("paired_") }).distinct().forEach { address ->
+                        TextButton(onClick = { host = address; selected = address; attempt++ }) { Text(address) }
+                    }
+                    OutlinedTextField(host, { host = it.trim() }, label = { Text("TV IP address") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                    Button(enabled = lanHost(host), onClick = { selected = host; attempt++ }) { Text("Connect") }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Checkbox(checked = legacy, onCheckedChange = {
+                            legacy = it
+                            profiles.edit().putBoolean("legacy_" + host, it).apply()
+                        })
+                        Text("Older TV connection (port 3000)")
+                    }
+                    OutlinedTextField(mac, { mac = it }, label = { Text("TV MAC address for wake-up") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                }
+            }
+        }
+
+        if (ready) {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("Remote", style = MaterialTheme.typography.titleLarge)
+                        TextButton(onClick = { session?.send("system/turnOff") }) { Text("Power off") }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        RemoteKey("▲", Modifier.width(68.dp)) { session?.key("UP") }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        RemoteKey("◀", Modifier.width(68.dp)) { session?.key("LEFT") }
+                        RemoteKey("OK", Modifier.width(68.dp)) { session?.key("ENTER") }
+                        RemoteKey("▶", Modifier.width(68.dp)) { session?.key("RIGHT") }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                        RemoteKey("▼", Modifier.width(68.dp)) { session?.key("DOWN") }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        TextButton(onClick = { session?.key("BACK") }) { Text("Back") }
+                        TextButton(onClick = { session?.key("HOME") }) { Text("Home") }
+                        TextButton(onClick = { session?.send("media.controls/play") }) { Text("Play") }
+                        TextButton(onClick = { session?.send("media.controls/pause") }) { Text("Pause") }
+                    }
+                }
+            }
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Volume  ${volume.toInt()}", style = MaterialTheme.typography.titleMedium)
+                    Slider(value = volume, onValueChange = { volume = it }, valueRange = 0f..100f,
+                        onValueChangeFinished = { session?.send("audio/setVolume", JSONObject().put("volume", volume.toInt())) })
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        OutlinedButton(onClick = { session?.send("audio/volumeDown") }) { Text("−") }
+                        OutlinedButton(onClick = { session?.send("audio/setMute", JSONObject().put("mute", true)) }) { Text("Mute") }
+                        OutlinedButton(onClick = { session?.send("audio/setMute", JSONObject().put("mute", false)) }) { Text("Unmute") }
+                        OutlinedButton(onClick = { session?.send("audio/volumeUp") }) { Text("+") }
+                    }
+                }
+            }
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Apps", style = MaterialTheme.typography.titleMedium)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        for ((label, id) in listOf("YouTube" to "youtube.leanback.v4", "Netflix" to "netflix", "Prime" to "amazon")) {
+                            TextButton(onClick = { session?.send("system.launcher/launch", JSONObject().put("id", id)) }) { Text(label) }
+                        }
+                    }
+                    Text("Input", style = MaterialTheme.typography.titleMedium)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        (1..4).forEach { n ->
+                            TextButton(onClick = { session?.send("tv/switchInput", JSONObject().put("inputId", "HDMI_" + n)) }) { Text("HDMI $n") }
+                        }
+                    }
+                }
+            }
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("TV notification", style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(message, { message = it }, modifier = Modifier.fillMaxWidth(), placeholder = { Text("Message to show on TV") })
+                    Button(enabled = message.isNotBlank(), onClick = {
+                        session?.send("system.notifications/createToast", JSONObject().put("message", message))
+                    }) { Text("Show on TV") }
+                }
+            }
+        }
+        if (lanHost(host) && validMac(mac)) {
+            OutlinedButton(onClick = {
+                profiles.edit().putString("mac_" + host, mac).apply()
+                scope.launch { info = runCatching { wakeTv(mac); "Wake packet sent" }.getOrElse { "Wake failed" } }
+            }) { Text("Power on TV") }
+        }
+        if (lanHost(selected)) {
+            TextButton(onClick = { showSchedule = !showSchedule }) { Text(if (showSchedule) "Hide schedules" else "Schedules") }
+            if (showSchedule) {
+                for (action in listOf("on", "off", "reminder")) {
+                    OutlinedButton(onClick = {
+                        android.app.TimePickerDialog(activity, { _, hour, minute ->
+                            if (action == "on" && host == selected && validMac(mac))
+                                profiles.edit().putString("mac_" + selected, mac).apply()
+                            info = runCatching { scheduleTv(ctx, selected, action, hour, minute, message); "Scheduled" }
+                                .getOrElse { it.message ?: "Could not schedule" }
+                        }, 20, 0, true).show()
+                    }) { Text("Schedule $action") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RemoteKey(label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    FilledTonalButton(onClick = onClick, modifier = modifier.height(52.dp),
+        contentPadding = PaddingValues(0.dp)) { Text(label) }
 }
