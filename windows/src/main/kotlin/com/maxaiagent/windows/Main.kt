@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SmartToy
@@ -229,10 +230,15 @@ private fun TopBar(controller: MaxDesktopController) {
 private fun AssistantPane(controller: MaxDesktopController) {
     Column(modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { controller.submitCommand("/status") }) { Text("/status") }
+            OutlinedButton(onClick = { controller.listenVoiceOnce() }) {
+                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Speak")
+            }
+            OutlinedButton(onClick = { controller.launchWindowsApp("Notepad", "notepad.exe") }) { Text("Open Notepad") }
+            OutlinedButton(onClick = { controller.launchWindowsApp("Calculator", "calc.exe") }) { Text("Calculator") }
             OutlinedButton(onClick = { controller.submitCommand("/ping") }) { Text("/ping bridge") }
-            OutlinedButton(onClick = { controller.submitCommand("Go to home screen") }) { Text("Home Intent") }
-            OutlinedButton(onClick = { controller.submitCommand("/hash max-desktop") }) { Text("SHA-256 Sample") }
+            OutlinedButton(onClick = { controller.submitCommand("/status") }) { Text("/status") }
         }
 
         Row(
@@ -380,10 +386,36 @@ private fun VaultPane(controller: MaxDesktopController) {
 
 @Composable
 private fun SettingsPane(controller: MaxDesktopController) {
+    var apiKeyInput by remember(controller.geminiApiKey) { mutableStateOf(controller.geminiApiKey) }
+    var bridgeInput by remember(controller.bridgeEndpoint) { mutableStateOf(controller.bridgeEndpoint) }
+    var voiceEnabled by remember(controller.voiceReplyEnabled) { mutableStateOf(controller.voiceReplyEnabled) }
+
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Desktop Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        OutlinedTextField(
+            value = apiKeyInput,
+            onValueChange = { apiKeyInput = it },
+            label = { Text("Gemini API Key (saved locally to ~/.max-ai/config.properties)") },
+            placeholder = { Text("AIza...") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = bridgeInput,
+            onValueChange = { bridgeInput = it },
+            label = { Text("Windows Agent Bridge URL") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Switch(checked = voiceEnabled, onCheckedChange = { voiceEnabled = it })
+            Text("Speak AI replies aloud (Windows TTS)")
+        }
+        Button(onClick = { controller.saveConfig(apiKeyInput, bridgeInput, voiceEnabled) }) {
+            Text("Save Settings")
+        }
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
         Text("Active Model: ${controller.operatingMode.modelId}", style = MaterialTheme.typography.bodyMedium)
         Text("Shared Engine: :core (JVM 11 bytecode, shared with :app)", style = MaterialTheme.typography.bodyMedium)
-        Text("Runtime Packaging: jpackage self-contained Windows x64 image", style = MaterialTheme.typography.bodyMedium)
     }
 }
