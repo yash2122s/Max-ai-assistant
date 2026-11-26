@@ -113,8 +113,9 @@ max-ai-public-website/
 *.md
 !README.md
 
-# Packaged desktop distributions
+# Packaged desktop distributions and Gradle build outputs
 dist/
+build/
 
 
 
