@@ -1,0 +1,59 @@
+name: Release MAX Desktop (Windows x64)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Test :core and stage :windows runtime
+        shell: pwsh
+        run: .\gradlew.bat :core:test :windows:installDist --console=plain
+
+      - name: Build self-contained MAX.exe app-image via jpackage
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build/jpackage | Out-Null
+          jpackage `
+            --type app-image `
+            --name MAX `
+            --input windows/build/install/windows/lib `
+            --main-jar windows.jar `
+            --main-class com.maxaiagent.windows.MainKt `
+            --dest build/jpackage `
+            --add-modules java.desktop,java.logging,java.management,java.naming,java.net.http,jdk.crypto.ec,jdk.unsupported,jdk.accessibility,java.security.jgss
+
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          tar.exe -a -cf dist/MAX-Windows-x64.zip -C build/jpackage MAX
+
+      - name: Upload portable ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MAX-Windows-x64
+          path: dist/MAX-Windows-x64.zip
+
+      - name: Attach ZIP to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/MAX-Windows-x64.zip
